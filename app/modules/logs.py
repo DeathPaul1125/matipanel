@@ -1,4 +1,4 @@
-"""Consulta a journalctl."""
+"""Consulta a journalctl + vista en vivo vía WebSocket."""
 import subprocess
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
@@ -12,10 +12,15 @@ def index():
     return render_template("logs.html")
 
 
+@logs_bp.route("/live")
+@login_required
+def live():
+    return render_template("logs_live.html")
+
+
 @logs_bp.route("/api/recent")
 @login_required
 def recent():
-    """Últimas N líneas del journal. Filtrable por unidad y prioridad."""
     n = min(int(request.args.get("n", 200)), 1000)
     unit = request.args.get("unit", "").strip()
     priority = request.args.get("priority", "").strip()

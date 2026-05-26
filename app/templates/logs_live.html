@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Logs en vivo{% endblock %}
+{% block heading %}journalctl -f (en vivo){% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="text" id="unit" class="input" placeholder="Unidad opcional (ej: ssh.service)" style="width:280px;">
+  <button class="btn btn-primary" id="btn-start" onclick="start()">Conectar</button>
+  <button class="btn" id="btn-stop" onclick="stop()" disabled>Detener</button>
+  <span id="status" class="pill mute">desconectado</span>
+  <a href="{{ url_for('logs.index') }}" class="btn">Vista histórica</a>
+</div>
+
+<pre id="output" class="terminal" style="height:60vh;">Pulsa Conectar para empezar a recibir el log en vivo…
+</pre>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let ws = null;
+let lineCount = 0;
+const out = document.getElementById('output');
+
+function setStatus(text, cls) {
+  const s = document.getElementById('status');
+  s.textContent = text;
+  s.className = 'pill ' + cls;
+}
+
+function start() {
+  if (ws) return;
+  const unit = document.getElementById('unit').value.trim();
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/logs/ws/tail');
+
+  ws.onopen = () => {
+    setStatus('conectado', 'ok');
+    document.getElementById('btn-start').disabled = true;
+    document.getElementById('btn-stop').disabled = false;
+    ws.send(unit);
+    out.textContent = '';
+    lineCount = 0;
+  };
+
+  ws.onmessage = e => {
+    if (e.data.startsWith('__error__')) {
+      out.textContent += '\n[ERROR] ' + e.data + '\n';
+      return;
+    }
+    out.textContent += e.data + '\n';
+    lineCount++;
+    if (lineCount > 5000) {
+      const lines = out.textContent.split('\n');
+      out.textContent = lines.slice(lines.length - 3000).join('\n');
+      lineCount = 3000;
+    }
+    out.scrollTop = out.scrollHeight;
+  };
+
+  ws.onerror = () => setStatus('error', 'err');
+  ws.onclose = () => {
+    setStatus('desconectado', 'mute');
+    ws = null;
+    document.getElementById('btn-start').disabled = false;
+    document.getElementById('btn-stop').disabled = true;
+  };
+}
+
+function stop() {
+  if (!ws) return;
+  try { ws.send('stop'); } catch(e){}
+  ws.close();
+}
+
+window.addEventListener('beforeunload', stop);
+</script>
+{% endblock %}
