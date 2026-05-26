@@ -1,0 +1,31 @@
+[Unit]
+Description=MatiPanel - Administrador de servidor Linux
+Documentation=https://github.com/tu-usuario/matipanel
+After=network.target
+
+[Service]
+Type=simple
+User=matipanel
+Group=matipanel
+WorkingDirectory=/opt/matipanel
+Environment="PATH=/opt/matipanel/venv/bin:/usr/bin"
+ExecStart=/opt/matipanel/venv/bin/gunicorn \
+    --workers 2 \
+    --bind 0.0.0.0:8443 \
+    --certfile /etc/matipanel/cert.pem \
+    --keyfile /etc/matipanel/key.pem \
+    --access-logfile - \
+    --error-logfile - \
+    wsgi:application
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log/matipanel /opt/matipanel
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

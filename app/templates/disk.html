@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Discos{% endblock %}
+{% block heading %}Discos y particiones{% endblock %}
+
+{% block content %}
+<div class="card">
+  <table class="lx" id="disk-table">
+    <thead>
+      <tr><th>Dispositivo</th><th>Mount</th><th>FS</th><th>Tamaño</th><th>Usado</th><th>Uso</th></tr>
+    </thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+  const r = await fetch("{{ url_for('disk.partitions') }}");
+  const d = await r.json();
+  const tbody = document.querySelector('#disk-table tbody');
+  if (!d.partitions || d.partitions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin particiones</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.partitions.map(p => {
+    const cls = p.percent >= 85 ? 'err' : p.percent >= 65 ? 'warn' : '';
+    return `
+      <tr>
+        <td class="mono">${p.device}</td>
+        <td class="mono">${p.mountpoint}</td>
+        <td>${p.fstype}</td>
+        <td>${p.total_h}</td>
+        <td>${p.used_h}</td>
+        <td>
+          <div class="bar ${cls}"><span style="width:${p.percent}%"></span></div>
+          <span class="muted small">${p.percent}%</span>
+        </td>
+      </tr>`;
+  }).join('');
+}
+load();
+</script>
+{% endblock %}

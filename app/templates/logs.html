@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block heading %}Logs (journalctl){% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="text" id="unit" class="input" placeholder="Unidad (ej: ssh.service)" style="width:240px;">
+  <select id="priority" class="input">
+    <option value="">Todas las prioridades</option>
+    <option value="err">err</option>
+    <option value="warning">warning</option>
+    <option value="info">info</option>
+  </select>
+  <select id="n" class="input">
+    <option value="100">100 líneas</option>
+    <option value="200" selected>200</option>
+    <option value="500">500</option>
+    <option value="1000">1000</option>
+  </select>
+  <button class="btn" onclick="load()">Cargar</button>
+</div>
+
+<pre id="log-output" class="terminal">Selecciona filtros y pulsa "Cargar"…</pre>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+  const unit = document.getElementById('unit').value;
+  const priority = document.getElementById('priority').value;
+  const n = document.getElementById('n').value;
+  const out = document.getElementById('log-output');
+  out.textContent = 'Cargando…';
+  const params = new URLSearchParams({ n });
+  if (unit) params.set('unit', unit);
+  if (priority) params.set('priority', priority);
+  const r = await fetch("{{ url_for('logs.recent') }}?" + params.toString());
+  const d = await r.json();
+  if (d.error) { out.textContent = d.error; return; }
+  out.textContent = d.lines.join('\n');
+  out.scrollTop = out.scrollHeight;
+}
+load();
+</script>
+{% endblock %}

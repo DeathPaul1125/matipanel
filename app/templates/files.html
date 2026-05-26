@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Archivos{% endblock %}
+{% block heading %}Explorador de archivos{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="text" id="path-input" class="input" value="/" style="flex:1;">
+  <button class="btn" onclick="go()">Ir</button>
+</div>
+
+<div class="card">
+  <div id="crumbs" class="crumbs muted small"></div>
+  <table class="lx" id="files-table">
+    <thead><tr><th></th><th>Nombre</th><th>Tamaño</th><th>Propietario</th><th>Permisos</th><th>Modificado</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load(path) {
+  const r = await fetch("{{ url_for('files.ls') }}?path=" + encodeURIComponent(path));
+  const d = await r.json();
+  const tbody = document.querySelector('#files-table tbody');
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + d.error + '</td></tr>'; return; }
+
+  document.getElementById('path-input').value = d.path;
+  document.getElementById('crumbs').textContent = d.path;
+
+  let rows = '';
+  if (d.parent) {
+    rows += `<tr><td>📁</td><td><a href="#" onclick="load('${d.parent}'); return false;">..</a></td><td>—</td><td>—</td><td class="mono">—</td><td>—</td></tr>`;
+  }
+  for (const it of d.items) {
+    const icon = it.is_dir ? '📁' : (it.is_link ? '🔗' : '📄');
+    const name = it.is_dir
+      ? `<a href="#" onclick="load('${d.path === '/' ? '' : d.path}/${it.name}'); return false;">${escapeHtml(it.name)}</a>`
+      : escapeHtml(it.name);
+    rows += `<tr><td>${icon}</td><td>${name}</td><td>${humanSize(it.size)}</td><td class="mono small">${it.owner}:${it.group}</td><td class="mono">${it.perms}</td><td class="small">${it.mtime}</td></tr>`;
+  }
+  tbody.innerHTML = rows;
+}
+
+function humanSize(n) {
+  if (n < 1024) return n + ' B';
+  for (const u of ['KB','MB','GB','TB']) { n /= 1024; if (n < 1024) return n.toFixed(1) + ' ' + u; }
+  return n.toFixed(1) + ' PB';
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function go() { load(document.getElementById('path-input').value); }
+document.getElementById('path-input').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+load('/');
+</script>
+{% endblock %}

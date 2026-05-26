@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Procesos{% endblock %}
+{% block heading %}Procesos{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="text" id="filter" placeholder="Filtrar por nombre, usuario o PID…" class="input">
+  <button class="btn" onclick="loadProcesses()">Refrescar</button>
+</div>
+
+<div class="card">
+  <table class="lx" id="proc-table">
+    <thead>
+      <tr><th>PID</th><th>Usuario</th><th>CMD</th><th>CPU%</th><th>MEM%</th><th>Estado</th><th>Tiempo</th><th></th></tr>
+    </thead>
+    <tbody><tr><td colspan="8" class="muted center">Cargando procesos…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allProcs = [];
+
+async function loadProcesses() {
+  const r = await fetch("{{ url_for('processes.list_processes') }}");
+  const d = await r.json();
+  allProcs = d.processes;
+  render();
+}
+
+function render() {
+  const q = document.getElementById('filter').value.toLowerCase();
+  const filtered = allProcs.filter(p =>
+    !q || p.cmd.toLowerCase().includes(q) || p.user.toLowerCase().includes(q) || String(p.pid).includes(q)
+  );
+  const tbody = document.querySelector('#proc-table tbody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="muted center">Sin resultados</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(p => `
+    <tr>
+      <td class="mono">${p.pid}</td>
+      <td>${escapeHtml(p.user)}</td>
+      <td class="mono truncate" title="${escapeHtml(p.cmd)}">${escapeHtml(p.cmd)}</td>
+      <td>${p.cpu}</td>
+      <td>${p.mem}</td>
+      <td><span class="pill mute">${p.status}</span></td>
+      <td class="mono">${p.running}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="killProc(${p.pid})">Kill</button></td>
+    </tr>
+  `).join('');
+}
+
+async function killProc(pid) {
+  if (!confirm('¿Enviar SIGTERM al proceso ' + pid + '?')) return;
+  const r = await fetch("/processes/api/kill/" + pid, { method: 'POST' });
+  const d = await r.json();
+  if (!d.ok) alert('Error: ' + d.error);
+  setTimeout(loadProcesses, 500);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('filter').addEventListener('input', render);
+loadProcesses();
+</script>
+{% endblock %}

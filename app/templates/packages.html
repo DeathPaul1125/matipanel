@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Paquetes{% endblock %}
+{% block heading %}Paquetes APT{% endblock %}
+
+{% block content %}
+<div class="grid grid-3">
+  <div class="stat"><div class="stat-lbl">Instalados</div><div class="stat-val" id="s-installed">—</div></div>
+  <div class="stat"><div class="stat-lbl">Actualizables</div><div class="stat-val" id="s-upgradable">—</div></div>
+  <div class="stat"><div class="stat-lbl">De seguridad</div><div class="stat-val" id="s-security">—</div></div>
+</div>
+
+<div class="card">
+  <h3>Actualizaciones disponibles</h3>
+  <table class="lx" id="pkg-table">
+    <thead><tr><th>Paquete</th><th>Nueva versión</th><th>Origen</th><th>Tipo</th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+  const r = await fetch("{{ url_for('packages.summary') }}");
+  const d = await r.json();
+  document.getElementById('s-installed').textContent = d.installed;
+  document.getElementById('s-upgradable').textContent = d.upgradable;
+  document.getElementById('s-security').textContent = d.security;
+
+  const tbody = document.querySelector('#pkg-table tbody');
+  if (!d.upgradable_list || d.upgradable_list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin actualizaciones pendientes ✓</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.upgradable_list.map(p => `
+    <tr>
+      <td class="mono">${p.name}</td>
+      <td class="mono">${p.new_version}</td>
+      <td class="small muted">${p.origin}</td>
+      <td><span class="pill ${p.security ? 'err' : 'mute'}">${p.security ? 'seguridad' : 'normal'}</span></td>
+    </tr>`).join('');
+}
+load();
+</script>
+{% endblock %}

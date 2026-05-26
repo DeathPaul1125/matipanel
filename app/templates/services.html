@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Servicios{% endblock %}
+{% block heading %}Servicios systemd{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="text" id="filter" placeholder="Buscar servicio…" class="input">
+  <button class="btn" onclick="loadServices()">Refrescar</button>
+</div>
+
+<div class="card">
+  <table class="lx" id="svc-table">
+    <thead>
+      <tr><th>Unidad</th><th>Estado</th><th>Sub</th><th>Descripción</th><th>Acciones</th></tr>
+    </thead>
+    <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allSvcs = [];
+
+async function loadServices() {
+  const r = await fetch("{{ url_for('services.list_services') }}");
+  const d = await r.json();
+  if (d.error) {
+    document.querySelector('#svc-table tbody').innerHTML =
+      '<tr><td colspan="5" class="muted center">Error: ' + d.error + '</td></tr>';
+    return;
+  }
+  allSvcs = d.services;
+  render();
+}
+
+function render() {
+  const q = document.getElementById('filter').value.toLowerCase();
+  const filtered = allSvcs.filter(s => !q || s.unit.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
+  const tbody = document.querySelector('#svc-table tbody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin resultados</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(s => {
+    const cls = s.active === 'active' ? 'ok' : s.active === 'failed' ? 'err' : 'mute';
+    return `
+      <tr>
+        <td class="mono">${escapeHtml(s.unit)}</td>
+        <td><span class="pill ${cls}">${s.active}</span></td>
+        <td class="mono">${escapeHtml(s.sub)}</td>
+        <td>${escapeHtml(s.description)}</td>
+        <td>
+          <button class="btn btn-sm" onclick="action('${s.unit}', 'start')">▶</button>
+          <button class="btn btn-sm" onclick="action('${s.unit}', 'stop')">■</button>
+          <button class="btn btn-sm" onclick="action('${s.unit}', 'restart')">↻</button>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+async function action(unit, act) {
+  if (!confirm(`¿Ejecutar ${act} en ${unit}?`)) return;
+  const r = await fetch("{{ url_for('services.action') }}", {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ unit, action: act })
+  });
+  const d = await r.json();
+  if (!d.ok) alert('Error: ' + d.error);
+  setTimeout(loadServices, 600);
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+document.getElementById('filter').addEventListener('input', render);
+loadServices();
+</script>
+{% endblock %}

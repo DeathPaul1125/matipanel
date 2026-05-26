@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard · {{ user }}@{{ hostname }}{% endblock %}
+
+{% block content %}
+<div class="grid grid-4">
+  <div class="stat">
+    <div class="stat-lbl">CPU</div>
+    <div class="stat-val" id="stat-cpu">—</div>
+    <div class="bar"><span id="bar-cpu"></span></div>
+    <div class="stat-sub" id="stat-cpu-sub">cargando…</div>
+  </div>
+  <div class="stat">
+    <div class="stat-lbl">Memoria</div>
+    <div class="stat-val" id="stat-mem">—</div>
+    <div class="bar"><span id="bar-mem"></span></div>
+    <div class="stat-sub" id="stat-mem-sub">cargando…</div>
+  </div>
+  <div class="stat">
+    <div class="stat-lbl">Disco /</div>
+    <div class="stat-val" id="stat-disk">—</div>
+    <div class="bar"><span id="bar-disk"></span></div>
+    <div class="stat-sub" id="stat-disk-sub">cargando…</div>
+  </div>
+  <div class="stat">
+    <div class="stat-lbl">Red</div>
+    <div class="stat-val" id="stat-net">—</div>
+    <div class="stat-sub" id="stat-net-sub">cargando…</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Información del sistema</h3>
+    <table class="lx">
+      <tr><td class="muted">Hostname</td><td class="mono right">{{ hostname }}</td></tr>
+      <tr><td class="muted">Distro</td><td class="right">{{ distro }}</td></tr>
+      <tr><td class="muted">Kernel</td><td class="mono right">{{ kernel }}</td></tr>
+      <tr><td class="muted">Arquitectura</td><td class="mono right">{{ arch }}</td></tr>
+      <tr><td class="muted">Uptime</td><td class="right" id="info-uptime">{{ uptime }}</td></tr>
+      <tr><td class="muted">Usuario</td><td class="mono right">{{ user }}</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Carga (loadavg)</h3>
+    <table class="lx">
+      <tr><td class="muted">Última 1 min</td><td class="mono right" id="load-1">—</td></tr>
+      <tr><td class="muted">Últimos 5 min</td><td class="mono right" id="load-5">—</td></tr>
+      <tr><td class="muted">Últimos 15 min</td><td class="mono right" id="load-15">—</td></tr>
+      <tr><td class="muted">Núcleos</td><td class="mono right" id="cpu-count">—</td></tr>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function refreshStats() {
+  try {
+    const r = await fetch("{{ url_for('dashboard.stats') }}");
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('stat-cpu').textContent = d.cpu.percent + '%';
+    document.getElementById('stat-cpu-sub').textContent = d.cpu.count + ' núcleos · load ' + d.cpu.load[0];
+    document.getElementById('bar-cpu').style.width = d.cpu.percent + '%';
+
+    document.getElementById('stat-mem').textContent = d.memory.used_h + ' / ' + d.memory.total_h;
+    document.getElementById('stat-mem-sub').textContent = d.memory.percent + '% en uso';
+    document.getElementById('bar-mem').style.width = d.memory.percent + '%';
+
+    document.getElementById('stat-disk').textContent = d.disk.used_h + ' / ' + d.disk.total_h;
+    document.getElementById('stat-disk-sub').textContent = d.disk.percent + '% en uso';
+    document.getElementById('bar-disk').style.width = d.disk.percent + '%';
+
+    document.getElementById('stat-net').textContent = '↓ ' + d.network.rx_h;
+    document.getElementById('stat-net-sub').textContent = '↑ ' + d.network.tx_h;
+
+    document.getElementById('load-1').textContent = d.cpu.load[0];
+    document.getElementById('load-5').textContent = d.cpu.load[1];
+    document.getElementById('load-15').textContent = d.cpu.load[2];
+    document.getElementById('cpu-count').textContent = d.cpu.count;
+
+    const upt = document.getElementById('topbar-uptime');
+    if (upt) upt.textContent = d.uptime;
+    document.getElementById('info-uptime').textContent = d.uptime;
+
+    // Tonos de las barras según uso
+    ['cpu','mem','disk'].forEach(k => {
+      const pct = d[k === 'mem' ? 'memory' : k].percent;
+      const bar = document.getElementById('bar-' + k).parentElement;
+      bar.classList.remove('warn','err');
+      if (pct >= 85) bar.classList.add('err');
+      else if (pct >= 65) bar.classList.add('warn');
+    });
+  } catch(e) {}
+}
+refreshStats();
+setInterval(refreshStats, 3000);
+</script>
+{% endblock %}

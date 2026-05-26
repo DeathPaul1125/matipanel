@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Usuarios{% endblock %}
+{% block heading %}Usuarios y grupos{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="text" id="filter" placeholder="Filtrar usuario…" class="input">
+  <select id="type-filter" class="input">
+    <option value="">Todos</option>
+    <option value="regular">Regulares (UID ≥ 1000)</option>
+    <option value="sistema">Sistema</option>
+  </select>
+</div>
+
+<div class="card">
+  <table class="lx" id="users-table">
+    <thead><tr><th>Usuario</th><th>UID</th><th>GID</th><th>Home</th><th>Shell</th><th>Tipo</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let all = [];
+async function load() {
+  const r = await fetch("{{ url_for('users.list_users') }}");
+  const d = await r.json();
+  all = d.users;
+  render();
+}
+function render() {
+  const q = document.getElementById('filter').value.toLowerCase();
+  const t = document.getElementById('type-filter').value;
+  const f = all.filter(u => (!q || u.name.toLowerCase().includes(q)) && (!t || u.type === t));
+  const tbody = document.querySelector('#users-table tbody');
+  if (f.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin resultados</td></tr>'; return; }
+  tbody.innerHTML = f.map(u => `
+    <tr>
+      <td class="mono">${u.name}</td>
+      <td class="mono">${u.uid}</td>
+      <td class="mono">${u.gid}</td>
+      <td class="mono">${u.home}</td>
+      <td class="mono">${u.shell}</td>
+      <td><span class="pill ${u.type === 'regular' ? 'ok' : 'mute'}">${u.type}</span></td>
+    </tr>
+  `).join('');
+}
+document.getElementById('filter').addEventListener('input', render);
+document.getElementById('type-filter').addEventListener('change', render);
+load();
+</script>
+{% endblock %}

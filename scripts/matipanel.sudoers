@@ -1,0 +1,9 @@
+# /etc/sudoers.d/matipanel
+# Permite al panel ejecutar acciones específicas sin password.
+# Instala con: sudo cp scripts/matipanel.sudoers /etc/sudoers.d/matipanel
+#              sudo chmod 0440 /etc/sudoers.d/matipanel
+#              sudo visudo -c   # valida la sintaxis
+
+%matipanel ALL=(root) NOPASSWD: /bin/systemctl, /usr/bin/systemctl
+%matipanel ALL=(root) NOPASSWD: /usr/sbin/ufw status *
+%matipanel ALL=(root) NOPASSWD: /usr/bin/apt update, /usr/bin/apt list *

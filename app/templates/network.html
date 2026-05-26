@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Red{% endblock %}
+{% block heading %}Interfaces de red{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom:12px;">
+  <h3>Interfaces</h3>
+  <table class="lx" id="iface-table">
+    <thead><tr><th>Iface</th><th>IPv4</th><th>IPv6</th><th>MAC</th><th>MTU</th><th>RX</th><th>TX</th><th>Estado</th></tr></thead>
+    <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Conexiones activas (LISTEN/ESTABLISHED)</h3>
+  <table class="lx" id="conn-table">
+    <thead><tr><th>Proto</th><th>Local</th><th>Remoto</th><th>Estado</th><th>PID</th><th>Proceso</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadIfaces() {
+  const r = await fetch("{{ url_for('network.interfaces') }}");
+  const d = await r.json();
+  document.querySelector('#iface-table tbody').innerHTML = d.interfaces.map(i => `
+    <tr>
+      <td class="mono">${i.name}</td>
+      <td class="mono">${i.ipv4}</td>
+      <td class="mono small">${i.ipv6}</td>
+      <td class="mono">${i.mac}</td>
+      <td>${i.mtu}</td>
+      <td>${i.rx_h}</td>
+      <td>${i.tx_h}</td>
+      <td><span class="pill ${i.is_up ? 'ok' : 'mute'}">${i.is_up ? 'UP' : 'DOWN'}</span></td>
+    </tr>`).join('');
+}
+
+async function loadConns() {
+  const r = await fetch("{{ url_for('network.connections') }}");
+  const d = await r.json();
+  const tbody = document.querySelector('#conn-table tbody');
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + d.error + '</td></tr>'; return; }
+  const filtered = d.connections.filter(c => c.status === 'LISTEN' || c.status === 'ESTABLISHED');
+  tbody.innerHTML = filtered.map(c => `
+    <tr>
+      <td class="mono">${c.proto}</td>
+      <td class="mono">${c.local}</td>
+      <td class="mono">${c.remote}</td>
+      <td><span class="pill ${c.status === 'LISTEN' ? 'mute' : 'ok'}">${c.status}</span></td>
+      <td class="mono">${c.pid || '—'}</td>
+      <td class="mono">${c.process}</td>
+    </tr>`).join('');
+}
+
+loadIfaces(); loadConns();
+</script>
+{% endblock %}

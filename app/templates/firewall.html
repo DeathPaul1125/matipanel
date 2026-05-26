@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Firewall{% endblock %}
+{% block heading %}Firewall (UFW){% endblock %}
+
+{% block content %}
+<div class="card">
+  <div id="fw-status" class="muted">Consultando estado…</div>
+  <pre id="fw-output" class="terminal" style="margin-top:12px; display:none;"></pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+  const r = await fetch("{{ url_for('firewall.status') }}");
+  const d = await r.json();
+  const status = document.getElementById('fw-status');
+  const out = document.getElementById('fw-output');
+  if (!d.installed) {
+    status.innerHTML = '<span class="pill mute">UFW no instalado</span> &nbsp; <code>sudo apt install ufw</code>';
+    return;
+  }
+  if (d.error) {
+    status.innerHTML = '<span class="pill warn">Sin permisos</span> &nbsp; ' + d.error +
+      '<br><span class="small muted">Tip: agrega a /etc/sudoers.d/matipanel: <code>%matipanel ALL=(root) NOPASSWD: /usr/sbin/ufw</code></span>';
+    return;
+  }
+  status.innerHTML = d.active
+    ? '<span class="pill ok">UFW activo</span>'
+    : '<span class="pill mute">UFW inactivo</span>';
+  if (d.raw) { out.style.display = 'block'; out.textContent = d.raw; }
+}
+load();
+</script>
+{% endblock %}

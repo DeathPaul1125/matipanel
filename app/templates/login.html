@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iniciar sesión · MatiPanel</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-icon big">M</div>
+      <h1>MatiPanel</h1>
+      <p class="login-sub">Administrador de servidor Linux</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, msg in messages %}
+        <div class="flash flash-{{ category }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST" class="login-form">
+      <label>
+        <span>Usuario</span>
+        <input type="text" name="username" required autofocus autocomplete="username">
+      </label>
+      <label>
+        <span>Contraseña</span>
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Iniciar sesión</button>
+    </form>
+
+    <p class="login-foot">Usa las credenciales de tu cuenta Linux.<br>El usuario debe pertenecer al grupo <code>matipanel</code> o <code>sudo</code>.</p>
+  </div>
+</body>
+</html>
