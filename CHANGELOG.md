@@ -1,26 +1,30 @@
 # Changelog
 
-Todos los cambios notables a MatiPanel se documentan aquí.
+## [0.2.0] - 2026-05-26
 
-El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/)
-y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### Añadido
+- 🐳 **Módulo Docker** — Listado de containers/images/volumes, start/stop/restart/rm, logs en modal.
+- 🔐 **2FA con TOTP** — Compatible con Google Authenticator, Authy, FreeOTP. Incluye 8 códigos de recuperación de un solo uso.
+- 📡 **Logs en vivo vía WebSocket** — `journalctl -f` streameado al navegador.
+- 💻 **Terminal embebida** — xterm.js + PTY real con el shell del usuario.
+- ✏️ **Editor de archivos** — Modal de edición con guardado opt-in (`MATIPANEL_FILE_WRITE=1`). Backup automático `.matipanel.bak`.
+- 🌐 **Soporte multidistro** — Detección automática Debian/Ubuntu vs RHEL/Rocky/Fedora.
+  - APT y DNF para paquetes
+  - UFW, firewalld e iptables para firewall
+  - Instalador adaptado a ambas familias
+- 🛡️ Página de Seguridad con setup wizard para 2FA.
+
+### Cambiado
+- Gunicorn ahora usa worker `gevent` (necesario para WebSockets).
+- Unidad systemd con timeout de 86400s para sesiones de terminal largas.
+- Permisos del directorio `/var/lib/matipanel` para almacenar secretos 2FA.
 
 ## [0.1.0] - 2026-05-26
 
 ### Añadido
 - 🎉 Primera versión de MatiPanel.
 - Dashboard con métricas en vivo (CPU, RAM, disco, red).
-- Módulo de procesos con filtrado y kill.
-- Módulo de servicios systemd con acciones start/stop/restart.
-- Módulo de discos y particiones.
-- Módulo de usuarios y grupos.
-- Módulo de red (interfaces + conexiones).
-- Módulo de firewall (UFW, solo lectura).
-- Módulo de explorador de archivos (read-only).
-- Módulo de paquetes APT con detección de actualizaciones de seguridad.
-- Módulo de logs vía journalctl.
+- Módulos: procesos, servicios systemd, discos, usuarios, red, firewall (UFW), archivos, paquetes APT, logs.
 - Login contra PAM con verificación de grupo.
-- HTTPS con certificado autofirmado en la instalación.
-- Script de instalación/desinstalación automatizado.
-- Servicio systemd con hardening (NoNewPrivileges, ProtectSystem, etc.).
-- Tema claro y oscuro automático según preferencia del sistema.
+- HTTPS con certificado autofirmado.
+- Tema claro y oscuro automático.

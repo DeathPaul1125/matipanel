@@ -1,6 +1,6 @@
 [Unit]
 Description=MatiPanel - Administrador de servidor Linux
-Documentation=https://github.com/tu-usuario/matipanel
+Documentation=https://github.com/InformaticaSenabed/matipanel
 After=network.target
 
 [Service]
@@ -9,22 +9,25 @@ User=matipanel
 Group=matipanel
 WorkingDirectory=/opt/matipanel
 Environment="PATH=/opt/matipanel/venv/bin:/usr/bin"
+Environment="HOME=/opt/matipanel"
 ExecStart=/opt/matipanel/venv/bin/gunicorn \
-    --workers 2 \
+    --worker-class gevent \
+    --workers 1 \
+    --worker-connections 100 \
     --bind 0.0.0.0:8443 \
     --certfile /etc/matipanel/cert.pem \
     --keyfile /etc/matipanel/key.pem \
+    --timeout 86400 \
     --access-logfile - \
     --error-logfile - \
     wsgi:application
 Restart=on-failure
 RestartSec=5
 
-# Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/log/matipanel /opt/matipanel
+ReadWritePaths=/var/log/matipanel /var/lib/matipanel /opt/matipanel
 PrivateTmp=true
 
 [Install]

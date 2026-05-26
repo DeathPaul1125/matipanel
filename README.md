@@ -12,16 +12,29 @@ Una alternativa moderna y minimalista para administrar tu servidor Linux desde e
 
 ## ✨ Características
 
+### Sistema
 - **Dashboard en vivo** — CPU, memoria, disco, red, loadavg actualizados cada 3 s.
 - **Procesos** — Vista estilo `htop`, filtrado, kill con confirmación.
 - **Servicios systemd** — Start / stop / restart / enable / disable.
 - **Discos** — Particiones, puntos de montaje, uso por filesystem.
 - **Usuarios y grupos** — Listado de `/etc/passwd` y `/etc/group`.
+
+### Red y seguridad
 - **Red** — Interfaces, IPs, MAC, conexiones activas (`ss`-like).
-- **Firewall (UFW)** — Estado y reglas activas.
-- **Archivos** — Explorador read-only con permisos POSIX.
-- **Paquetes APT** — Instalados, actualizables, alertas de seguridad.
-- **Logs** — Consulta filtrada de `journalctl` con prioridad y unidad.
+- **Firewall** — Soporte para UFW, firewalld e iptables (autodetectado).
+- **2FA con TOTP** — Compatible con Google Authenticator, Authy, FreeOTP, Aegis. Códigos de recuperación incluidos.
+
+### Operaciones
+- **Archivos** — Explorador con editor opcional (`MATIPANEL_FILE_WRITE=1`), backup automático.
+- **Paquetes** — APT y DNF con detección de actualizaciones de seguridad.
+- **Logs** — Consulta filtrada de `journalctl` + **vista en vivo** con WebSocket.
+- **Docker** — Containers, images, volúmenes, logs en modal, start/stop/restart.
+- **Terminal embebida** — xterm.js + PTY real, sesión interactiva como tu usuario.
+
+### Multidistro
+Detección automática y adaptación a:
+- Debian, Ubuntu, Linux Mint, Pop!_OS (APT + UFW)
+- RHEL, Rocky, AlmaLinux, CentOS, Fedora (DNF + firewalld)
 
 ## 🔐 Seguridad
 
@@ -140,15 +153,18 @@ sudo ./scripts/uninstall.sh
 
 ## 🗺️ Roadmap
 
-- [ ] Editor de archivos con permisos write opcionales
-- [ ] Edición visual de reglas UFW
+- [x] ~~Editor de archivos con permisos write opcionales~~
+- [x] ~~Gestión de Docker~~
+- [x] ~~2FA con TOTP~~
+- [x] ~~WebSocket para logs en vivo~~
+- [x] ~~Soporte multidistro (RHEL/Rocky con `dnf` y `firewalld`)~~
+- [x] ~~Terminal embebida (xterm.js + PTY)~~
+- [ ] Edición visual de reglas UFW/firewalld
 - [ ] Crontab GUI
-- [ ] Gestión de Docker
-- [ ] Sesiones SSH activas
+- [ ] Sesiones SSH activas (`who`, `last`)
 - [ ] Backups con borg/restic
-- [ ] WebSocket para logs en vivo (`journalctl -f`)
-- [ ] 2FA con TOTP
-- [ ] Soporte multidistro (RHEL/Rocky con `dnf` y `firewalld`)
+- [ ] Nginx vhosts manager
+- [ ] Let's Encrypt automation
 
 ## 📜 Licencia
 
