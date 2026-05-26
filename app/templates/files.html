@@ -6,6 +6,11 @@
 <div class="toolbar">
   <input type="text" id="path-input" class="input" value="/" style="flex:1;">
   <button class="btn" onclick="go()">Ir</button>
+  {% if write_enabled %}
+    <span class="pill warn">⚠ Modo escritura activo</span>
+  {% else %}
+    <span class="pill mute">read-only</span>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -15,16 +20,39 @@
     <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
   </table>
 </div>
+
+<div id="editor-modal" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center;">
+  <div style="background:var(--surface); border-radius:var(--radius-lg); width:90%; max-width:1100px; height:85vh; display:flex; flex-direction:column; overflow:hidden;">
+    <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <div style="font-weight:500;" id="ed-filename">archivo</div>
+        <div class="muted small mono" id="ed-info"></div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        {% if write_enabled %}
+        <button class="btn btn-primary" onclick="saveFile()">Guardar</button>
+        {% endif %}
+        <button class="btn" onclick="closeEditor()">Cerrar</button>
+      </div>
+    </div>
+    <textarea id="editor" style="flex:1; width:100%; font-family:var(--mono); font-size:13px; padding:14px; border:none; resize:none; background:var(--surface); color:var(--text); outline:none;"></textarea>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let currentPath = '';
+let editingPath = '';
+const WRITE = {{ 'true' if write_enabled else 'false' }};
+
 async function load(path) {
   const r = await fetch("{{ url_for('files.ls') }}?path=" + encodeURIComponent(path));
   const d = await r.json();
   const tbody = document.querySelector('#files-table tbody');
   if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + d.error + '</td></tr>'; return; }
 
+  currentPath = d.path;
   document.getElementById('path-input').value = d.path;
   document.getElementById('crumbs').textContent = d.path;
 
@@ -34,12 +62,49 @@ async function load(path) {
   }
   for (const it of d.items) {
     const icon = it.is_dir ? '📁' : (it.is_link ? '🔗' : '📄');
-    const name = it.is_dir
-      ? `<a href="#" onclick="load('${d.path === '/' ? '' : d.path}/${it.name}'); return false;">${escapeHtml(it.name)}</a>`
-      : escapeHtml(it.name);
+    const fullPath = d.path === '/' ? '/' + it.name : d.path + '/' + it.name;
+    let name;
+    if (it.is_dir) {
+      name = `<a href="#" onclick="load('${fullPath}'); return false;">${escapeHtml(it.name)}</a>`;
+    } else {
+      name = `<a href="#" onclick="editFile('${fullPath}'); return false;">${escapeHtml(it.name)}</a>`;
+    }
     rows += `<tr><td>${icon}</td><td>${name}</td><td>${humanSize(it.size)}</td><td class="mono small">${it.owner}:${it.group}</td><td class="mono">${it.perms}</td><td class="small">${it.mtime}</td></tr>`;
   }
   tbody.innerHTML = rows;
+}
+
+async function editFile(path) {
+  const r = await fetch("{{ url_for('files.read') }}?path=" + encodeURIComponent(path));
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  editingPath = path;
+  document.getElementById('ed-filename').textContent = path;
+  document.getElementById('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '') + (WRITE ? '' : ' · solo lectura');
+  const ed = document.getElementById('editor');
+  ed.value = d.content;
+  ed.readOnly = !WRITE;
+  document.getElementById('editor-modal').style.display = 'flex';
+}
+
+async function saveFile() {
+  if (!WRITE) return;
+  if (!confirm('¿Guardar cambios en ' + editingPath + '? Se creará un backup .matipanel.bak')) return;
+  const r = await fetch("{{ url_for('files.write') }}", {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ path: editingPath, content: document.getElementById('editor').value })
+  });
+  const d = await r.json();
+  if (d.error) { alert('Error: ' + d.error); return; }
+  alert('Guardado ✓\nBackup: ' + d.backup);
+  closeEditor();
+  load(currentPath);
+}
+
+function closeEditor() {
+  document.getElementById('editor-modal').style.display = 'none';
+  editingPath = '';
 }
 
 function humanSize(n) {
