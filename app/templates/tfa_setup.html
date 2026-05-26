@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Configurar 2FA{% endblock %}
+{% block heading %}Configurar autenticación 2FA{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:640px;">
+  <h3>Paso 1 · Escanea el QR con tu app</h3>
+  <p class="muted small">Google Authenticator, Authy, FreeOTP, Aegis, 1Password, etc.</p>
+
+  <div id="qr-container" style="margin:16px 0; padding:16px; background:#fff; border-radius:8px; display:inline-block;"></div>
+
+  <details style="margin-top:8px;">
+    <summary class="muted small" style="cursor:pointer;">¿No puedes escanear? Mostrar secret manualmente</summary>
+    <p class="mono small" style="margin-top:8px; padding:8px; background:var(--surface-2); border-radius:6px; word-break:break-all;">{{ secret }}</p>
+  </details>
+
+  <h3 style="margin-top:24px;">Paso 2 · Guarda estos códigos de recuperación</h3>
+  <p class="muted small">Cada uno se usa una sola vez. Te servirán si pierdes el acceso a tu app.</p>
+  <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; margin:12px 0; font-family:var(--mono); font-size:13px;">
+    {% for c in codes %}<div style="padding:8px 12px; background:var(--surface-2); border-radius:6px; text-align:center;">{{ c }}</div>{% endfor %}
+  </div>
+
+  <h3 style="margin-top:24px;">Paso 3 · Confirma con tu primer código</h3>
+  <form method="POST" action="{{ url_for('auth.tfa_activate') }}" style="display:flex; gap:8px; align-items:center;">
+    <input type="text" name="code" required placeholder="000000" inputmode="numeric"
+           style="font-family:var(--mono); letter-spacing:0.2em; text-align:center; flex:1; max-width:200px;">
+    <button type="submit" class="btn btn-primary">Activar 2FA</button>
+    <a href="{{ url_for('auth.security') }}" class="btn">Cancelar</a>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+new QRCode(document.getElementById('qr-container'), {
+  text: {{ otpauth_uri|tojson }},
+  width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M
+});
+</script>
+{% endblock %}

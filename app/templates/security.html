@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Seguridad{% endblock %}
+{% block heading %}Seguridad de la cuenta{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:640px;">
+  <h3>Autenticación de dos factores (TOTP)</h3>
+
+  {% if not has_pyotp %}
+    <p class="muted">El módulo <code>pyotp</code> no está instalado. Reinstala con:</p>
+    <pre class="terminal">/opt/matipanel/venv/bin/pip install pyotp qrcode
+sudo systemctl restart matipanel</pre>
+  {% elif tfa_enabled %}
+    <p>
+      <span class="pill ok">2FA activado</span>
+      &nbsp; Estás protegido con un código adicional al iniciar sesión.
+    </p>
+    <form method="POST" action="{{ url_for('auth.tfa_disable') }}"
+          onsubmit="return confirm('¿Desactivar 2FA? Volverás a iniciar sesión solo con contraseña.')">
+      <button type="submit" class="btn btn-danger">Desactivar 2FA</button>
+    </form>
+  {% else %}
+    <p class="muted">Añade una capa extra de seguridad con Google Authenticator, Authy, FreeOTP o similar.</p>
+    <a href="{{ url_for('auth.tfa_setup') }}" class="btn btn-primary">Configurar 2FA</a>
+  {% endif %}
+</div>
+{% endblock %}

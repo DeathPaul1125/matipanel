@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verificación 2FA · MatiPanel</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-icon big">🔐</div>
+      <h1>Código de verificación</h1>
+      <p class="login-sub">Ingresa el código de 6 dígitos de tu app autenticadora</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, msg in messages %}<div class="flash flash-{{ category }}">{{ msg }}</div>{% endfor %}
+    {% endwith %}
+
+    <form method="POST" class="login-form">
+      <label>
+        <span>Código (o uno de recuperación)</span>
+        <input type="text" name="code" required autofocus inputmode="numeric"
+               placeholder="000000" autocomplete="one-time-code"
+               style="text-align:center; letter-spacing:0.3em; font-size:18px; font-family:var(--mono);">
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Verificar</button>
+    </form>
+
+    <p class="login-foot">
+      ¿Perdiste el acceso? Usa un código de recuperación (8 caracteres hex).<br>
+      <a href="{{ url_for('auth.login') }}">Volver al login</a>
+    </p>
+  </div>
+</body>
+</html>
