@@ -54,13 +54,13 @@ La tarjeta **Sitios** lista los archivos de `sites-available` y `sites-enabled`.
 |---|---|---|
 | **Dominio** | El nombre principal, por ejemplo `sistema.ejemplo.gob.gt`. | Nombre de host válido. Se guarda en minúsculas. |
 | **Alias** | Otros nombres, separados por coma o espacio, por ejemplo `www.sistema.ejemplo.gob.gt`. | Opcional. Cada alias debe ser un nombre de host válido. |
-| **Document root** | Carpeta del sitio. Se rellena sola con `/var/www/<dominio>/public_html`. | Ruta absoluta bajo `/var/www/`, `/srv/` o `/home/`. Sin `..`. Solo letras, números, `_`, `.`, `-` y `/`. |
+| **Document root** | Carpeta del sitio. Se rellena sola con `/var/www/<dominio>/public_html`. | Ruta absoluta bajo `/var/www/`, `/srv/` o `/home/`. Sin `..`. Solo letras, números, `_`, `.`, `-` y `/`. Si la ruta contiene un enlace simbólico, su destino real también debe quedar bajo esas carpetas. |
 | **PHP-FPM** | **Sin PHP** o una versión, por ejemplo **PHP 8.4-FPM**. | Solo aparecen las versiones de PHP-FPM que están en ejecución. |
 
 ### Qué hace el panel al pulsar Crear
 
 1. Crea la carpeta del document root si no existe.
-2. Si la carpeta no tiene `index.html` ni `index.php`, crea un `index.html` de ejemplo con el nombre del dominio.
+2. Si la carpeta no tiene `index.html` ni `index.php`, crea un `index.html` de ejemplo con el nombre del dominio (nunca a través de un enlace simbólico).
 3. Asigna a `www-data` las carpetas y el archivo que acaba de crear.
 4. En Apache con PHP, habilita los módulos `proxy_fcgi` y `setenvif`.
 5. Escribe el archivo `sites-available/<dominio>.conf`.
@@ -151,7 +151,7 @@ Al deshabilitar, el sitio deja de responder tras la recarga. Si la prueba de con
 1. Pulsa **Eliminar** en la fila del sitio.
 2. Confirma en **Eliminar sitio**. Si es un sitio por defecto del paquete, se pide una segunda confirmación (**Sitio por defecto**).
 
-El panel deshabilita el sitio, borra su archivo de `sites-available`, prueba la configuración y recarga.
+El panel deshabilita el sitio, borra su archivo de `sites-available`, prueba la configuración y recarga. Si la configuración era válida antes y deja de serlo sin este sitio (por ejemplo, otro archivo lo incluía), el panel lo restaura tal como estaba y muestra **Sin este sitio la configuración deja de ser válida; se restauró**.
 
 > **Importante:** Eliminar un sitio **no** borra su document root, sus logs ni su certificado SSL. Bórralos aparte si ya no los necesitas (desde [Archivos](26-archivos.md) y [SSL / Let's Encrypt](22-ssl.md)).
 

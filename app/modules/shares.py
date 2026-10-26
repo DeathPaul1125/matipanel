@@ -7,6 +7,8 @@ import posixpath
 import pwd
 import re
 import shutil
+import stat
+import tempfile
 from urllib.parse import urlsplit
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
@@ -67,10 +69,21 @@ def _read(path):
 
 
 def _write(path, text, like=None):
-    with open(path, "w", encoding="utf-8", errors="surrogateescape", newline="\n") as f:
-        f.write(text)
-    if like and os.path.exists(like):
-        shutil.copymode(like, path)
+    """Escritura atómica (temporal + rename en el mismo directorio) con el modo y dueño de `like`:
+    un fallo a mitad nunca deja /etc/exports o smb.conf truncados."""
+    st = os.stat(like) if like and os.path.exists(like) else None
+    fd, tmp = tempfile.mkstemp(prefix=".matipanel.", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="\n") as f:
+            f.write(text)
+        if st:
+            os.chown(tmp, st.st_uid, st.st_gid)
+        os.chmod(tmp, stat.S_IMODE(st.st_mode) if st else 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def _backup(path):
@@ -125,13 +138,21 @@ def _bool(v):
 
 def valid_path(p, nfs=False):
     """Ruta absoluta normalizada, sin '..' ni rutas del sistema."""
-    if not p or len(p) > 255 or not (NFS_PATH_RE if nfs else SMB_PATH_RE).match(p):
+    if not p or len(p) > 255 or not (NFS_PATH_RE if nfs else SMB_PATH_RE).fullmatch(p):
         return False
     if posixpath.normpath(p) != p or "//" in p or p != p.strip():
         return False
-    if p in PROTECTED_EXACT or any(p == b or p.startswith(b + "/") for b in PROTECTED):
-        return False
-    return True
+    return not _protected(p)
+
+
+def _protected(p):
+    return p in PROTECTED_EXACT or any(p == b or p.startswith(b + "/") for b in PROTECTED)
+
+
+def real_path_ok(p):
+    """valid_path() es léxico: un enlace simbólico (p. ej. /home/ana/datos -> /etc, creado por un
+    usuario) lo esquivaría. La ruta real, resolviendo enlaces, tampoco puede ser del sistema."""
+    return not _protected(os.path.realpath(p))
 
 
 def _clean_path(raw):
@@ -145,11 +166,11 @@ def _make_dir(path, spec):
     owner = str(spec.get("owner", "root")).strip()
     group = str(spec.get("group", "root")).strip()
     mode = str(spec.get("mode", "0755")).strip()
-    if not NAME_RE.match(owner) or not _user_exists(owner):
+    if not NAME_RE.fullmatch(owner) or not _user_exists(owner):
         return None, f"El usuario «{owner}» no existe"
-    if not NAME_RE.match(group) or not _group_exists(group):
+    if not NAME_RE.fullmatch(group) or not _group_exists(group):
         return None, f"El grupo «{group}» no existe"
-    if not MODE_RE.match(mode):
+    if not MODE_RE.fullmatch(mode):
         return None, "Permisos inválidos (usa octal, p. ej. 0775 o 2775)"
     created, p = [], path
     while p and p != "/" and not os.path.exists(p):
@@ -353,9 +374,9 @@ def user_list(raw):
         if t in ("%S", "%U"):
             continue
         if t[0] in "@+":
-            if not NAME_RE.match(t[1:]) or not _group_exists(t[1:]):
+            if not NAME_RE.fullmatch(t[1:]) or not _group_exists(t[1:]):
                 return None, f"El grupo «{t[1:]}» no existe en Linux"
-        elif not NAME_RE.match(t) or not _user_exists(t):
+        elif not NAME_RE.fullmatch(t) or not _user_exists(t):
             return None, f"El usuario «{t}» no existe en Linux (usa @grupo para grupos)"
     return " ".join(toks), None
 
@@ -370,7 +391,7 @@ def share_params(d, special=False):
                           "ni caracteres especiales, y no puede ser una carpeta del sistema")
         up["path"] = path
     comment = str(d.get("comment") or "").strip()
-    if not TEXT_RE.match(comment):
+    if not TEXT_RE.fullmatch(comment):
         return None, "Descripción inválida (máx. 120 caracteres, sin comillas ni barras invertidas)"
     up["comment"] = comment or None
     up["readonly"] = "no" if d.get("writable") else "yes"
@@ -383,7 +404,7 @@ def share_params(d, special=False):
         up[key] = val or None
     for key, field in (("createmask", "create_mask"), ("directorymask", "directory_mask")):
         m = str(d.get(field) or "").strip()
-        if m and not MASK_RE.match(m):
+        if m and not MASK_RE.fullmatch(m):
             return None, "Máscara inválida (octal de 3 o 4 dígitos, p. ej. 0664)"
         up[key] = m.zfill(4) if m else None
     return up, None
@@ -395,11 +416,11 @@ def global_params(d, current):
     nb = str(d.get("netbios_name") or "").strip()
     ss = str(d.get("server_string") or "").strip()
     sec, mtg, mp = d.get("security"), d.get("map_to_guest"), d.get("min_protocol") or ""
-    if not NETBIOS_RE.match(wg):
+    if not NETBIOS_RE.fullmatch(wg):
         return None, "Grupo de trabajo inválido (1-15 letras, números, - o _)"
-    if nb and not NETBIOS_RE.match(nb):
+    if nb and not NETBIOS_RE.fullmatch(nb):
         return None, "Nombre NetBIOS inválido (1-15 letras, números, - o _)"
-    if not TEXT_RE.match(ss):
+    if not TEXT_RE.fullmatch(ss):
         return None, "Descripción del servidor inválida"
     if sec not in SECURITY or mtg not in MAP_TO_GUEST or mp not in MIN_PROTOCOLS:
         return None, "Valor no permitido"
@@ -541,13 +562,13 @@ def valid_client(h):
     if h == "*":
         return True
     if h.startswith("*."):
-        return bool(HOST_RE.match(h[2:]))
+        return bool(HOST_RE.fullmatch(h[2:]))
     try:
         ipaddress.ip_network(h, strict=False) if "/" in h else ipaddress.ip_address(h)
         return True
     except ValueError:
         pass
-    return bool(HOST_RE.match(h)) and not re.fullmatch(r"[\d.]+", h)
+    return bool(HOST_RE.fullmatch(h)) and not re.fullmatch(r"[\d.]+", h)
 
 
 def nfs_options(raw):
@@ -555,7 +576,7 @@ def nfs_options(raw):
     opts = list(dict.fromkeys(str(o).strip() for o in opts if str(o).strip()))
     anon = {}
     for o in opts:
-        m = ANON_RE.match(o)
+        m = ANON_RE.fullmatch(o)
         if m:
             if int(m.group(2)) > 4294967294 or anon.setdefault(m.group(1), m.group(2)) != m.group(2):
                 return None, f"Valor inválido o repetido: {o}"
@@ -783,12 +804,13 @@ def smb_save_share():
     text = _read(SMB_CONF)
     sections = smb_parse(text)[1]
     if original:
-        if not _find(sections, original):
+        # [global] no es un recurso: "guest ok", "path"… ahí cambiarían los valores por defecto de todos
+        if original.lower() == "global" or not _find(sections, original):
             return _err("El recurso no existe", 404)
         special = original.lower() in SPECIAL_SHARES
     else:
         name = str(d.get("name") or "").strip()
-        if not SHARE_RE.match(name):
+        if not SHARE_RE.fullmatch(name):
             return _err("Nombre inválido: 1-40 letras, números, _, - o $ (sin espacios)")
         if name.lower() in RESERVED_SHARES:
             return _err("Ese nombre está reservado por Samba")
@@ -800,6 +822,8 @@ def smb_save_share():
         return _err(e)
     created = []
     if up.get("path"):
+        if not real_path_ok(up["path"]):
+            return _err("La ruta (o un enlace simbólico en ella) apunta a una carpeta del sistema")
         created, resp = _ensure_dir(up["path"], d)
         if resp:
             return resp
@@ -844,11 +868,11 @@ def smb_users():
 @login_required
 def smb_user_action():
     d = request.get_json(silent=True) or {}
-    act, user, pw = d.get("action", ""), str(d.get("user") or ""), str(d.get("password") or "")
+    act, user, pw = d.get("action", ""), str(d.get("user") or "").strip(), str(d.get("password") or "")
     flags = {"enable": "-e", "disable": "-d", "delete": "-x"}
     if act not in ("add", "passwd", *flags):
         return _err("Acción no permitida")
-    if not NAME_RE.match(user):
+    if not NAME_RE.fullmatch(user):
         return _err("Nombre de usuario inválido")
     inp = None
     if act in ("add", "passwd"):
@@ -913,6 +937,8 @@ def nfs_save_export():
         return _err("La exportación no existe", 404)
     if path != original and find(path):
         return _err("Esa carpeta ya está exportada; edita la entrada existente", 409)
+    if not real_path_ok(path):
+        return _err("La ruta (o un enlace simbólico en ella) apunta a una carpeta del sistema")
     created, resp = _ensure_dir(path, d)
     if resp:
         return resp

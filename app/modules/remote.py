@@ -12,6 +12,7 @@ import json
 import platform
 import socket
 import ssl
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -28,6 +29,7 @@ remote_bp = Blueprint("remote", __name__)
 
 REMOTE_PATH = "/servidores/api/remote/summary"  # mismo prefijo en todos los MatiPanel
 TIMEOUT = 5          # s por conexión y por lectura
+DEADLINE = 15        # s en total por consulta (conexión + TLS + respuesta)
 MAX_BODY = 1 << 20   # 1 MB: un resumen ocupa unos pocos KB
 HISTORY_POINTS = 60  # 5 min a una muestra cada 5 s
 
@@ -108,12 +110,48 @@ def _tls_context():
     return ctx
 
 
+class _Deadline:
+    """Tope de tiempo TOTAL para una conexión: TIMEOUT es por operación, y un servidor hostil
+    que manda un byte cada pocos segundos podría retener la consulta indefinidamente.
+    Al vencer, se corta el socket (shutdown) y la lectura bloqueada termina con error."""
+
+    def __init__(self, conn, seconds=DEADLINE):
+        self.conn, self.fired = conn, False
+        self.timer = threading.Timer(seconds, self._fire)
+        self.timer.daemon = True
+
+    def _fire(self):
+        self.fired = True
+        sock = getattr(self.conn, "sock", None)  # durante el handshake TLS es aún el socket TCP
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def start(self):
+        self.timer.start()
+        return self
+
+    def cancel(self):
+        self.timer.cancel()
+
+
 def _peer_fingerprint(url):
     """Huella del certificado que presenta el servidor (una conexión, sin enviar nada)."""
     host, port = store.split_url(url)
-    with socket.create_connection((host, port), timeout=TIMEOUT) as raw:
-        with _tls_context().wrap_socket(raw, server_hostname=host) as s:
-            return store.fp_of_der(s.getpeercert(binary_form=True) or b"")
+    conn = http.client.HTTPSConnection(host, port, timeout=TIMEOUT, context=_tls_context())
+    dl = _Deadline(conn).start()
+    try:
+        conn.connect()
+        return store.fp_of_der(conn.sock.getpeercert(binary_form=True) or b"")
+    except OSError:
+        if dl.fired:
+            raise socket.timeout("deadline")
+        raise
+    finally:
+        dl.cancel()
+        conn.close()
 
 
 def _net_error(e):
@@ -130,10 +168,15 @@ def _net_error(e):
 
 def _fetch(server):
     """Consulta un servidor remoto. Nunca lanza: devuelve el estado para la tarjeta."""
-    out = {"id": server["id"], "state": "offline", "error": "", "data": None, "ms": None}
-    host, port = store.split_url(server["url"])
+    out = {"id": server.get("id"), "state": "offline", "error": "", "data": None, "ms": None}
+    try:
+        host, port = store.split_url(store.normalize_url(server.get("url")))
+    except ValueError:
+        out.update(state="error", error="La dirección guardada no es válida: edita el servidor.")
+        return out
     t0 = time.time()
     conn = http.client.HTTPSConnection(host, port, timeout=TIMEOUT, context=_tls_context())
+    dl = _Deadline(conn).start()
     try:
         conn.connect()
         got = store.fp_of_der(conn.sock.getpeercert(binary_form=True) or b"")
@@ -149,7 +192,7 @@ def _fetch(server):
             "User-Agent": f"MatiPanel/{__version__} (multi-servidor)",
         })
         r = conn.getresponse()
-        body = r.read(MAX_BODY + 1)
+        body = _read_limited(r, MAX_BODY + 1)
         out["ms"] = int((time.time() - t0) * 1000)
         if r.status == 401:
             out.update(state="auth", error="El otro servidor rechazó el token (inválido o revocado).")
@@ -168,12 +211,27 @@ def _fetch(server):
             else:
                 out.update(state="online", data=data)
     except (OSError, http.client.HTTPException) as e:
-        out["error"] = _net_error(e)
-    except ValueError:
+        out["error"] = _net_error(socket.timeout("deadline") if dl.fired else e)
+    except (ValueError, RecursionError):  # JSON inválido o anidado a propósito hasta el límite
+        out.update(state="error", error="Respuesta no válida del otro panel.")
+    except Exception:  # nunca lanzar: un servidor hostil no debe tumbar /api/status
         out.update(state="error", error="Respuesta no válida del otro panel.")
     finally:
+        dl.cancel()
         conn.close()
     return out
+
+
+def _read_limited(resp, limit):
+    """Lee como mucho `limit` bytes (en trozos: el _Deadline corta si llegan muy despacio)."""
+    chunks, total = [], 0
+    while total < limit:
+        chunk = resp.read1(min(65536, limit - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
 
 
 def _parallel(fn, items):
@@ -212,7 +270,7 @@ def status():
     results = {r["id"]: r for r in _parallel(_fetch, servers)} if servers else {}
     remote = []
     for s in servers:
-        r = results.get(s["id"]) or {"state": "offline", "error": "Sin datos."}
+        r = results.get(s.get("id")) or {"state": "offline", "error": "Sin datos."}
         remote.append({**store.public_server(s), **r})
     local = {"id": "local", "local": True, "name": socket.gethostname(), "url": "",
              "state": "online", "error": "", "data": _summary(), "ms": 0}

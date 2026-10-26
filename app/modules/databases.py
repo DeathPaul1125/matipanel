@@ -3,6 +3,7 @@ import gzip
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -68,6 +69,42 @@ def _my_opts():
     return _my_defaults or []  # si el servidor está caído no se cachea
 
 
+_my_sandbox = None
+
+
+def _my_sandbox_opt():
+    """MariaDB >= 10.5.25 / 11.x: --sandbox desactiva \\! (shell), \\. (source), tee… en el cliente.
+    Un volcado restaurado como root no debe poder ejecutar comandos del sistema."""
+    global _my_sandbox
+    if _my_sandbox is None:
+        code, out, _ = run(["mysql", "--help"], timeout=10)
+        _my_sandbox = ["--sandbox"] if code == 0 and "--sandbox" in out else []
+    return _my_sandbox
+
+
+def _popen(cmd, **kw):
+    """Popen en su propio grupo de procesos: así _kill() alcanza también al psql/pg_dump
+    que lanza runuser (matar solo a runuser dejaba al hijo vivo y la lectura colgada)."""
+    return subprocess.Popen(cmd, cwd="/", start_new_session=True, **kw)
+
+
+def _kill(p):
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except (AttributeError, OSError):
+        try:
+            p.kill()
+        except OSError:
+            pass
+
+
+def _tail(f, n=4000):
+    """Últimos n caracteres de un archivo temporal (stderr) sin leerlo entero."""
+    f.seek(0, os.SEEK_END)
+    f.seek(max(0, f.tell() - n * 4))
+    return f.read().decode(errors="replace").strip()[-n:]
+
+
 def _cmd(engine, db=None, names=False):
     """Comando cliente que lee SQL por stdin. Salida separada por tabuladores."""
     if engine == "mysql":
@@ -125,9 +162,9 @@ def _valid_password(pw):
 def _user_args(engine, data):
     """Valida user/host del JSON. Retorna (user, host, error)."""
     user, host = data.get("user", ""), data.get("host", "localhost") or "localhost"
-    if not isinstance(user, str) or not (MY_USER_RE if engine == "mysql" else NAME_RE).match(user):
+    if not isinstance(user, str) or not (MY_USER_RE if engine == "mysql" else NAME_RE).fullmatch(user):
         return None, None, "Nombre de usuario inválido"
-    if engine == "mysql" and not (isinstance(host, str) and HOST_RE.match(host)):
+    if engine == "mysql" and not (isinstance(host, str) and HOST_RE.fullmatch(host)):
         return None, None, "Host inválido"
     if user in SYSTEM_USERS[engine]:
         return None, None, f"'{user}' es una cuenta del sistema; no se modifica desde el panel"
@@ -135,7 +172,7 @@ def _user_args(engine, data):
 
 
 def _valid_db(name):
-    return isinstance(name, str) and bool(NAME_RE.match(name))
+    return isinstance(name, str) and bool(NAME_RE.fullmatch(name))
 
 
 def _grant_sql(engine, user, host, db, revoke=False, escape=True):
@@ -351,17 +388,17 @@ def _feed(stream, data):
         pass
 
 
-def _run_capped(cmd, sql):
+def _run_capped(cmd, sql, env=None):
     """Como run(), pero corta la salida en MAX_OUT y mata el proceso a los QUERY_TIMEOUT s."""
     with tempfile.TemporaryFile() as errf:
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errf, cwd="/")
-        timer = threading.Timer(QUERY_TIMEOUT, p.kill)
+        p = _popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errf, env=env)
+        timer = threading.Timer(QUERY_TIMEOUT, _kill, args=(p,))
         timer.start()
         threading.Thread(target=_feed, args=(p.stdin, sql.encode()), daemon=True).start()
         out = p.stdout.read(MAX_OUT + 1)
         truncated = len(out) > MAX_OUT
         if truncated:
-            p.kill()
+            _kill(p)
         p.stdout.close()
         code = p.wait()
         timer.cancel()
@@ -382,7 +419,9 @@ def query(engine):
         return _bad("Consulta vacía o demasiado grande (máx. 1 MB)")
     if db and not _valid_db(db):
         return _bad("Base de datos inválida")
-    code, out, err, truncated = _run_capped(_cmd(engine, db, names=True), sql)
+    # PG: el servidor también cancela la sentencia (matar al cliente no detiene un pg_sleep)
+    env = {**os.environ, "PGOPTIONS": f"-c statement_timeout={QUERY_TIMEOUT}s"} if engine == "pg" else None
+    code, out, err, truncated = _run_capped(_cmd(engine, db, names=True), sql, env)
 
     lines = out.splitlines()
     if truncated and lines:
@@ -403,7 +442,7 @@ def query(engine):
 def _dump_stream(cmd):
     """Genera el volcado comprimido en gzip sin cargarlo en memoria."""
     errf = tempfile.TemporaryFile()
-    p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errf, cwd="/")
+    p = _popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errf)
     z = zlib.compressobj(6, zlib.DEFLATED, 31)  # wbits=31 -> formato gzip
     try:
         while chunk := p.stdout.read(CHUNK):
@@ -416,8 +455,8 @@ def _dump_stream(cmd):
             yield z.compress(note.encode())
         yield z.flush()
     finally:
-        if p.poll() is None:
-            p.kill()
+        if p.poll() is None:  # descarga cancelada por el navegador: muere también pg_dump
+            _kill(p)
         p.stdout.close()
         p.wait()
         errf.close()
@@ -459,12 +498,14 @@ def restore(engine, db):
 
     src = gzip.GzipFile(fileobj=f.stream) if f.filename.lower().endswith(".gz") else f.stream
     if engine == "mysql":
-        cmd = ["mysql", *_my_opts(), f"--database={db}"]  # se detiene en el primer error
+        # se detiene en el primer error; --sandbox (si el cliente lo soporta) bloquea \! y similares
+        cmd = ["mysql", *_my_opts(), *_my_sandbox_opt(), f"--database={db}"]
     else:
+        # ponytail: psql no tiene modo sandbox; un \! del volcado corre como el usuario postgres (no root)
         cmd = ["runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", db]
     bad = None
     with tempfile.TemporaryFile() as errf:
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errf, cwd="/")
+        p = _popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errf)
         try:
             while chunk := src.read(CHUNK):
                 p.stdin.write(chunk)
@@ -472,14 +513,13 @@ def restore(engine, db):
             pass  # el cliente terminó antes (error SQL): el motivo está en stderr
         except (OSError, EOFError, zlib.error) as e:
             bad = f"Archivo inválido: {e}"
-            p.kill()
+            _kill(p)
         try:
             p.stdin.close()
         except OSError:
             pass
         code = p.wait()
-        errf.seek(0)
-        err = errf.read().decode(errors="replace").strip()[-4000:]
+        err = _tail(errf)  # psql puede emitir miles de NOTICE: no cargar todo en memoria
     if bad:
         return _bad(bad)
     if code != 0:

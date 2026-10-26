@@ -87,7 +87,7 @@ def run_action():
     if act in NEEDS_PKGS:
         rx = PKG_RE if pm == "apt" else RPM_RE
         if (not isinstance(pkgs, list) or not 0 < len(pkgs) <= 200
-                or not all(isinstance(p, str) and rx.match(p) for p in pkgs)):
+                or not all(isinstance(p, str) and rx.fullmatch(p) for p in pkgs)):
             return jsonify({"ok": False, "error": "Nombre de paquete inválido"}), 400
         args += ["--", *pkgs]
 
@@ -106,7 +106,7 @@ def search():
     if detect()["pkg"] != "apt":
         return jsonify({"error": "La búsqueda solo está disponible con APT"}), 501
     terms = request.args.get("q", "").split()
-    if not terms or len(terms) > 5 or not all(TERM_RE.match(t) for t in terms):
+    if not terms or len(terms) > 5 or not all(TERM_RE.fullmatch(t) for t in terms):
         return jsonify({"error": "Búsqueda inválida (letras, números y + . _ -)"}), 400
 
     code, out, err = run(["apt-cache", "search", "--", *terms], timeout=60, env=PM_ENV)

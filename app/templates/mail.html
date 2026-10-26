@@ -379,7 +379,8 @@ async function loadQueue() {
   if (d.error) { queueItems = []; tbody.innerHTML = emptyRow(8, d.error); document.getElementById('q-count').textContent = ''; return; }
   queueItems = d.items;
   document.getElementById('q-count').textContent = '(' + d.total + ' mensaje' + (d.total === 1 ? '' : 's')
-    + (d.total > d.items.length ? ', mostrando ' + d.items.length : '') + ')';
+    + (d.total > d.items.length ? ', mostrando ' + d.items.length : '')
+    + (d.truncated ? ' — lista parcial: la cola es demasiado grande; usa postqueue -p en la terminal' : '') + ')';
   renderQueue();
 }
 

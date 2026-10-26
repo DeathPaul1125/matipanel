@@ -79,7 +79,7 @@
       <a class="dedication-link" href="{{ url_for('dashboard.about') }}" title="Para Matías">💙 <span class="nav-label">Para Matías</span></a>
       <div class="sidebar-foot">
         <span class="mono">{{ current_user.username if current_user.is_authenticated else '' }}</span>
-        <a href="{{ url_for('auth.logout') }}">Cerrar sesión</a>
+        <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0;"><button class="linklike" type="submit">Cerrar sesión</button></form>
       </div>
     </aside>
 
@@ -92,7 +92,16 @@
           <span>{% block heading %}{% endblock %}</span>
         </div>
         <div class="topbar-meta">
-          <span class="hide-sm mono">{{ request.host.split(':')[0] }}</span>
+          {#- Estado del servidor, visible en todas las pantallas (se actualiza cada 30 s) -#}
+          <div class="tb-health" id="tb-health" data-level="">
+            <a class="tb-verdict" href="{{ url_for('dashboard.index') }}" id="tb-verdict-link">
+              <span class="led sm mute" id="tb-led"></span><span id="tb-verdict">Revisando…</span>
+            </a>
+            <a class="chip tb-chip" href="{{ url_for('services.index') }}" title="Servicios con fallo"><b id="tb-failed">—</b><span class="tb-label">con fallo</span></a>
+            <a class="chip tb-chip" href="{{ url_for('packages.index') }}" title="Actualizaciones pendientes"><b id="tb-updates">—</b><span class="tb-label">actualizaciones</span></a>
+            <a class="chip tb-chip" href="{{ url_for('system.index') }}" title="Sesiones abiertas en el servidor"><b id="tb-sessions">—</b><span class="tb-label">sesiones</span></a>
+          </div>
+          <span class="hide-sm mono tb-host">{{ request.host.split(':')[0] }}</span>
           {% set help_slug = HELP_CONTEXT.get(request.blueprint) %}
           <a class="icon-btn" href="{{ url_for('help.page', slug=help_slug) if help_slug else url_for('help.page') }}" title="Ayuda de esta pantalla" aria-label="Ayuda">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -111,6 +120,29 @@
     </main>
   </div>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+  (() => {
+    const $ = id => document.getElementById(id);
+    async function health() {
+      if (document.hidden) return;
+      let d;
+      try { const r = await fetch("{{ url_for('dashboard.health') }}"); if (!r.ok) return; d = await r.json(); } catch (e) { return; }
+      const verdict = d.level === 'ok' ? 'Todo en orden' : d.issues.join(' · ');
+      $('tb-health').dataset.level = d.level;
+      $('tb-led').className = 'led sm live ' + (d.level === 'ok' ? '' : d.level);
+      $('tb-verdict').textContent = d.level === 'ok' ? verdict : 'Atención: ' + verdict;
+      $('tb-verdict-link').title = d.level === 'ok' ? 'El servidor no presenta problemas' : 'Atención: ' + verdict;
+      $('tb-failed').textContent = d.failed.length;
+      $('tb-failed').parentElement.classList.toggle('bad', d.failed.length > 0);
+      $('tb-failed').parentElement.title = d.failed.length ? 'Servicios con fallo: ' + d.failed.join(', ') : 'Ningún servicio con fallo';
+      $('tb-updates').textContent = d.updates ?? '—';
+      $('tb-sessions').textContent = d.sessions;
+    }
+    health();
+    setInterval(health, 30000);
+    document.addEventListener('visibilitychange', health);
+  })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

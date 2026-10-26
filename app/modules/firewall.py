@@ -218,7 +218,7 @@ def ufw_add_rule():
             src = str(ipaddress.ip_network(src, strict=False))
         except ValueError:
             return _err("Origen inválido (IP o CIDR)")
-    if comment and not COMMENT_RE.match(comment):
+    if comment and not COMMENT_RE.fullmatch(comment):
         return _err("Comentario inválido (letras, números y . , : / ( ) - _)")
 
     cmd = ["ufw", act]
@@ -328,7 +328,7 @@ def firewalld_service():
         return _err("firewalld no es el firewall activo")
     d = request.get_json(silent=True) or {}
     op, svc = d.get("op"), str(d.get("service", ""))
-    if op not in ("add", "remove") or not SERVICE_RE.match(svc):
+    if op not in ("add", "remove") or not SERVICE_RE.fullmatch(svc):
         return _err("Operación o servicio inválido")
     code, out, _ = _fwcmd("--get-services")
     if code != 0 or svc not in out.split():

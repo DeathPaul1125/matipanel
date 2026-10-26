@@ -3,23 +3,6 @@
 {% block heading %}Dashboard{% endblock %}
 
 {% block content %}
-{# Veredicto de salud: lo primero que quiere saber quien administra el servidor #}
-<section class="health" id="health" data-level="ok">
-  <span class="led lg live" id="health-led"></span>
-  <div class="health-main">
-    <div class="health-greet" id="greet">Hola, {{ user }}</div>
-    <h1 class="health-verdict" id="health-verdict">Revisando el servidor…</h1>
-    <div class="health-sub">
-      <span class="mono">{{ user }}@{{ hostname }}</span> · {{ distro }} · encendido hace <span id="uptime">{{ uptime }}</span>
-    </div>
-  </div>
-  <div class="health-chips">
-    <a class="chip" href="{{ url_for('services.index') }}"><span class="led sm mute" id="chip-failed-led"></span><b id="chip-failed">—</b> servicios con fallo</a>
-    <a class="chip" href="{{ url_for('packages.index') }}"><b id="chip-updates">—</b> actualizaciones</a>
-    <a class="chip" href="{{ url_for('system.index') }}"><b id="chip-sessions">—</b> sesiones</a>
-  </div>
-</section>
-
 {# Tacómetros #}
 <div class="gauges" {% if not prefs.dash.gauges %}hidden{% endif %}>
   <div class="gauge" id="g-cpu"></div>
@@ -178,7 +161,6 @@ async function tick() {
   G.swap.set(d.swap.percent, d.swap.total_h === '0.0 B' ? 'sin swap' : `${d.swap.used_h} de ${d.swap.total_h}`);
   G.disk.set(d.disk.percent, `${d.disk.free_h} libres de ${d.disk.total_h}`);
 
-  $('uptime').textContent = d.uptime;
   $('kv-uptime').textContent = d.uptime;
   $('kv-load').textContent = d.cpu.load.map(l => l.toFixed(2)).join(' · ') + '  (1, 5, 15 min)';
   $('kv-procs').textContent = d.procs;
@@ -186,17 +168,12 @@ async function tick() {
   $('kv-swap').textContent = d.swap.total_h === '0.0 B' ? 'No configurada' : `${d.swap.used_h} usada de ${d.swap.total_h}`;
   $('kv-disk').textContent = `${d.disk.used_h} usado · ${d.disk.free_h} libre · ${d.disk.total_h} total`;
   $('server-time').textContent = 'Hora del servidor: ' + new Date(d.ts * 1000).toLocaleString('es', { dateStyle: 'full', timeStyle: 'short' });
-  renderHealth();
 }
 
 // ── Datos pesados (cada 15 s) ──
 async function loadOverview() {
   try { overview = await (await fetch("{{ url_for('dashboard.overview') }}")).json(); } catch (e) { return; }
   const o = overview;
-  $('chip-failed').textContent = o.failed.length;
-  $('chip-failed-led').className = 'led sm ' + (o.failed.length ? 'err' : '');
-  $('chip-updates').textContent = o.updates ?? '—';
-  $('chip-sessions').textContent = o.sessions;
   $('kv-sessions').textContent = o.sessions;
   $('kv-updates').querySelector('a').textContent = o.updates === null ? 'No disponible'
     : o.updates === 0 ? 'Todo está actualizado' : `${o.updates} paquetes por actualizar`;
@@ -217,43 +194,6 @@ async function loadOverview() {
       <td class="right mono muted">${p.pid}</td><td class="right mono">${p.cpu.toFixed(1)}%</td>
       <td class="right mono">${p.mem.toFixed(1)}%</td></tr>`).join('')
     || '<tr><td colspan="5" class="muted center">Sin datos</td></tr>';
-  renderHealth();
-}
-
-// Veredicto: el problema más grave manda; si no hay ninguno, "Todo en orden"
-function renderHealth() {
-  if (!latest) return;
-  const d = latest, issues = [];
-  const add = (lvl, msg) => issues.push({ lvl, msg });
-  if (overview) {
-    if (overview.failed.length) add('err', overview.failed.length === 1
-      ? `El servicio ${overview.failed[0]} falló` : `${overview.failed.length} servicios fallaron`);
-    for (const p of overview.partitions) {
-      if (p.percent >= 90) add('err', `Disco ${p.mount} al ${Math.round(p.percent)}%`);
-      else if (p.percent >= 80) add('warn', `Disco ${p.mount} al ${Math.round(p.percent)}%`);
-    }
-  } else if (d.disk.percent >= 80) {
-    add(d.disk.percent >= 90 ? 'err' : 'warn', `Disco / al ${Math.round(d.disk.percent)}%`);
-  }
-  if (d.memory.percent >= 95) add('err', `Memoria al ${Math.round(d.memory.percent)}%`);
-  else if (d.memory.percent >= 85) add('warn', `Memoria al ${Math.round(d.memory.percent)}%`);
-  const recent = points.slice(-6).map(p => p.cpu);
-  const cpuAvg = recent.reduce((a, b) => a + b, 0) / (recent.length || 1);
-  if (recent.length >= 6 && cpuAvg >= 90) add('warn', `CPU sostenida al ${Math.round(cpuAvg)}%`);
-  if (d.cpu.load[0] / d.cpu.count >= 1.5) add('warn', `Carga alta (${d.cpu.load[0]})`);
-
-  const lvl = issues.some(i => i.lvl === 'err') ? 'err' : issues.length ? 'warn' : 'ok';
-  issues.sort((a, b) => (a.lvl === 'err' ? -1 : 1) - (b.lvl === 'err' ? -1 : 1));
-  $('health').dataset.level = lvl;
-  $('health-led').className = 'led lg live ' + (lvl === 'ok' ? '' : lvl);
-  $('health-verdict').textContent = lvl === 'ok' ? 'Todo en orden'
-    : 'Atención: ' + issues.map(i => i.msg).join(' · ');
-}
-
-// Saludo según la hora del navegador
-{
-  const h = new Date().getHours();
-  $('greet').textContent = (h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches') + ', {{ user }}';
 }
 
 tick(); loadHistory(); loadOverview();

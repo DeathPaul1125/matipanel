@@ -15,7 +15,9 @@ def index():
 @appearance_bp.route("/api", methods=["POST"])
 @login_required
 def save():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     if data.get("reset"):
         new = prefs.clean({})
     else:

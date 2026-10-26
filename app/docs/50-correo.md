@@ -125,7 +125,7 @@ La pestaña **Cola de correo** lista los mensajes que Postfix todavía no pudo e
 | **Remitente / Destinatarios** | Direcciones del sobre. `<>` es un aviso del sistema (rebote). |
 | **Motivo** | Por qué no se entregó, por ejemplo `Connection timed out` o `Host not found`. |
 
-Escribe en **Filtrar…** para buscar por ID, remitente o destinatario.
+Escribe en **Filtrar…** para buscar por ID, remitente o destinatario. Si la cola es enorme (más de 32 MB de datos de `postqueue -j`), el contador indica **lista parcial**: usa `postqueue -p` en la [Terminal](29-terminal.md) para verla completa.
 
 Acciones:
 

@@ -214,6 +214,25 @@ code { font-family: var(--mono); font-size: 0.9em; padding: 1px 5px; background:
   .card { overflow-x: auto; }  /* tablas anchas: scroll dentro de la tarjeta */
 }
 
+/* Estado del servidor en la barra superior */
+.tb-health { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tb-verdict {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 340px;
+  padding: 5px 12px 5px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 500; text-decoration: none;
+}
+.tb-verdict span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-verdict:hover { border-color: var(--border-strong); text-decoration: none; }
+.tb-health[data-level="warn"] .tb-verdict { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.tb-health[data-level="err"] .tb-verdict { background: var(--err-bg); color: var(--err); border-color: transparent; }
+.tb-chip { padding: 4px 10px; font-size: 12px; gap: 5px; }
+.tb-chip.bad { background: var(--err-bg); color: var(--err); border-color: transparent; }
+.tb-chip.bad b { color: var(--err); }
+.linklike { border: none; background: none; padding: 0; font: inherit; color: var(--sb-text-2, var(--text-muted)); cursor: pointer; }
+.linklike:hover { text-decoration: underline; }
+@media (max-width: 1280px) { .tb-label { display: none; } }
+@media (max-width: 900px) { .tb-chip, .tb-host { display: none; } .tb-verdict { max-width: 46vw; } }
+
 /* ── Grids ── */
 .grid { display: grid; gap: 12px; margin-bottom: 12px; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

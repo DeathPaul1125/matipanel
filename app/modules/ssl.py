@@ -91,7 +91,7 @@ def timer():
 
 
 def _valid_webroot(p):
-    return (bool(p) and len(p) < 256 and p.startswith("/") and PATH_RE.match(p)
+    return (bool(p) and len(p) < 256 and p.startswith("/") and PATH_RE.fullmatch(p)
             and ".." not in p.split("/") and os.path.isdir(p))
 
 
@@ -108,10 +108,10 @@ def obtain():
 
     if not domains or len(domains) > 100:
         return _err("Indica entre 1 y 100 dominios")
-    bad = [d for d in domains if not HOST_RE.match(d) or d.startswith("-")]
+    bad = [d for d in domains if not HOST_RE.fullmatch(d) or d.startswith("-")]
     if bad:
         return _err("Dominio inválido: " + bad[0])
-    if not EMAIL_RE.match(email) or email.startswith("-"):
+    if not EMAIL_RE.fullmatch(email) or email.startswith("-"):
         return _err("Email inválido")
 
     cmd = ["certbot"]
@@ -152,7 +152,7 @@ def delete():
     if not _available():
         return _err("certbot no está instalado", 404)
     name = (request.get_json(silent=True) or {}).get("name", "")
-    if not CERT_RE.match(name):
+    if not CERT_RE.fullmatch(name):
         return _err("Nombre de certificado inválido")
     code, out, err = run(["certbot", "delete", f"--cert-name={name}", "--non-interactive"], timeout=60)
     output = (out + "\n" + err).strip()

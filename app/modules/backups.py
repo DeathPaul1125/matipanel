@@ -18,18 +18,18 @@ CRON_FILE = "/etc/cron.d/matipanel-backups"
 CRON_LOG = "/var/log/matipanel-backups.log"
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}\Z")  # \Z: "$" aceptaría un salto de línea final
 # Manual: <nombre>-YYYYmmdd-HHMMSS.tar.gz · Programado: <trabajo>-auto-YYYYmmdd-HHMMSS.tar.gz.
 # Solo los "-auto-" de un trabajo entran en su retención; los manuales nunca se podan.
-FILE_RE = re.compile(r"^([A-Za-z0-9_-]{1,40}?)(-auto)?-(\d{8}-\d{6})\.tar\.gz$")
+FILE_RE = re.compile(r"^([A-Za-z0-9_-]{1,40}?)(-auto)?-(\d{8}-\d{6})\.tar\.gz\Z")
 AUTO_TAG = "-auto"
 
 
 def valid_name(name):
     """Nombre de respaldo/trabajo. Prohíbe terminar en -auto (se confundiría con uno programado)."""
     return bool(NAME_RE.match(name or "")) and not name.endswith(AUTO_TAG)
-EXCLUDE_RE = re.compile(r"^[A-Za-z0-9_.*?/\[\]-]{1,200}$")
-TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+EXCLUDE_RE = re.compile(r"^[A-Za-z0-9_.*?/\[\]-]{1,200}\Z")
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)\Z")
 
 
 def check_paths(paths):
@@ -65,6 +65,7 @@ def create_backup(name, paths, excludes=(), auto=False):
     if not valid_name(name):
         return False, "Nombre inválido"
     os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
+    os.chmod(BACKUP_DIR, 0o700)  # si ya existía con otros permisos, el .tar.gz sería legible un instante
     tag = AUTO_TAG if auto else ""
     dest = os.path.join(BACKUP_DIR, f"{name}{tag}-{datetime.now():%Y%m%d-%H%M%S}.tar.gz")
     if os.path.exists(dest):

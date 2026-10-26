@@ -6,7 +6,10 @@ import posixpath
 import re
 import shutil
 import socket
+import stat
 import subprocess
+import tempfile
+import threading
 from email.message import EmailMessage
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
@@ -26,6 +29,7 @@ MAIL_PORTS = (25, 465, 587, 110, 995, 143, 993)
 LOG_LINES = 300
 POSTCAT_MAX = 200 * 1024
 QUEUE_MAX = 2000
+QUEUE_BYTES = 32 * 1024 * 1024
 
 POSTFIX_PKGS = ("postfix",)
 DOVECOT_PKGS = ("dovecot-imapd", "dovecot-pop3d")
@@ -93,19 +97,19 @@ def validate_param(key, value):
     if CTRL_RE.search(v) or len(v) > 500:
         return None, "contiene caracteres no permitidos"
     if key in ("myhostname", "mydomain"):
-        return (v.lower(), None) if HOST_RE.match(v) else (None, "nombre de host inválido")
+        return (v.lower(), None) if HOST_RE.fullmatch(v) else (None, "nombre de host inválido")
     if key == "myorigin":
-        if v in ("$myhostname", "$mydomain", "/etc/mailname") or HOST_RE.match(v):
-            return v.lower() if HOST_RE.match(v) else v, None
+        if v in ("$myhostname", "$mydomain", "/etc/mailname") or HOST_RE.fullmatch(v):
+            return v.lower() if HOST_RE.fullmatch(v) else v, None
         return None, "usa $myhostname, $mydomain, /etc/mailname o un dominio"
     if key == "mydestination":
         toks = _split_list(v)
-        bad = [t for t in toks if not DEST_TOKEN_RE.match(t)]
+        bad = [t for t in toks if not DEST_TOKEN_RE.fullmatch(t)]
         return (None, f"elemento inválido: {bad[0]}") if bad else (", ".join(toks), None)
     if key == "relayhost":
         if not v:
             return "", None
-        m = RELAY_RE.match(v)
+        m = RELAY_RE.fullmatch(v)
         if not m or (m.group(3) and not 1 <= int(m.group(3)) <= 65535):
             return None, "usa host, [host] o [host]:puerto"
         return v.lower(), None
@@ -119,7 +123,7 @@ def validate_param(key, value):
             try:
                 ipaddress.ip_address(t)
             except ValueError:
-                if not HOST_RE.match(t):
+                if not HOST_RE.fullmatch(t):
                     return None, f"interfaz inválida: {t}"
         return ", ".join(toks), None
     if key == "inet_protocols":
@@ -136,13 +140,13 @@ def validate_param(key, value):
     if key == "home_mailbox":
         if not v:
             return "", None
-        if MAILBOX_RE.match(v) and ".." not in v.split("/"):
+        if MAILBOX_RE.fullmatch(v) and ".." not in v.split("/"):
             return v, None
         return None, "ruta relativa al home, ej. Maildir/"
     if key in ("smtpd_tls_cert_file", "smtpd_tls_key_file"):
         if not v:
             return "", None
-        if not PATH_RE.match(v) or ".." in v.split("/") or posixpath.normpath(v) != v:
+        if not PATH_RE.fullmatch(v) or ".." in v.split("/") or posixpath.normpath(v) != v:
             return None, "ruta absoluta inválida"
         return v, None
     return None, "parámetro no permitido"
@@ -180,7 +184,7 @@ def parse_postconf(out):
 
 def valid_queue_id(qid):
     qid = str(qid or "")
-    return bool(QID_SHORT_RE.match(qid) or QID_LONG_RE.match(qid))
+    return bool(QID_SHORT_RE.fullmatch(qid) or QID_LONG_RE.fullmatch(qid))
 
 
 def parse_queue(out):
@@ -245,9 +249,9 @@ def validate_alias_dest(dest):
     for t in toks:
         path = t[len(":include:"):] if t.startswith(":include:") else t
         if path.startswith("/"):
-            if not PATH_RE.match(path) or ".." in path.split("/"):
+            if not PATH_RE.fullmatch(path) or ".." in path.split("/"):
                 return None
-        elif t.startswith(":include:") or not (LOCAL_RE.match(t) or EMAIL_RE.match(t)):
+        elif t.startswith(":include:") or not (LOCAL_RE.fullmatch(t) or EMAIL_RE.fullmatch(t)):
             return None
     return ", ".join(toks)
 
@@ -347,16 +351,30 @@ def _dovecot_ok():
 
 
 def _run_raw(cmd, timeout=30, cap=None):
-    """Como util.run pero decodifica bytes con reemplazo (correos y logs pueden traer bytes no UTF-8)."""
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
-    except FileNotFoundError:
-        return 127, "", f"{cmd[0]} no está instalado", False
-    except subprocess.TimeoutExpired:
+    """Como util.run pero decodifica bytes con reemplazo (correos y logs pueden traer bytes no UTF-8)
+    y, con `cap`, deja de leer (y mata el proceso) al pasar de cap bytes: la memoria queda acotada."""
+    with tempfile.TemporaryFile() as errf:
+        try:
+            p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errf)
+        except FileNotFoundError:
+            return 127, "", f"{cmd[0]} no está instalado", False
+        expired = []
+        timer = threading.Timer(timeout, lambda: (expired.append(1), p.kill()))
+        timer.start()
+        try:
+            data = p.stdout.read(cap + 1) if cap else p.stdout.read()
+            cut = bool(cap) and len(data) > cap
+            if cut:
+                p.kill()
+            p.stdout.close()
+            code = p.wait()
+        finally:
+            timer.cancel()
+        errf.seek(0)
+        err = errf.read(64 * 1024).decode("utf-8", "replace")
+    if expired and not cut:
         return 124, "", "Tiempo de espera agotado", False
-    data = r.stdout[:cap] if cap else r.stdout
-    return (r.returncode, data.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"),
-            bool(cap and len(r.stdout) > cap))
+    return code, data[:cap].decode("utf-8", "replace") if cap else data.decode("utf-8", "replace"), err, cut
 
 
 def _unit_state(unit):
@@ -381,11 +399,29 @@ def _restore(path):
     shutil.copy2(path + BAK, path)
 
 
+def _atomic_write(path, text):
+    """Temporal + rename en el mismo directorio, conservando dueño y permisos (nuevo: 0644).
+    Un fallo a mitad nunca deja /etc/aliases o 10-ssl.conf truncados."""
+    st = os.stat(path) if os.path.exists(path) else None
+    fd, tmp = tempfile.mkstemp(prefix=".matipanel.", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        if st:
+            os.chown(tmp, st.st_uid, st.st_gid)
+        os.chmod(tmp, stat.S_IMODE(st.st_mode) if st else 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
 def _fqdn():
     name = run(["hostname", "-f"], timeout=10)[1].strip().lower()
-    if not HOST_RE.match(name):
+    if not HOST_RE.fullmatch(name):
         name = socket.getfqdn().lower()
-    return name if HOST_RE.match(name) else "localhost.localdomain"
+    return name if HOST_RE.fullmatch(name) else "localhost.localdomain"
 
 
 # ── Página y estado ──────────────────────────────────────────────────
@@ -536,11 +572,14 @@ def postfix_config_save():
 def queue():
     if not _postfix_ok():
         return _err("Postfix no está instalado", 404)
-    code, out, err, _ = _run_raw(["postqueue", "-j"], timeout=30)
-    if code != 0:
+    # Una cola enorme (spam, rebotes) puede dar cientos de MB de JSON: se corta en QUEUE_BYTES
+    code, out, err, cut = _run_raw(["postqueue", "-j"], timeout=30, cap=QUEUE_BYTES)
+    if code != 0 and not cut:
         return _err((err or out).strip() or "postqueue falló", 500)
+    if cut:
+        out = out.rsplit("\n", 1)[0]  # la última línea puede estar incompleta
     items = parse_queue(out)
-    return jsonify({"total": len(items), "items": items[:QUEUE_MAX]})
+    return jsonify({"total": len(items), "items": items[:QUEUE_MAX], "truncated": cut})
 
 
 @mail_bp.route("/api/queue/action", methods=["POST"])
@@ -597,8 +636,7 @@ def _write_aliases(text):
     existed = os.path.exists(ALIASES)
     if existed:
         _backup(ALIASES)
-    with open(ALIASES, "w", encoding="utf-8") as f:
-        f.write(text)
+    _atomic_write(ALIASES, text)
     code, out, err = run(["newaliases"], timeout=60)
     if code != 0:
         if existed:
@@ -631,7 +669,7 @@ def aliases_save():
             return _err("Alias inválido")
         new, error = aliases_delete(text, name)
     elif act == "save":
-        if not ALIAS_RE.match(name):
+        if not ALIAS_RE.fullmatch(name):
             return _err("Nombre de alias inválido (letras minúsculas, números, . _ + -)")
         if orig and (len(orig) > 200 or CTRL_RE.search(orig)):
             return _err("Alias original inválido")
@@ -703,8 +741,7 @@ def dovecot_ssl():
         with open(DOVECOT_SSL_CONF, encoding="utf-8", errors="replace") as f:
             text = f.read()
         _backup(DOVECOT_SSL_CONF)
-        with open(DOVECOT_SSL_CONF, "w", encoding="utf-8") as f:
-            f.write(set_dovecot_ssl(text, value))
+        _atomic_write(DOVECOT_SSL_CONF, set_dovecot_ssl(text, value))
     except OSError as e:
         return _err(f"No se pudo escribir {DOVECOT_SSL_CONF}: {e}", 500)
     code, out, err = run(["doveconf", "-n"], timeout=20)
@@ -763,7 +800,7 @@ def send_test():
     to = str(data.get("to") or "").strip()
     subject = str(data.get("subject") or "").strip() or "Prueba de MatiPanel"
     body = str(data.get("body") or "").replace("\r\n", "\n")
-    if not EMAIL_RE.match(to) or len(to) > 254:
+    if not EMAIL_RE.fullmatch(to) or len(to) > 254:
         return _err("Correo de destino inválido")
     if CTRL_RE.search(subject) or len(subject) > 200:
         return _err("Asunto inválido (máx. 200 caracteres, sin saltos de línea)")

@@ -75,7 +75,7 @@ def _apply(s):
 
 
 def valid_docroot(p):
-    return (bool(p) and len(p) < 256 and PATH_RE.match(p) and p.startswith(DOCROOT_BASES)
+    return (bool(p) and len(p) < 256 and PATH_RE.fullmatch(p) and p.startswith(DOCROOT_BASES)
             and ".." not in p.split("/") and os.path.normpath(p) == p)
 
 
@@ -215,7 +215,7 @@ def site_action(srv):
         return _err("Servidor no instalado", 404)
     data = request.get_json(silent=True) or {}
     name, act = data.get("name", ""), data.get("action", "")
-    if not FILE_RE.match(name):
+    if not FILE_RE.fullmatch(name):
         return _err("Nombre de sitio inválido")
     avail, enabled = _dirs(s)
     path = os.path.join(avail, name)
@@ -244,12 +244,24 @@ def site_action(srv):
             return _err("Solo se pueden eliminar sitios de sites-available", 404)
         if name in s["defaults"] and not data.get("force"):
             return _err("Es un sitio por defecto; confirma para eliminarlo", 409)
-        if os.path.lexists(os.path.join(enabled, name)):
+        was_ok = _test(s)[0]  # si ya estaba rota, no se puede culpar al borrado
+        was_enabled = os.path.lexists(os.path.join(enabled, name))
+        with open(path, "rb") as f:
+            saved, mode = f.read(), os.stat(path).st_mode & 0o7777
+        if was_enabled:
             ok, out = _disable(srv, s, name)
             if not ok:
                 return _err(out or "No se pudo deshabilitar", 500)
         os.remove(path)
         ok, out = _apply(s)
+        if not ok and was_ok:
+            # Otro sitio dependía de este (p. ej. un include): se restaura tal cual estaba
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            with os.fdopen(fd, "wb") as f:
+                f.write(saved)
+            if was_enabled:
+                _enable(srv, s, name)
+            return _err("Sin este sitio la configuración deja de ser válida; se restauró", 409, output=out)
         return jsonify({"ok": ok, "output": out, "error": "" if ok else "Eliminado, pero la prueba de config falló"})
 
     return _err("Acción no permitida")
@@ -297,21 +309,37 @@ def _nginx_vhost(domain, aliases, docroot, php):
             f"}}\n")
 
 
+def _real_ok(p):
+    """La ruta real (resolviendo symlinks) también debe quedar bajo DOCROOT_BASES: en /home un
+    usuario podría dejar un enlace hacia /etc y el panel (root) crearía y chownearía ahí."""
+    real = os.path.realpath(p)
+    return real.startswith(DOCROOT_BASES)
+
+
 def _make_docroot(docroot, domain):
     """Crea el docroot y un index.html; devuelve lo que creó (para poder revertirlo)."""
+    if not _real_ok(docroot):
+        raise OSError("la ruta real (siguiendo enlaces simbólicos) sale de " + ", ".join(DOCROOT_BASES))
     missing, p = [], docroot
-    while p and p != "/" and not os.path.exists(p):
+    while p and p != "/" and not os.path.lexists(p):
         missing.append(p)
         p = os.path.dirname(p)
     os.makedirs(docroot, exist_ok=True)
+    if not _real_ok(docroot) or not os.path.isdir(docroot):  # carrera: un enlace apareció mientras tanto
+        _undo_docroot(missing)
+        raise OSError("la ruta cambió durante la creación")
     index = os.path.join(docroot, "index.html")
-    if not any(os.path.exists(os.path.join(docroot, f)) for f in ("index.html", "index.php")):
-        with open(index, "w") as f:
+    if not any(os.path.lexists(os.path.join(docroot, f)) for f in ("index.html", "index.php")):
+        # O_NOFOLLOW|O_EXCL: nunca escribir a través de un symlink plantado en el docroot
+        fd = os.open(index, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
+        with os.fdopen(fd, "w") as f:
             f.write(f"<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>{domain}</title></head>\n"
                     f"<body><h1>{domain}</h1><p>Sitio creado con MatiPanel.</p></body></html>\n")
         missing.append(index)
+    import pwd, grp  # noqa: E401 — solo existen en POSIX
+    uid, gid = pwd.getpwnam("www-data").pw_uid, grp.getgrnam("www-data").gr_gid
     for path in missing:
-        shutil.chown(path, "www-data", "www-data")
+        os.lchown(path, uid, gid)  # lchown: no seguir enlaces
     return missing
 
 
@@ -336,14 +364,14 @@ def create(srv):
     docroot = str(data.get("docroot", "")).strip().rstrip("/") or f"/var/www/{domain}/public_html"
     php = str(data.get("php", "")).strip()
 
-    if not HOST_RE.match(domain) or domain.startswith("-"):
+    if not HOST_RE.fullmatch(domain) or domain.startswith("-"):
         return _err("Dominio inválido")
-    bad = [a for a in aliases if not HOST_RE.match(a) or a.startswith("-")]
+    bad = [a for a in aliases if not HOST_RE.fullmatch(a) or a.startswith("-")]
     if bad:
         return _err("Alias inválido: " + bad[0])
     if not valid_docroot(docroot):
         return _err("Document root inválido (ruta absoluta bajo " + ", ".join(DOCROOT_BASES) + ")")
-    if php and (not PHP_RE.match(php) or php not in php_versions()):
+    if php and (not PHP_RE.fullmatch(php) or php not in php_versions()):
         return _err("Versión de PHP-FPM no disponible")
 
     avail, enabled = _dirs(s)
@@ -401,7 +429,7 @@ def mod_action():
     name, act = data.get("name", ""), data.get("action", "")
     if act not in ("enable", "disable"):
         return _err("Acción no permitida")
-    if not MOD_RE.match(name):
+    if not MOD_RE.fullmatch(name):
         return _err("Nombre de módulo inválido")
     code, o, e = run(["a2enmod" if act == "enable" else "a2dismod", "-q", name])
     if code != 0:
@@ -421,7 +449,8 @@ def log(srv):
         return _err("Log inválido")
     if not os.path.exists(path):
         return jsonify({"log": "", "path": path})
-    code, out, err = run(["tail", "-n", "200", "--", path], timeout=10)
+    # -c: líneas gigantes (URLs de un atacante en access.log) no inflan la respuesta
+    code, out, err = run(["tail", "-c", "262144", "--", path], timeout=10)
     if code != 0:
         return _err(err.strip() or "No se pudo leer el log", 500)
-    return jsonify({"log": out, "path": path})
+    return jsonify({"log": "\n".join(out.splitlines()[-200:]), "path": path})

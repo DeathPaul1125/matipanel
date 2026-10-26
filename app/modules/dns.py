@@ -325,7 +325,7 @@ def parse_zone(text, zone):
         first = toks[0].text
         if not e["lead_ws"] and first.startswith("$"):
             d = first.upper()
-            if d == "$TTL" and len(toks) > 1 and TTL_RE.match(toks[1].text):
+            if d == "$TTL" and len(toks) > 1 and TTL_RE.fullmatch(toks[1].text):
                 ttl_default = toks[1].text
             elif d == "$ORIGIN" and len(toks) > 1:
                 cur_origin = abs_name(toks[1].text, cur_origin)
@@ -342,7 +342,7 @@ def parse_zone(text, zone):
             t = toks[i].text
             if cls is None and t.upper() in ("IN", "CH", "HS", "CS"):
                 cls = t.upper()
-            elif ttl is None and TTL_RE.match(t):
+            elif ttl is None and TTL_RE.fullmatch(t):
                 ttl = t
             else:
                 break
@@ -490,15 +490,15 @@ def _is_ip(v):
 
 def valid_domain(d):
     d = str(d or "").strip().lower().rstrip(".")
-    if not DOMAIN_RE.match(d):
+    if not DOMAIN_RE.fullmatch(d):
         raise DnsError("Dominio inválido (ej. ejemplo.com; solo letras, números, guiones y puntos)")
     return d
 
 
 def email_to_rname(email, fallback_domain):
     email = str(email or "").strip() or f"hostmaster@{fallback_domain}"
-    m = EMAIL_RE.match(email)
-    if not m or not DOMAIN_RE.match(m.group(2).lower()):
+    m = EMAIL_RE.fullmatch(email)
+    if not m or not DOMAIN_RE.fullmatch(m.group(2).lower()):
         raise DnsError("Correo del administrador inválido")
     return m.group(1).replace(".", "\\.") + "." + m.group(2).lower() + "."
 
@@ -524,7 +524,7 @@ def owner_abs(name, origin, rtype=""):
         a = n + "." + origin
     if a != origin and not a.endswith("." + origin):
         raise DnsError(f"El nombre debe pertenecer a la zona {origin[:-1]}")
-    if a != origin and not OWNER_RE.match(a[:-len(origin) - 1]):
+    if a != origin and not OWNER_RE.fullmatch(a[:-len(origin) - 1]):
         raise DnsError("Nombre inválido: usa letras, números, guiones, _ y puntos (o * al inicio)")
     if len(a) > 254:
         raise DnsError("Nombre demasiado largo")
@@ -541,7 +541,7 @@ def target_abs(value, origin, allow_root=False):
         return origin
     if _is_ip(v.rstrip(".")):
         raise DnsError("Aquí va un nombre de host, no una dirección IP")
-    if not HOST_RE.match(v):
+    if not HOST_RE.fullmatch(v):
         raise DnsError(f"Nombre de host inválido: {v[:80]}")
     v = v.lower()
     if v.endswith("."):
@@ -593,7 +593,7 @@ def build_rdata(rtype, f, origin, owner):
         if tag not in CAA_TAGS:
             raise DnsError("Etiqueta CAA inválida (issue, issuewild o iodef)")
         val = str(f.get("value", "")).strip()
-        if not CAA_VALUE_RE.match(val) or '"' in val or "\\" in val:
+        if not CAA_VALUE_RE.fullmatch(val) or '"' in val or "\\" in val:
             raise DnsError("Valor CAA inválido (texto ASCII sin comillas, máx. 255)")
         if tag == "iodef" and not re.match(r"^(mailto:|https?://)\S+$", val):
             raise DnsError("iodef debe ser mailto:correo o una URL https://")
@@ -721,9 +721,11 @@ def _read(path):
         return f.read()
 
 
-def _write(path, text):
-    """Escritura atómica conservando dueño y permisos (archivos nuevos: root:bind 0644)."""
-    st = os.stat(path) if os.path.exists(path) else None
+def _write(path, text, like=None):
+    """Escritura atómica conservando dueño y permisos (de `like` si se indica; nuevos: root:bind 0644).
+    os.replace sustituye un symlink en `path` en vez de seguirlo."""
+    ref = like or path
+    st = os.stat(ref) if os.path.exists(ref) else None
     fd, tmp = tempfile.mkstemp(prefix=".matipanel.", dir=os.path.dirname(path))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="\n") as f:
@@ -745,8 +747,10 @@ def _write(path, text):
 
 
 def _backup(path):
+    # No shutil.copy2: en /var/cache/bind y /var/lib/bind el usuario bind puede crear archivos, y un
+    # <zona>.matipanel.bak enlazado a /etc/... haría que root escribiera fuera. _write no sigue enlaces.
     if os.path.exists(path):
-        shutil.copy2(path, path + BAK)
+        _write(path + BAK, _read(path), like=path)
 
 
 def _out(code, out, err):
@@ -814,7 +818,7 @@ def _local_zones():
 
 def _get_zone(name, primary=True):
     name = str(name or "").strip().lower().rstrip(".")
-    if not ZONE_RE.match(name):
+    if not ZONE_RE.fullmatch(name):
         raise DnsError("Nombre de zona inválido")
     text, zones = _local_zones()
     z = next((z for z in zones if z["name"] == name), None)
@@ -1119,7 +1123,7 @@ def create_secondary():
     _need()
     d = _data()
     domain = str(d.get("domain") or "").strip().lower().rstrip(".")
-    if not (DOMAIN_RE.match(domain)):
+    if not (DOMAIN_RE.fullmatch(domain)):
         raise DnsError("Dominio inválido")
     primaries = _ip_list(d.get("primaries"), "Primarios")
     if not primaries:
@@ -1338,7 +1342,7 @@ def dig():
     cmd = ["dig", "+time=3", "+tries=1", "@" + server]
     if qtype == "PTR" and _is_ip(name):
         cmd += ["-x", str(ipaddress.ip_address(name))]
-    elif HOST_RE.match(name) or name == ".":
+    elif HOST_RE.fullmatch(name) or name == ".":
         cmd += [name, qtype]
     else:
         raise DnsError("Nombre inválido")

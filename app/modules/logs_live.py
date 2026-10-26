@@ -21,7 +21,7 @@ def register_websockets(sock):
             return
 
         unit = ws.receive(timeout=10)
-        if not unit:
+        if not isinstance(unit, str):  # None = timeout; "" = todo el journal (unidad opcional)
             ws.close()
             return
         unit = unit.strip()
@@ -29,15 +29,17 @@ def register_websockets(sock):
         cmd = ["journalctl", "-f", "--no-pager", "--output=short-iso", "-n", "50"]
         if unit:
             if not valid_name(unit):
-                ws.send(f"__error__: nombre de unidad inválido: {unit}")
+                ws.send(f"__error__: nombre de unidad inválido: {unit[:200]}")
                 ws.close()
                 return
             cmd += ["-u", unit]
 
         try:
             proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                # errors="replace": un mensaje con bytes no UTF-8 (cualquier usuario local puede
+                # escribir en el journal con `logger`) mataba el hilo lector en silencio.
+                text=True, errors="replace", bufsize=1,
             )
         except (FileNotFoundError, PermissionError) as e:
             ws.send(f"__error__: {e}")

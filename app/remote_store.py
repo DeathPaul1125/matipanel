@@ -38,17 +38,23 @@ def _load(path, key):
         with open(path) as f:
             data = json.load(f)
         items = data.get(key) if isinstance(data, dict) else None
-        return items if isinstance(items, list) else []
+        # Solo objetos: una entrada que no sea dict haría fallar los .get() (y la API remota con 500).
+        return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
     except (OSError, ValueError):
         return []
 
 
 def _save(path, key, items):
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    # Creado ya con 0600: el contenido es secreto desde el primer byte.
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    # Creado ya con 0600 (el contenido es secreto desde el primer byte), nuevo (O_EXCL) y sin
+    # seguir un symlink plantado en el lugar del temporal.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump({key: items}, f, indent=2)
     os.chmod(tmp, 0o600)
@@ -112,12 +118,13 @@ def verify_token(token, ip=None, path=None):
     tokens = _load(path, "tokens")
     found = None
     for t in tokens:
-        if hmac.compare_digest(str(t.get("hash", "")), h):
+        if hmac.compare_digest(str(t.get("hash", "")).encode(), h.encode()):
             found = t
     if not found:
         return None
     now = int(time.time())
-    if not found.get("last_used") or now - found["last_used"] >= LAST_USED_EVERY or found.get("last_ip") != ip:
+    last = found.get("last_used")
+    if not isinstance(last, (int, float)) or now - last >= LAST_USED_EVERY or found.get("last_ip") != ip:
         found["last_used"], found["last_ip"] = now, ip
         try:
             _save(path, "tokens", tokens)
@@ -385,6 +392,13 @@ if __name__ == "__main__":
         # Archivo corrupto → lista vacía, sin excepción
         tp.write_text("{no es json")
         assert list_tokens(tp) == [] and verify_token(tok, None, tp) is None
+        # Entradas que no son objetos → se ignoran (antes: AttributeError → 500 en la API remota)
+        tp.write_text(json.dumps({"tokens": ["x", 1, None, {"id": "a", "hash": "é"}]}))
+        assert [t["id"] for t in list_tokens(tp)] == ["a"] and verify_token(tok, None, tp) is None
+        # Un temporal huérfano (o un symlink en su lugar) no impide guardar
+        (Path(d) / "t.json.tmp").write_text("basura")
+        create_token("otro", tp)
+        assert len(list_tokens(tp)) == 2
 
     # Limpieza de respuestas remotas
     c = clean_summary({"hostname": "<b>x</b>\x00", "cpu": float("nan"), "mem": 150, "disk": "42.5",

@@ -79,7 +79,7 @@ Si necesitas una opción que no está en el formulario, pulsa **Editar smb.conf*
 | Campo | Qué poner |
 |---|---|
 | **Nombre del recurso** | Lo que verán los usuarios: `\\servidor\nombre`. Hasta 40 letras, números, `_`, `-` o `$`, sin espacios. Si termina en `$` (por ejemplo `admin$`), el recurso queda oculto en la lista de Windows. |
-| **Carpeta en el servidor** | Ruta absoluta, por ejemplo `/srv/samba/documentos`. No se permiten carpetas del sistema (`/etc`, `/usr`, `/root`, `/proc`…). |
+| **Carpeta en el servidor** | Ruta absoluta, por ejemplo `/srv/samba/documentos`. No se permiten carpetas del sistema (`/etc`, `/usr`, `/root`, `/proc`…), tampoco a través de un enlace simbólico que apunte a ellas. |
 | **Descripción** | Opcional. Texto que ven los usuarios. |
 | **Permitir escritura** | Si está desmarcado, el recurso es de solo lectura. |
 | **Acceso de invitados** | Cualquiera puede entrar sin contraseña. Requiere **Invitados** en **Bad User**. |
@@ -173,7 +173,7 @@ El indicador muestra si el servidor NFS está activo, las versiones de NFS habil
 ### Exportar una carpeta
 
 1. Pulsa **+ Nueva exportación**.
-2. En **Carpeta a exportar** escribe la ruta, por ejemplo `/srv/nfs/datos`. Sin espacios.
+2. En **Carpeta a exportar** escribe la ruta, por ejemplo `/srv/nfs/datos`. Sin espacios. Igual que en Samba, no se aceptan carpetas del sistema ni enlaces simbólicos que apunten a ellas.
 3. En cada fila de **Clientes autorizados y opciones** escribe el cliente y sus opciones. Usa **+ Agregar cliente** para más filas y **✕** para quitar una.
 4. Pulsa **Guardar**. Si la carpeta no existe, el panel ofrece crearla igual que en Samba.
 

@@ -34,7 +34,11 @@ def create_app():
 
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = os.environ.get("MATIPANEL_SECURE_COOKIE") == "1"
+    secure = os.environ.get("MATIPANEL_SECURE_COOKIE") == "1"
+    app.config["SESSION_COOKIE_SECURE"] = secure
+    # __Host-: el navegador exige HTTPS, Path=/ y sin Domain, así otro sitio o subdominio
+    # no puede fijar ni leer esta cookie. En desarrollo (HTTP) se usa un nombre normal.
+    app.config["SESSION_COOKIE_NAME"] = "__Host-matipanel" if secure else "matipanel_session"
     app.config["PERMANENT_SESSION_LIFETIME"] = 3600
     app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024  # subidas y restauraciones: 1 GB
     app.config["SOCK_SERVER_OPTIONS"] = {"ping_interval": 25}
@@ -59,6 +63,24 @@ def create_app():
         # Apariencia del usuario disponible en todas las plantillas
         p = user_prefs.get(current_user.username if current_user.is_authenticated else None)
         return {"prefs": p, "prefs_css": user_prefs.css(p)}
+
+    @app.after_request
+    def _security_headers(resp):
+        # CSP: los scripts del panel son propios o en línea; se prohíbe cargar código externo,
+        # enviar datos a otros orígenes (connect/form) y mostrar el panel dentro de otra página.
+        resp.headers.setdefault("Content-Security-Policy", "; ".join([
+            "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:", "font-src 'self'",
+            f"connect-src 'self' wss://{request.host} ws://{request.host}", "object-src 'none'",
+            "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"]))
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+        resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        if resp.mimetype == "application/json":  # datos del servidor: que no queden en caché
+            resp.headers.setdefault("Cache-Control", "no-store")
+        return resp
 
     sock = Sock(app)
 

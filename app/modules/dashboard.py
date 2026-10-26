@@ -177,6 +177,41 @@ def overview():
     })
 
 
+# Veredicto de salud para la barra superior (todas las pantallas). Caché corta: varias
+# pestañas abiertas no multiplican las llamadas a systemctl.
+_health_cache = {"at": 0.0, "data": None}
+
+
+@dashboard_bp.route("/api/health")
+@login_required
+def health():
+    now = time.time()
+    if _health_cache["data"] and now - _health_cache["at"] < 10:
+        return jsonify(_health_cache["data"])
+    issues = []
+    failed = _failed_units()
+    if failed:
+        issues.append(("err", f"El servicio {failed[0]} falló" if len(failed) == 1 else f"{len(failed)} servicios fallaron"))
+    for p in _partitions():
+        if p["percent"] >= 80:
+            issues.append(("err" if p["percent"] >= 90 else "warn", f"Disco {p['mount']} al {round(p['percent'])} %"))
+    mem = psutil.virtual_memory().percent
+    if mem >= 85:
+        issues.append(("err" if mem >= 95 else "warn", f"Memoria al {round(mem)} %"))
+    recent = [p["cpu"] for p in list(_history)[-6:]]
+    if len(recent) >= 6 and sum(recent) / len(recent) >= 90:
+        issues.append(("warn", f"CPU sostenida al {round(sum(recent) / len(recent))} %"))
+    load1, cores = psutil.getloadavg()[0], psutil.cpu_count() or 1
+    if load1 / cores >= 1.5:
+        issues.append(("warn", f"Carga alta ({load1:.2f})"))
+    issues.sort(key=lambda i: i[0] != "err")
+    level = "err" if any(l == "err" for l, _ in issues) else "warn" if issues else "ok"
+    data = {"level": level, "issues": [m for _, m in issues], "failed": failed,
+            "updates": _pending_updates(), "sessions": len(psutil.users())}
+    _health_cache.update(at=now, data=data)
+    return jsonify(data)
+
+
 def _failed_units():
     code, out, _ = run(["systemctl", "list-units", "--failed", "--type=service",
                         "--plain", "--no-legend", "--no-pager"], timeout=10)

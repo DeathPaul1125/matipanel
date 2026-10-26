@@ -200,7 +200,7 @@ const $ = id => document.getElementById(id);
 let currentPath = '/', items = [], shown = [], selected = new Set(), lastClicked = -1;
 let sort = JSON.parse(localStorage.getItem('mp-fm-sort') || '{"key":"name","dir":1}');
 let backStack = [], fwdStack = [], clipboard = null, searchMode = false, disk = null;
-let editingPath = '', editorOriginal = '', editorLocked = true, permTargets = [];
+let editingPath = '', editingVersion = '', editorOriginal = '', editorLocked = true, permTargets = [], lsTotal = 0;
 
 function join(dir, name) { return dir === '/' ? '/' + name : dir + '/' + name; }
 function closeModal(id) { $(id).classList.remove('open'); }
@@ -264,7 +264,7 @@ async function load(path) {
   catch (e) { d = { error: String(e) }; }
   if (d.error) { err(d, 'No se pudo abrir la carpeta'); return false; }
   const prev = currentPath;
-  currentPath = d.path; items = d.items.map(it => ({ ...it, full: join(d.path, it.name) })); disk = d.disk;
+  currentPath = d.path; items = d.items.map(it => ({ ...it, full: join(d.path, it.name) })); disk = d.disk; lsTotal = d.total || d.items.length;
   if (prev !== currentPath) { selected.clear(); lastClicked = -1; $('filter').value = ''; }
   searchMode = false; $('search-head').hidden = true;
   history.replaceState(null, '', '?path=' + encodeURIComponent(d.path));
@@ -326,7 +326,8 @@ function render() {
   const files = shown.filter(i => !i.is_dir), dirs = shown.length - files.length;
   $('status').textContent = searchMode ? `${shown.length} resultado(s)` :
     `${dirs} carpeta(s) · ${files.length} archivo(s) · ${humanSize(files.reduce((a, f) => a + f.size, 0))}`
-    + (items.length !== shown.length ? ` · ${items.length - shown.length} oculto(s) o filtrado(s)` : '');
+    + (items.length !== shown.length ? ` · ${items.length - shown.length} oculto(s) o filtrado(s)` : '')
+    + (!searchMode && lsTotal > items.length ? ` · solo se muestran ${items.length} de ${lsTotal} entradas: usa la búsqueda o la terminal` : '');
   $('cb-all').checked = shown.length > 0 && shown.every(it => selected.has(it.full));
   renderBars();
 }
@@ -615,7 +616,7 @@ async function savePerms() {
   const rec = $('perm-rec').checked, mode = $('perm-mode').value.trim();
   const owner = $('perm-owner').value.trim(), group = $('perm-group').value.trim();
   for (const it of permTargets) {
-    if (mode !== it.mode_oct || rec) {
+    if (!it.is_link && (mode !== it.mode_oct || rec)) {  // chmod seguiría el enlace hasta su destino
       const d = await postJSON(API + 'chmod', { path: it.full, mode, recursive: rec && it.is_dir });
       if (!d.ok) return err(d, 'chmod falló en ' + it.name);
     }
@@ -668,7 +669,7 @@ async function editFile(path) {
       location.href = API + 'download?path=' + encodeURIComponent(path);
     return;
   }
-  editingPath = d.path;
+  editingPath = d.path; editingVersion = d.version || '';
   editorLocked = !WRITE || !!d.lossy;
   $('ed-filename').textContent = d.path;
   $('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '')
@@ -688,8 +689,9 @@ async function closeEditor() {
 }
 async function saveFile() {
   if (editorLocked) return;
-  const d = await postJSON(API + 'write', { path: editingPath, content: ed.value });
+  const d = await postJSON(API + 'write', { path: editingPath, content: ed.value, version: editingVersion });
   if (!d.ok) return err(d, 'No se pudo guardar');
+  editingVersion = d.version || '';
   ui.toast('Guardado ✓ · respaldo en ' + d.backup.split('/').pop());
   editorOriginal = ed.value; updateGutter();
   load(currentPath);

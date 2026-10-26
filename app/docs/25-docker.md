@@ -68,7 +68,7 @@ En la columna **Acciones** de cada contenedor:
 ## Ver los logs de un contenedor
 
 1. Pulsa **logs** en la fila del contenedor.
-2. Se abre una ventana con las últimas 200 líneas (`docker logs --tail 200`).
+2. Se abre una ventana con las últimas 200 líneas (`docker logs --tail 200`). Si esas líneas suman más de 1 MB, se muestra solo el primer MB con el aviso **salida recortada**.
 3. Pulsa **Cerrar** para volver.
 
 Los logs no se actualizan en vivo. Vuelve a pulsar **logs** para ver las líneas nuevas. Para seguirlos en tiempo real usa la [Terminal](29-terminal.md): `sudo docker logs -f <nombre>`.

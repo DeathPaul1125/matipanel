@@ -25,8 +25,11 @@ __mp_banner
 # ── Prompt por segmentos: [usuario] [ruta › con › separadores] › ──
 # La ruta va en variables referenciadas desde PS1 (comillas simples): así un directorio
 # llamado '$(comando)' se muestra tal cual y nunca se ejecuta.
+# Los caracteres de control del nombre (ESC, etc.) se muestran como '?': un directorio creado por
+# otro usuario no puede inyectar secuencias de escape en la terminal al entrar en él.
 __mp_prompt() {
-  local st=$? p=${PWD/#$HOME/\~}
+  local st=$? p=${PWD/#"$HOME"/\~}
+  p=${p//[[:cntrl:]]/?}
   local disp=${p//\// › }
   [[ $p == /* ]] && disp="/${disp# › }"
   if [[ $disp == *' › '* ]]; then

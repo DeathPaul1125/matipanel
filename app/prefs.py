@@ -11,7 +11,7 @@ from pathlib import Path
 
 STORE_PATH = Path(os.environ.get("MATIPANEL_PREFS", "/var/lib/matipanel/prefs.json"))
 
-HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+HEX = re.compile(r"#[0-9a-fA-F]{6}\Z")  # \Z (no $): "$" aceptaría un salto de línea final
 DASH_SECTIONS = ("gauges", "history", "info", "procs", "quick")
 
 DEFAULTS = {
@@ -41,15 +41,18 @@ DEFAULT_ACCENT = "#0E7C6B"
 def _load_all():
     try:
         with open(STORE_PATH) as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
+            data = json.load(f)
+    except (OSError, ValueError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def get(username):
     prefs = copy.deepcopy(DEFAULTS)
     saved = _load_all().get(username, {}) if username else {}
-    return clean({**prefs, **saved, "dash": {**prefs["dash"], **saved.get("dash", {})}})
+    saved = saved if isinstance(saved, dict) else {}
+    dash = saved.get("dash") if isinstance(saved.get("dash"), dict) else {}
+    return clean({**prefs, **saved, "dash": {**prefs["dash"], **dash}})
 
 
 def clean(p):
@@ -72,9 +75,14 @@ def clean(p):
 def save(username, prefs):
     data = _load_all()
     data[username] = clean(prefs)
-    STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STORE_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = STORE_PATH.with_suffix(".tmp")
-    with open(tmp, "w") as f:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=2)
     os.chmod(tmp, 0o600)
     os.replace(tmp, STORE_PATH)
@@ -119,6 +127,8 @@ def css(p):
 if __name__ == "__main__":
     assert clean({"accent": "red;}body{display:none", "sidebar": "x", "zoom": "500"}) == DEFAULTS
     assert clean({"accent": "#2563EB"})["accent"] == "#2563EB"
+    c = clean({"accent": "#2563EB\n", "sidebar": "#2563EB\n}"})
+    assert c["accent"] == "default" and c["sidebar"] == "navy"
     assert "--sb-bg:#0F1E3A" in css(clean({}))            # azul oscuro por defecto
     assert "--sb-text:#16181c" in css(clean({"sidebar": "#F5F5F0"}))  # color claro → texto oscuro
     assert css(clean({"sidebar": "light"})) == ""

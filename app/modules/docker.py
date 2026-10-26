@@ -2,11 +2,13 @@
 import subprocess
 import json
 import shutil
+import threading
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from ..util import valid_name
 
 docker_bp = Blueprint("docker", __name__)
+LOGS_MAX = 1024 * 1024
 
 def _available():
     # Por request (no al importar): instalar Docker no obliga a reiniciar el panel.
@@ -157,10 +159,31 @@ def action():
 def logs(container):
     if not _safe_id(container):
         return jsonify({"error": "ID inválido"}), 400
-    code, out, err = _docker("logs", "--tail", "200", "--", container, timeout=10)
-    if code != 0:
-        return jsonify({"error": err.strip()}), 500
-    return jsonify({"logs": out + err})
+    if not _available():
+        return jsonify({"error": "docker no instalado"}), 500
+    # 200 líneas pueden ser cientos de MB si el contenedor escribe líneas gigantes o binario:
+    # se lee como bytes, con tope y tiempo límite, para no tumbar el único worker.
+    try:
+        p = subprocess.Popen(["docker", "logs", "--tail", "200", "--", container],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except OSError as e:
+        return jsonify({"error": str(e)}), 500
+    timer = threading.Timer(10, p.kill)
+    timer.start()
+    try:
+        data = p.stdout.read(LOGS_MAX + 1)
+        if len(data) > LOGS_MAX:
+            p.kill()
+        p.stdout.close()
+        code = p.wait()
+    finally:
+        timer.cancel()
+    text = data[-LOGS_MAX:].decode("utf-8", "replace")
+    if len(data) > LOGS_MAX:
+        text = f"[… salida recortada a {LOGS_MAX // 1024} KB …]\n" + text
+    elif code != 0:
+        return jsonify({"error": text.strip() or "docker logs falló"}), 500
+    return jsonify({"logs": text})
 
 
 def _safe_id(s):

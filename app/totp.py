@@ -9,6 +9,8 @@ import os
 import json
 import secrets
 import hashlib
+import hmac
+import time
 from pathlib import Path
 
 try:
@@ -42,9 +44,16 @@ def _load_store():
 
 
 def _save_store(data):
-    STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STORE_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = STORE_PATH.with_suffix(".tmp")
-    with open(tmp, "w") as f:
+    # Creado ya con 0600 (los secretos nunca quedan legibles ni un instante) y sin seguir
+    # un symlink que alguien haya dejado en el lugar del temporal.
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(data, f, indent=2)
     os.chmod(tmp, 0o600)
     os.replace(tmp, STORE_PATH)
@@ -99,21 +108,40 @@ def provisioning_uri(username, secret, issuer="MatiPanel"):
     return pyotp.totp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer)
 
 
+def _is_totp_code(code):
+    return isinstance(code, str) and len(code) == 6 and code.isascii() and code.isdigit()
+
+
 def verify(username, code):
-    """Verifica un código TOTP de 6 dígitos."""
-    if not HAS_PYOTP:
+    """Verifica un código TOTP de 6 dígitos (ventana ±1 paso).
+
+    Cada código sirve UNA vez: se guarda el último paso de tiempo aceptado y se rechaza
+    cualquier código de ese paso o anteriores (alguien que vio el código, o lo capturó,
+    no puede reutilizarlo dentro de su ventana de validez)."""
+    if not HAS_PYOTP or not _is_totp_code(code):
         return False
-    data = _load_store().get(username, {})
-    secret = data.get("secret")
-    if not secret:
+    store = _load_store()
+    data = store.get(username)
+    if not isinstance(data, dict) or not data.get("secret"):
         return False
-    totp = pyotp.TOTP(secret)
-    return totp.verify(code, valid_window=1)
+    totp = pyotp.TOTP(data["secret"])
+    now = int(time.time())
+    last = data.get("last_step")
+    last = last if isinstance(last, int) else -1
+    for offset in (0, -1, 1):
+        ts = now + offset * totp.interval
+        step = ts // totp.interval
+        if step > last and hmac.compare_digest(totp.at(ts), code):
+            data["last_step"] = step
+            store[username] = data
+            _save_store(store)
+            return True
+    return False
 
 
 def activate(username, code):
     """Confirma el secret con el primer código válido."""
-    if verify(username, code):
+    if pending_secret(username) and verify(username, code):
         store = _load_store()
         if username in store:
             store[username]["active"] = True
@@ -131,7 +159,7 @@ def disable(username):
 
 def consume_recovery(username, code):
     """Usa un código de recuperación (un solo uso)."""
-    code = code.strip().lower()
+    code = str(code).strip().lower()
     h = hashlib.sha256(code.encode()).hexdigest()
     store = _load_store()
     data = store.get(username, {})

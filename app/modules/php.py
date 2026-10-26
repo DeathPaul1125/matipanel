@@ -2,6 +2,8 @@
 import os
 import re
 import shutil
+import stat
+import tempfile
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from ..util import run
@@ -25,7 +27,7 @@ def _versions():
         names = os.listdir(PHP_ROOT)
     except OSError:
         return []
-    vers = [n for n in names if VER_RE.match(n) and os.path.isdir(os.path.join(PHP_ROOT, n))]
+    vers = [n for n in names if VER_RE.fullmatch(n) and os.path.isdir(os.path.join(PHP_ROOT, n))]
     return sorted(vers, key=lambda v: tuple(map(int, v.split("."))), reverse=True)
 
 
@@ -150,7 +152,7 @@ def set_ini():
     if not isinstance(values, dict) or not values:
         return jsonify({"ok": False, "error": "Sin cambios"}), 400
     for k, v in values.items():
-        if k not in DIRECTIVES or not isinstance(v, str) or not VALUE_RE.match(v):
+        if k not in DIRECTIVES or not isinstance(v, str) or not VALUE_RE.fullmatch(v):
             return jsonify({"ok": False, "error": f"Valor inválido para {k}"}), 400
 
     path = os.path.join(PHP_ROOT, ver, sapi, "php.ini")
@@ -179,8 +181,20 @@ def _write_directives(path, values):
             text = commented.sub(lambda _m: line, text, count=1)
         else:
             text = text.rstrip("\n") + f"\n{line}\n"
-    with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
-        f.write(text)
+    # Escritura atómica (temporal + rename) conservando dueño y permisos: un fallo a mitad
+    # (disco lleno, worker reiniciado) nunca deja un php.ini truncado.
+    st = os.stat(path)
+    fd, tmp = tempfile.mkstemp(prefix=".matipanel.", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as f:
+            f.write(text)
+        os.chown(tmp, st.st_uid, st.st_gid)
+        os.chmod(tmp, stat.S_IMODE(st.st_mode))
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 @php_bp.route("/api/modules")
@@ -209,7 +223,7 @@ def modules():
 def toggle_module():
     data = request.get_json(silent=True) or {}
     ver, sapi, mod = data.get("version", ""), data.get("sapi", ""), data.get("module", "")
-    if ver not in _versions() or sapi not in SAPIS or not MOD_RE.match(mod):
+    if ver not in _versions() or sapi not in SAPIS or not MOD_RE.fullmatch(mod):
         return jsonify({"ok": False, "error": "Parámetros inválidos"}), 400
     if not os.path.isfile(os.path.join(PHP_ROOT, ver, "mods-available", f"{mod}.ini")):
         return jsonify({"ok": False, "error": "Módulo no disponible"}), 404
@@ -225,7 +239,7 @@ def toggle_module():
 def install_ext():
     data = request.get_json(silent=True) or {}
     ver, name = data.get("version", ""), data.get("name", "")
-    if ver not in _versions() or not EXT_RE.match(name):
+    if ver not in _versions() or not EXT_RE.fullmatch(name):
         return jsonify({"ok": False, "error": "Versión o nombre de extensión inválido"}), 400
     ok, output, error = apt_get("install", "--", f"php{ver}-{name}", timeout=600)
     if not ok:

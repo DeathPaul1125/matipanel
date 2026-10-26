@@ -119,7 +119,7 @@ function done(d) { if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' 
 const NAMES = { ufw: 'UFW', firewalld: 'firewalld', nftables: 'nftables', iptables: 'iptables' };
 const PRESETS = [
   ['SSH', '22', 'tcp'], ['HTTP (web)', '80', 'tcp'], ['HTTPS (web)', '443', 'tcp'],
-  ['MatiPanel', '{{ request.host.rsplit(":", 1)[1] if ":" in request.host else "8443" }}', 'tcp'],
+  ['MatiPanel', {{ (request.host.rsplit(":", 1)[1] if ":" in request.host and not request.host.endswith("]") else "8443")|tojson }}, 'tcp'],
   ['MySQL / MariaDB', '3306', 'tcp'], ['PostgreSQL', '5432', 'tcp'], ['FTP', '21', 'tcp'],
   ['Correo SMTP', '25', 'tcp'], ['DNS', '53', 'any'], ['Samba', '445', 'tcp'], ['Webmin', '10000', 'tcp'],
 ];

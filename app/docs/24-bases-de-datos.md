@@ -116,7 +116,7 @@ El resultado aparece como tabla, con la cantidad de filas y el tiempo. Los error
 | Tiempo máximo | 60 segundos |
 | Tamaño de la consulta | 1 MB |
 
-Si se supera un límite de salida verás **resultado truncado (máx. 1000 filas / 2 MB)**. Si la consulta tarda más de 60 segundos, se cancela.
+Si se supera un límite de salida verás **resultado truncado (máx. 1000 filas / 2 MB)**. Si la consulta tarda más de 60 segundos, se cancela: el panel detiene el cliente y, en PostgreSQL, el propio servidor cancela la sentencia (`statement_timeout`).
 
 - En MariaDB/MySQL, la opción **(sin base de datos)** ejecuta sin base seleccionada.
 - En PostgreSQL, la primera opción es la base `postgres`.
@@ -144,6 +144,7 @@ El respaldo se genera con `mysqldump` (incluye rutinas y triggers) o `pg_dump`, 
 
 - El script se ejecuta sobre la base existente. Las tablas que contenga el archivo pueden reemplazarse.
 - La importación se detiene en el primer error y muestra el mensaje del motor. Lo que ya se importó antes del error queda aplicado.
+- En MariaDB, si el cliente `mysql` lo soporta (MariaDB 10.5.25 / 11.x o posterior, como en Debian 13), la restauración usa el modo `--sandbox`: un archivo con comandos del cliente como `\!` (ejecutar en el shell) o `source` se rechaza en vez de ejecutarse como root. En PostgreSQL esos comandos de `psql` se ejecutarían como el usuario `postgres`: restaura solo archivos de origen confiable.
 
 > **Importante:** Restaurar puede sobrescribir datos. Haz un **Backup** de la base antes de restaurar.
 
