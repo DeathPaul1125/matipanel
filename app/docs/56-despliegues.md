@@ -231,6 +231,14 @@ Al crear la aplicación (o en **Configuración**), elige **Tipo de proyecto → 
 
 > **Importante:** Si tu framework tiene un instalador web (`install.php`), protégelo o elimínalo del repositorio de producción: en el contenedor sigue existiendo.
 
+### Nombre interno con Apache en el puerto 80
+
+El nombre interno (por ejemplo `quetzal.local`) se atiende en el puerto 80. Si en el servidor ya hay un **Apache** en ese puerto, el panel no lo detiene: crea el sitio `/etc/apache2/sites-available/matipanel-app-<app>.conf`, que reenvía ese nombre al puerto propio de la app (activa los módulos `proxy` y `proxy_http` si hace falta, valida con `apache2ctl configtest` y recarga Apache). La app sigue disponible también por su puerto (`http://servidor:8081`). Si quitas el nombre interno o eliminas la app, el sitio de Apache se borra.
+
+Si el puerto 80 lo ocupa otro programa que no es Apache ni Nginx, el despliegue se detiene con un aviso: quita el nombre interno o libera el puerto.
+
+> **Recuerda:** el nombre tiene que apuntar a la IP del servidor: un registro en tu DNS interno o, para probar, una línea en el archivo `hosts` de tu equipo (`192.100.10.64 quetzal.local`).
+
 ### Usar tu propio Dockerfile
 
 Si el repositorio trae un `Dockerfile` en la raíz, el panel lo usa en lugar del generado. Debe:

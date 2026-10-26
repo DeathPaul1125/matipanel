@@ -113,7 +113,7 @@
       </div>
       <label class="form-row"><span>Nombre interno (opcional)</span>
         <input class="input mono" id="wz-host" placeholder="miapp.apps.empresa.local" autocomplete="off">
-        <span class="dlg-help">Necesita un registro DNS que apunte a este servidor (por ejemplo el comodín <span class="mono">*.apps.empresa.local</span>). El puerto propio se asigna solo.</span></label>
+        <span class="dlg-help">Necesita un registro DNS que apunte a este servidor (por ejemplo el comodín <span class="mono">*.apps.empresa.local</span>). El puerto propio se asigna solo. Si Apache ya usa el puerto 80, él reenvía este nombre a la app.</span></label>
       <label class="form-row"><span>Base de datos</span>
         <select class="input" id="wz-db"><option value="none">Ninguna (uso una externa)</option><option value="mariadb">MariaDB 11</option><option value="postgres">PostgreSQL 16</option></select>
         <span class="dlg-help">Se crea en un contenedor propio y sus credenciales se agregan al .env (DB_*).</span></label>
@@ -289,7 +289,8 @@
           <input class="input mono" id="cf-migcmd" placeholder="php migrate.php" autocomplete="off">
           <span class="dlg-help">Se ejecuta antes de activar cada versión nueva; si falla, la anterior sigue en línea.</span></label>
       </div>
-      <label class="form-row"><span>Nombre interno (opcional)</span><input class="input mono" id="cf-host" placeholder="miapp.apps.empresa.local" autocomplete="off"></label>
+      <label class="form-row"><span>Nombre interno (opcional)</span><input class="input mono" id="cf-host" placeholder="miapp.apps.empresa.local" autocomplete="off">
+        <span class="dlg-help">Se atiende en el puerto 80. Si Apache ya lo usa, el panel crea un sitio en Apache que reenvía este nombre al puerto de la app. Vacío = solo por puerto.</span></label>
       <label class="form-row"><span>Extensiones de PHP adicionales</span><input class="input mono" id="cf-ext" placeholder="intl gd bcmath" autocomplete="off">
         <span class="dlg-help">Solo con el Dockerfile generado; se instalan con install-php-extensions.</span></label>
       <label class="dlg-check"><input type="checkbox" id="cf-auto"> Desplegar solo con cada push (sondeo cada 60 s y webhook)</label>

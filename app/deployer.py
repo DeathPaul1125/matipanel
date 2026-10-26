@@ -42,6 +42,7 @@ from pathlib import Path
 
 BASE_DIR = Path(os.environ.get("MATIPANEL_APPS", "/var/lib/matipanel/apps"))
 NGINX_DIR = Path("/etc/nginx")
+APACHE_DIR = Path("/etc/apache2")
 O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 O_BINARY = getattr(os, "O_BINARY", 0)
 
@@ -1034,6 +1035,81 @@ def nginx_paths(name):
     return NGINX_DIR / "sites-available" / fname, NGINX_DIR / "sites-enabled" / fname
 
 
+def apache_paths(name):
+    fname = f"matipanel-app-{name}.conf"
+    return APACHE_DIR / "sites-available" / fname, APACHE_DIR / "sites-enabled" / fname
+
+
+def render_apache_proxy(cfg):
+    """VirtualHost de Apache para el nombre interno: reenvía al puerto propio de la app (que atiende
+    Nginx). Así conviven el Apache del servidor en el 80 y las apps desplegadas."""
+    host, port = cfg.get("hostname") or "", int(cfg["port"])
+    if not valid_hostname(host):
+        raise ValueError("hostname inválido")
+    return (f"# Generado por MatiPanel (Despliegues) para «{cfg['name']}»: Apache tiene el puerto 80, así que\n"
+            f"# reenvía el nombre interno al puerto {port} de la app. No lo edites: se reescribe en cada despliegue.\n"
+            f"<VirtualHost *:80>\n"
+            f"    ServerName {host}\n"
+            f"    ProxyPreserveHost On\n"
+            f"    ProxyRequests Off\n"
+            f"    ProxyPass / http://127.0.0.1:{port}/ upgrade=websocket\n"
+            f"    ProxyPassReverse / http://127.0.0.1:{port}/\n"
+            f"    ProxyTimeout 300\n"
+            f"</VirtualHost>\n")
+
+
+def apply_apache_host(name, cfg):
+    """Escribe y activa el sitio de Apache (proxy y proxy_http se activan si hace falta). → (ok, mensaje)."""
+    avail, link = apache_paths(name)
+    if lstat_kind(avail.parent) != "dir" or lstat_kind(link.parent) != "dir":
+        return False, "Apache ocupa el puerto 80 pero no tiene /etc/apache2/sites-available (¿no es Debian/Ubuntu?)"
+    if lstat_kind(avail) not in (None, "file") or lstat_kind(link) not in (None, "link"):
+        return False, f"{avail} o {link} no son lo que el panel espera; revísalos a mano"
+    text = render_apache_proxy(cfg)
+    old = read_text(avail) if lstat_kind(avail) == "file" else None
+    if old == text and lstat_kind(link) == "link":
+        return True, "Apache ya reenvía el nombre interno"
+    code, o, e = _run(["a2enmod", "-q", "proxy", "proxy_http"], timeout=60)
+    if code != 0:
+        return False, "No se pudieron activar los módulos proxy de Apache: " + (o + e).strip()[-500:]
+    write_file(avail, text, 0o644)
+    made_link = lstat_kind(link) is None
+    if made_link:
+        os.symlink(f"../sites-available/{avail.name}", str(link))
+
+    def restore():
+        if old is not None:
+            write_file(avail, old, 0o644)
+        else:
+            os.unlink(avail)
+        if made_link:
+            os.unlink(link)
+
+    code, o, e = _run(["apache2ctl", "configtest"], timeout=30)
+    if code != 0:
+        restore()
+        return False, "apache2ctl configtest falló; se dejó todo como estaba:\n" + (o + e).strip()[-1500:]
+    code, o, e = _run(["systemctl", "reload", "apache2"], timeout=60)
+    if code != 0:
+        restore()
+        _run(["systemctl", "reload", "apache2"], timeout=60)
+        return False, "No se pudo recargar Apache: " + (o + e).strip()[-500:]
+    return True, f"Apache reenvía {cfg['hostname']} al puerto {cfg['port']}"
+
+
+def remove_apache_host(name):
+    avail, link = apache_paths(name)
+    changed = False
+    if lstat_kind(link) == "link":
+        os.unlink(link)
+        changed = True
+    if lstat_kind(avail) == "file":
+        os.unlink(avail)
+        changed = True
+    if changed and _run(["apache2ctl", "configtest"], timeout=30)[0] == 0:
+        _run(["systemctl", "reload", "apache2"], timeout=60)
+
+
 def apply_nginx(name, cfg, upstream_port):
     """Escribe el sitio de la app, valida con nginx -t y recarga. Si falla, deja todo como estaba."""
     avail, link = nginx_paths(name)
@@ -1044,14 +1120,25 @@ def apply_nginx(name, cfg, upstream_port):
         return False, f"{avail} no es un archivo normal; revísalo a mano"
     if lstat_kind(link) not in (None, "link"):
         return False, f"{link} es un archivo real y no un enlace; revísalo a mano"
+    notes = []
     if cfg.get("hostname"):
-        # Con nombre interno Nginx necesita el puerto 80. Si lo tiene otro programa (Apache), el
-        # reload «funciona» pero Nginx descarta la configuración nueva sin avisar.
+        # El nombre interno se atiende en el puerto 80. Si lo tiene Apache, Apache lo reenvía al puerto de
+        # la app; si lo tiene otro programa, no hay forma (el reload de Nginx fallaría sin avisar).
         others = port_users(80) - {"nginx"}
-        if others:
+        if others and others <= {"apache2", "httpd"}:
+            ok, msg = apply_apache_host(name, cfg)  # antes de tocar Nginx: si falla, nada cambió
+            if not ok:
+                return False, msg
+            notes.append(msg)
+            cfg = {**cfg, "hostname": ""}  # Nginx solo atiende el puerto propio
+        elif others:
             return False, (f"El puerto 80 lo usa {', '.join(sorted(others))}, y el nombre interno necesita que lo "
-                           f"atienda Nginx. Quita el nombre interno en Configuración (la app seguirá en el puerto "
-                           f"{cfg['port']}) o libera el puerto 80.")
+                           f"atienda Nginx o Apache. Quita el nombre interno en Configuración (la app seguirá en "
+                           f"el puerto {cfg['port']}) o libera el puerto 80.")
+        else:
+            remove_apache_host(name)
+    else:
+        remove_apache_host(name)
     old = read_text(avail) if kind == "file" else None
     write_file(avail, render_nginx(cfg, upstream_port), 0o644)
     made_link = False
@@ -1083,7 +1170,7 @@ def apply_nginx(name, cfg, upstream_port):
         _, jlog, _ = _run(["journalctl", "-u", "nginx", "-n", "8", "--no-pager"], timeout=15)
         return False, (f"Nginx no abrió el puerto {cfg['port']}; se dejó la configuración anterior. "
                        f"¿Está activo Nginx y libre ese puerto?\n" + jlog.strip())
-    return True, (out + err).strip()
+    return True, "\n".join([*notes, (out + err).strip()]).strip()
 
 
 def remove_nginx(name):
@@ -1735,6 +1822,7 @@ def delete_app(name, volumes=False):
                 _run(["docker", "image", "rm", "-f", ref], 60)
     try:
         remove_nginx(name)
+        remove_apache_host(name)
     except OSError as e:
         warnings.append(f"Nginx: {e}")
     with _lock:
@@ -1918,6 +2006,13 @@ if __name__ == "__main__":
                    "LDB_HOST": "db", "LDB_PASS": "P" * 32}, upd
     assert set(service_env(pc, sec)) == {"DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"}
     assert dict(parse_env(db_env(pc, sec))[0])["MARIADB_DATABASE"] == "app"
+    ap = render_apache_proxy({"name": "quetzal", "hostname": "quetzal.local", "port": 8081})
+    assert "ServerName quetzal.local\n" in ap and "ProxyPass / http://127.0.0.1:8081/ upgrade=websocket" in ap
+    try:
+        render_apache_proxy({"name": "x", "hostname": "a.b\nInclude /etc/shadow", "port": 8081})
+        raise AssertionError("hostname con salto de línea aceptado")
+    except ValueError:
+        pass
     assert exposed_port('{"80/tcp":{}}') == 80 and exposed_port('{"8080/tcp":{},"8443/tcp":{}}') is None
     assert exposed_port("null") is None and exposed_port("") is None and exposed_port('{"53/udp":{}}') is None
     legacy = {k: v for k, v in pc.items() if k != "db_name"}  # creada como Laravel y cambiada a PHP
