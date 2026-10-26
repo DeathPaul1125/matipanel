@@ -157,3 +157,108 @@ window.ui = (() => {
 
   return { alert, confirm, prompt, form, toast };
 })();
+
+// ── Terminal de acciones: salida en vivo de lo que hace el servidor al pulsar un botón ──
+// Cada POST del panel lleva X-Job-Id; si tarda más de un instante se abre una ventana tipo
+// terminal que muestra, en tiempo real, los comandos y su salida (apt-get, systemctl, docker…).
+(() => {
+  const DELAY = 700;
+  const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+  let box = null, active = null;
+
+  function ensureBox() {
+    if (box) return box;
+    box = document.createElement('div');
+    box.className = 'modal jobterm';
+    box.innerHTML = `<div class="modal-box wide jt-box" role="dialog" aria-label="Salida de la acción">
+        <div class="jt-head">
+          <span class="led sm live warn" data-jt="led"></span>
+          <b class="jt-title" data-jt="title"></b>
+          <span class="jt-status" data-jt="status">Ejecutando…</span>
+          <button class="btn btn-sm" type="button" data-jt="close">Cerrar</button>
+        </div>
+        <pre class="jt-out" data-jt="out"></pre>
+        <div class="jt-foot small" data-jt="foot">Puedes cerrar esta ventana: la acción sigue en el servidor.</div>
+      </div>`;
+    document.body.appendChild(box);
+    box.querySelector('[data-jt=close]').onclick = () => { box.classList.remove('open'); if (active) active.visible = false; };
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && box.classList.contains('open') && !document.querySelector('dialog[open]')) box.querySelector('[data-jt=close]').click(); });
+    return box;
+  }
+  const el = k => ensureBox().querySelector(`[data-jt=${k}]`);
+
+  function append(text) {
+    const out = el('out'), atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+    out.textContent += text.replace(ANSI, '').replace(/\r(?!\n)/g, '\n');
+    if (atBottom) out.scrollTop = out.scrollHeight;
+  }
+
+  async function poll(job) {
+    while (job.polling) {
+      try {
+        const d = await (await nativeFetch('/jobs/' + job.id + '?offset=' + job.offset)).json();
+        if (d.text) { if (job === active) append(d.text); job.offset = d.offset; }
+        if (job.finished && (!d.text || d.done)) break;
+      } catch (e) { /* reintenta */ }
+      await new Promise(r => setTimeout(r, job.finished ? 150 : 400));
+    }
+    job.polling = false;
+  }
+
+  function open(job) {
+    ensureBox();
+    active = job; job.visible = true;
+    el('title').textContent = job.title;
+    el('status').textContent = 'Ejecutando…';
+    el('led').className = 'led sm live warn';
+    el('out').textContent = '';
+    el('foot').hidden = false;
+    box.classList.add('open');
+    job.polling = true;
+    poll(job);
+  }
+
+  function finish(job, ok, errorText) {
+    job.finished = true;
+    if (!job.visible || job !== active) return;
+    const settle = () => {
+      if (job.polling) return setTimeout(settle, 120);
+      if (!el('out').textContent.trim()) append(ok ? 'La acción terminó sin salida en pantalla.\n' : '');
+      if (!ok && errorText) append('\n' + errorText + '\n');
+      el('status').textContent = ok ? 'Completado' : 'Falló';
+      el('led').className = 'led sm ' + (ok ? '' : 'err');
+      el('foot').hidden = true;
+    };
+    settle();
+  }
+
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (input, init = {}) {
+    const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    const url = new URL(input instanceof Request ? input.url : input, location.href);
+    if (method === 'GET' || url.origin !== location.origin || url.pathname.startsWith('/jobs/')) return nativeFetch(input, init);
+    const id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(16) + Math.random().toString(16).slice(2)).replace(/[^A-Za-z0-9-]/g, '');
+    const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+    if (headers.has('X-Job-Id')) return nativeFetch(input, init);
+    headers.set('X-Job-Id', id);
+    const btn = document.activeElement && document.activeElement.closest('button, a, .btn');
+    const title = (btn && btn.textContent.trim().replace(/\s+/g, ' ').slice(0, 60)) || 'Acción en el servidor';
+    const job = { id, title, offset: 0, polling: false, finished: false, visible: false };
+    const timer = setTimeout(() => open(job), DELAY);
+    try {
+      const resp = await nativeFetch(input, { ...init, headers });
+      clearTimeout(timer);
+      let ok = resp.ok, err = '';
+      if (job.visible) {
+        try { const body = await resp.clone().json(); if (body && body.ok === false) { ok = false; err = body.error || ''; } } catch (e) {}
+        if (!resp.ok && !err) err = 'HTTP ' + resp.status;
+      }
+      finish(job, ok, err);
+      return resp;
+    } catch (e) {
+      clearTimeout(timer);
+      finish(job, false, String(e));
+      throw e;
+    }
+  };
+})();

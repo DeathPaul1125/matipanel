@@ -1,6 +1,8 @@
 """Helpers compartidos entre módulos."""
 import ipaddress
+import shlex
 import subprocess
+import threading
 import time
 from urllib.parse import urlparse
 from flask import request
@@ -9,7 +11,15 @@ _NAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345678
 
 
 def run(cmd, timeout=30, input=None, env=None, cwd=None):
-    """Ejecuta un comando SIN shell. Retorna (returncode, stdout, stderr)."""
+    """Ejecuta un comando SIN shell. Retorna (returncode, stdout, stderr).
+
+    Si la petición trae X-Job-Id (un botón del panel), la salida se transmite en vivo a la
+    ventana de terminal del navegador mientras el comando corre (ver app/jobs.py).
+    """
+    from . import jobs  # import diferido: jobs usa flask_login
+    jid = jobs.current_job()
+    if jid:
+        return _run_streaming(cmd, timeout, input, env, cwd, jid)
     try:
         # errors="replace": una salida con bytes no UTF-8 (p. ej. un log con basura escrita por
         # un atacante) no debe tumbar la petición con UnicodeDecodeError.
@@ -20,6 +30,50 @@ def run(cmd, timeout=30, input=None, env=None, cwd=None):
         return 127, "", f"{cmd[0]} no está instalado"
     except subprocess.TimeoutExpired:
         return 124, "", "Tiempo de espera agotado"
+
+
+def _run_streaming(cmd, timeout, input, env, cwd, jid):
+    """Como run(), pero copiando stdout y stderr línea a línea a la tarea `jid`."""
+    from . import jobs
+    jobs.write(jid, "$ " + shlex.join(str(c) for c in cmd) + "\n")
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
+                             env=env, cwd=cwd, bufsize=1)
+    except FileNotFoundError:
+        msg = f"{cmd[0]} no está instalado"
+        jobs.write(jid, msg + "\n")
+        return 127, "", msg
+    out, err = [], []
+
+    def pump(stream, sink):
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            jobs.write(jid, line)
+        stream.close()
+
+    readers = [threading.Thread(target=pump, args=(p.stdout, out), daemon=True),
+               threading.Thread(target=pump, args=(p.stderr, err), daemon=True)]
+    for t in readers:
+        t.start()
+    if input is not None:
+        try:
+            p.stdin.write(input)
+            p.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+    try:
+        code = p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        jobs.write(jid, "\n[tiempo de espera agotado]\n")
+        return 124, "".join(out), "Tiempo de espera agotado"
+    for t in readers:
+        t.join(5)
+    if code != 0:
+        jobs.write(jid, f"[terminó con código {code}]\n")
+    return code, "".join(out), "".join(err)
 
 
 def bytes_to_human(n):

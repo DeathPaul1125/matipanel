@@ -46,6 +46,8 @@ def register_modules(app, sock):
     ]:
         app.register_blueprint(bp, url_prefix=prefix)
 
+    from .. import jobs
+    jobs.init_app(app)  # salida en vivo de los botones (ventana de terminal)
     app.jinja_env.globals["HELP_CONTEXT"] = HELP_CONTEXT  # botón "?" de cada pantalla
     app.jinja_env.globals["VIEW_FUNCS"] = app.view_functions  # el menú oculta módulos no registrados
     register_terminal_ws(sock)
