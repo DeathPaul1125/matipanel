@@ -21,14 +21,24 @@ except ImportError:
 STORE_PATH = Path(os.environ.get("MATIPANEL_2FA_STORE", "/var/lib/matipanel/2fa.json"))
 
 
+class StoreError(Exception):
+    """El almacén de 2FA existe pero no se puede leer: hay que fallar cerrado."""
+
+
 def _load_store():
-    if not STORE_PATH.exists():
-        return {}
+    # Solo un archivo inexistente significa "sin 2FA". Si existe pero está corrupto
+    # o no se puede leer, se lanza StoreError: el login se bloquea y, como todos los
+    # guardados cargan primero, el archivo nunca se sobrescribe con un almacén vacío.
     try:
         with open(STORE_PATH) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+            data = json.load(f)
+    except FileNotFoundError:
         return {}
+    except (ValueError, OSError):
+        raise StoreError(f"No se pudo leer la configuración de 2FA; revisa {STORE_PATH}")
+    if not isinstance(data, dict):
+        raise StoreError(f"No se pudo leer la configuración de 2FA; revisa {STORE_PATH}")
+    return data
 
 
 def _save_store(data):
@@ -62,6 +72,23 @@ def generate_secret(username):
     }
     _save_store(store)
     return secret, codes
+
+
+def pending_secret(username):
+    """Secret aún no confirmado (para reintentar la activación con el mismo QR)."""
+    data = _load_store().get(username, {})
+    return None if data.get("active") else data.get("secret")
+
+
+def valid_recovery_codes(username, codes):
+    """Filtra los códigos que siguen vigentes para el usuario (descarta inventados)."""
+    hashes = set(_load_store().get(username, {}).get("recovery_hashes", []))
+    return [c for c in codes if hashlib.sha256(c.strip().lower().encode()).hexdigest() in hashes]
+
+
+def recovery_remaining(username):
+    """Cuántos códigos de recuperación sin usar le quedan al usuario."""
+    return len(_load_store().get(username, {}).get("recovery_hashes", []))
 
 
 def provisioning_uri(username, secret, issuer="MatiPanel"):
