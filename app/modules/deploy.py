@@ -147,7 +147,17 @@ def install():
             c, o, e = run(["systemctl", "enable", "--now", "docker"], timeout=120)
             log.append((o + e).strip())
         if k == "nginx":
-            run(["systemctl", "enable", "--now", "nginx"], timeout=120)
+            c, o, e = run(["systemctl", "enable", "--now", "nginx"], timeout=120)
+            if c != 0:
+                # Diagnóstico visible en la terminal de la acción: casi siempre es el puerto 80 ocupado
+                _, t_out, t_err = run(["nginx", "-t"], timeout=30)
+                _, ports, _ = run(["ss", "-ltnp", "( sport = :80 or sport = :443 )"], timeout=10)
+                _, jlog, _ = run(["journalctl", "-u", "nginx", "-n", "15", "--no-pager"], timeout=15)
+                log.append("\n".join(x.strip() for x in (o + e, t_out + t_err, ports, jlog)))
+                return _err("Nginx se instaló pero no arrancó. Lo más común: otro servicio (Apache, otro "
+                            "proxy o un contenedor) ya usa el puerto 80. Detén ese servicio o quita el sitio "
+                            "por defecto de Nginx (/etc/nginx/sites-enabled/default) y vuelve a intentar.",
+                            500, output="\n".join(log)[-6000:])
     return jsonify({"ok": True, "output": "\n".join(log)[-6000:], "requirements": _requirements()})
 
 
