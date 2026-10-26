@@ -459,6 +459,15 @@ async function installReq(key) {
   loadReq();
 }
 
+// Compartido por el asistente (lista) y la Configuración (detalle).
+// Muestra los campos del tipo elegido (Laravel o PHP) dentro del mismo formulario.
+function kindUI(sel) {
+  const scope = sel.closest('[data-step], [data-panel]');
+  scope.querySelectorAll('[data-kind]').forEach(el => { el.hidden = el.dataset.kind !== sel.value; });
+}
+const phpFields = px => ({ kind: $(`#${px}-kind`).value, docroot: $(`#${px}-docroot`).value.trim(),
+  env_path: $(`#${px}-envpath`).value.trim(), persist: $(`#${px}-persist`).value.trim(),
+  migrate_cmd: $(`#${px}-migcmd`).value.trim() });
 {% if not app_name %}
 // ── Lista ──
 async function loadApps() {
@@ -513,14 +522,6 @@ function setStep(n) {
   $('#wz-next').textContent = n === 3 ? 'Crear aplicación' : 'Siguiente';
   $('#wz-error').hidden = true;
 }
-// Muestra los campos del tipo elegido (Laravel o PHP) dentro del mismo formulario.
-function kindUI(sel) {
-  const scope = sel.closest('[data-step], [data-panel]');
-  scope.querySelectorAll('[data-kind]').forEach(el => { el.hidden = el.dataset.kind !== sel.value; });
-}
-const phpFields = px => ({ kind: $(`#${px}-kind`).value, docroot: $(`#${px}-docroot`).value.trim(),
-  env_path: $(`#${px}-envpath`).value.trim(), persist: $(`#${px}-persist`).value.trim(),
-  migrate_cmd: $(`#${px}-migcmd`).value.trim() });
 function wizError(msg) { const el = $('#wz-error'); el.textContent = msg; el.hidden = false; }
 function openWizard(draft) {
   Object.assign(wz, { step: 1, name: '', ssh: false, created: false });
