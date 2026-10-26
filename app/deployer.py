@@ -428,14 +428,16 @@ def render_compose(cfg, appdir, slots=None):
             svc["ports"] = [f"127.0.0.1:{slot_port(cfg, slot)}:{cport}"]
             services["app_" + slot] = svc
     active = slots.get(cfg.get("active_slot") or "")
+    # El HEALTHCHECK de la imagen prueba HTTP; worker y programador no sirven HTTP.
     if active and cfg.get("worker"):
         svc = base(active, "worker")
         svc.update(command=["php", "/var/www/html/artisan", "queue:work", "--tries=3", "--max-time=3600"],
-                   stop_signal="SIGTERM")
+                   stop_signal="SIGTERM", healthcheck={"disable": True})
         services["worker"] = svc
     if active and cfg.get("scheduler"):
         svc = base(active, "scheduler")
-        svc.update(command=["php", "/var/www/html/artisan", "schedule:work"], stop_signal="SIGTERM")
+        svc.update(command=["php", "/var/www/html/artisan", "schedule:work"], stop_signal="SIGTERM",
+                   healthcheck={"disable": True})
         services["scheduler"] = svc
     doc = {"name": project_name(name), "services": services, "volumes": volumes}
     text = json.dumps(doc, indent=2, ensure_ascii=False)
@@ -891,18 +893,24 @@ def apply_nginx(name, cfg, upstream_port):
     if lstat_kind(link) is None:
         os.symlink(str(avail), str(link))
         made_link = True
-    code, out, err = _run(["nginx", "-t"], timeout=30)
-    if code != 0:
+    def restore():
         if old is not None:
             write_file(avail, old, 0o644)
         else:
             os.unlink(avail)
         if made_link:
             os.unlink(link)
+
+    code, out, err = _run(["nginx", "-t"], timeout=30)
+    if code != 0:
+        restore()
         return False, "nginx -t falló; se dejó la configuración anterior:\n" + (out + err).strip()
     code, o, e = _run(["systemctl", "reload-or-restart", "nginx"], timeout=60)
     if code != 0:
-        return False, "No se pudo recargar Nginx: " + (o + e).strip()
+        # Nginx sigue con la configuración vieja en memoria: el archivo también debe volver atrás
+        # para que un reinicio posterior no apunte a un slot que se va a detener.
+        restore()
+        return False, "No se pudo recargar Nginx; se dejó la configuración anterior: " + (o + e).strip()
     return True, (out + err).strip()
 
 
@@ -1242,7 +1250,7 @@ def _pipeline(name, dep, log):
         log.write(out + "\n")
         if not ok:
             raise Fail("No se pudo actualizar Nginx. La versión anterior sigue en línea.")
-    except (Fail, Cancelled):
+    except Exception:  # Fail, Cancelled o un error inesperado: el slot nuevo se descarta
         _run(compose(name, "rm", "-sf", tsvc), 120)
         _write_compose(name, load_config(name))
         raise

@@ -62,13 +62,27 @@ def create_app():
 
     @app.before_request
     def _csrf_origin_check():
-        # Toda petición que modifica algo debe venir del propio panel: los navegadores
-        # mandan Origin (o al menos Referer) en POST/PUT/PATCH/DELETE. Sin ninguno de los dos,
-        # o con otro host, se rechaza. GET/HEAD nunca modifican nada en el panel.
-        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-            origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
-            if not origin or origin == "null" or urlparse(origin).netloc != request.host:
-                abort(403)
+        # Toda petición que modifica algo debe venir del propio panel. Señales del navegador,
+        # en orden: Sec-Fetch-Site (la pone el navegador y una página ajena no puede falsearla),
+        # Origin y, si falta o es "null", Referer. Sin ninguna señal válida se rechaza.
+        # GET/HEAD nunca modifican nada en el panel.
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return
+        site = request.headers.get("Sec-Fetch-Site", "")
+        if site in ("cross-site", "same-site"):
+            return _csrf_reject(f"Sec-Fetch-Site={site}")
+        if site == "same-origin":
+            return
+        origin = request.headers.get("Origin", "")
+        if not origin or origin == "null":
+            origin = request.headers.get("Referer", "")
+        if not origin or urlparse(origin).netloc != request.host:
+            return _csrf_reject(f"Origin/Referer={origin or '(ninguno)'} host={request.host}")
+
+    def _csrf_reject(reason):
+        app.logger.warning("Petición rechazada por protección CSRF (%s %s): %s",
+                           request.method, request.path, reason)
+        abort(403)
 
     @app.context_processor
     def _inject_prefs():
