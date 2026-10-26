@@ -1310,6 +1310,25 @@ def _build(name, cfg, image, sha, log):
          BUILD_TIMEOUT, "docker build", env=env)
 
 
+def exposed_port(ports_json):
+    """Del JSON de .Config.ExposedPorts ({"80/tcp": {}}) → el puerto si la imagen expone uno solo."""
+    try:
+        ports = [k.split("/")[0] for k in (json.loads(ports_json) or {}) if k.endswith("/tcp")]
+    except (ValueError, AttributeError):
+        return None
+    return int(ports[0]) if len(ports) == 1 and ports[0].isdigit() and 1 <= int(ports[0]) <= 65535 else None
+
+
+def _adopt_exposed_port(name, cfg, image, log):
+    """Dockerfile propio con un solo EXPOSE (p. ej. php:*-apache → 80): se usa ese puerto interno,
+    así no hay que adivinar el valor en Configuración."""
+    code, out, _ = _run(["docker", "image", "inspect", "--format", "{{json .Config.ExposedPorts}}", image], 30)
+    port = exposed_port(out.strip()) if code == 0 else None
+    if port and port != int(cfg.get("container_port") or 8080):
+        log.write(f"La imagen expone el puerto {port}: se usa como puerto interno (antes {cfg.get('container_port') or 8080})\n")
+        update_config(name, lambda c: c.update(container_port=port))
+
+
 def _write_compose(name, cfg, slots=None):
     if is_php(cfg):
         # Copia del .env para montarla como archivo. Dueño www-data (uid 33 en la imagen) y 0400: el
@@ -1390,6 +1409,7 @@ def _pipeline(name, dep, log):
         _check_cancel()
         _seed_env(name, cfg, log)
         _build(name, cfg, image, info["sha"], log)
+        _adopt_exposed_port(name, cfg, image, log)
     else:
         log.step(f"Reutilizando la imagen {image} (sin compilar de nuevo)")
         if not TAG_RE.fullmatch(image.split(":", 1)[-1]) or not image.startswith(f"matipanel/{name}:"):
@@ -1868,6 +1888,8 @@ if __name__ == "__main__":
                    "LDB_HOST": "db", "LDB_PASS": "P" * 32}, upd
     assert set(service_env(pc, sec)) == {"DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"}
     assert dict(parse_env(db_env(pc, sec))[0])["MARIADB_DATABASE"] == "app"
+    assert exposed_port('{"80/tcp":{}}') == 80 and exposed_port('{"8080/tcp":{},"8443/tcp":{}}') is None
+    assert exposed_port("null") is None and exposed_port("") is None and exposed_port('{"53/udp":{}}') is None
     legacy = {k: v for k, v in pc.items() if k != "db_name"}  # creada como Laravel y cambiada a PHP
     assert service_env(legacy, sec, "LDB_USER=x\n") == {"LDB_USER": "laravel"} and db_name(legacy) == "laravel"
     filled = dict(parse_env(fill_db_placeholders(pc, sec, "LDB_HOST='localhost'\nLDB_NAME='db_quetzal'\nLDB_USER='root'\n"
