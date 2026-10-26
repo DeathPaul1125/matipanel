@@ -1,6 +1,6 @@
 # SSL / Let's Encrypt
 
-Este módulo obtiene, lista, renueva y elimina certificados HTTPS gratuitos de Let's Encrypt usando `certbot`. Lo encuentras en **Menú → Servidores → SSL / Let's Encrypt**.
+Este módulo obtiene, lista, renueva y elimina certificados HTTPS gratuitos de Let's Encrypt usando `certbot`. Lo encuentras en **Menú → Web y aplicaciones → SSL / Let's Encrypt**.
 
 ## Requisitos antes de pedir un certificado
 

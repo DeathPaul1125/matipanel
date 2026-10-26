@@ -142,7 +142,7 @@ Entraste como root con `su` sin guion. Las versiones recientes del instalador ya
 
 ### ¿Cómo sé qué versión tengo?
 
-Abre **Menú → Cuenta → Acerca de**.
+Abre **menú de usuario (tu nombre, abajo a la izquierda) → Acerca de**.
 
 ## Ver también
 

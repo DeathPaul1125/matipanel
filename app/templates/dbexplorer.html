@@ -1,0 +1,1366 @@
+{% extends "base.html" %}
+{% block title %}Explorador BD{% endblock %}
+{% block heading %}Explorador de bases de datos{% endblock %}
+
+{% block content %}
+{% if not has_mysql and not has_pg %}
+<div class="card">
+  <h3>No hay motores de base de datos instalados</h3>
+  <p class="muted">Instala MariaDB (compatible con MySQL) o PostgreSQL desde <a href="{{ url_for('databases.index') }}">Bases de datos</a> y recarga esta página.</p>
+</div>
+{% else %}
+<div class="dbx">
+  <aside class="card dbx-side">
+    {% if has_mysql and has_pg %}
+    <div class="seg dbx-eng" id="eng-seg">
+      <button type="button" data-eng="mysql">MariaDB / MySQL</button>
+      <button type="button" data-eng="pg">PostgreSQL</button>
+    </div>
+    {% endif %}
+    <label class="docs-search dbx-filter">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="tree-filter" placeholder="Filtrar bases y tablas…" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="dbx-tree" id="tree"><div class="dbx-tree-msg">Cargando…</div></div>
+    <div class="dbx-side-foot">
+      <button type="button" class="btn btn-sm" id="tree-reload">Refrescar</button>
+      <a class="btn btn-sm" href="{{ url_for('databases.index') }}">Administrar motor</a>
+    </div>
+  </aside>
+
+  <section class="dbx-main">
+    <div class="card dbx-head">
+      <nav class="dbx-crumbs" id="crumbs" aria-label="Ubicación"></nav>
+      <div class="tabs dbx-tabs" id="tabs"></div>
+    </div>
+    <div id="view"></div>
+  </section>
+</div>
+
+<div class="modal" id="dbx-modal"><div class="modal-box wide" id="dbx-modal-box"></div></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if has_mysql or has_pg %}
+<script>
+(() => {
+const BASE = {{ url_for('dbexplorer.index')|tojson }} + 'api/';
+const TYPES = {{ types|tojson }};
+const EXPRS = {{ exprs|tojson }};
+const PER_PAGE = {{ per_page|tojson }};
+const ENGINES = [{% if has_mysql %}'mysql',{% endif %}{% if has_pg %}'pg',{% endif %}];
+const ENG_LABEL = {mysql: 'MariaDB / MySQL', pg: 'PostgreSQL'};
+const DB_TABS = [['tables', 'Tablas'], ['sql', 'SQL'], ['create', 'Crear tabla'], ['export', 'Exportar']];
+const TABLE_TABS = [['data', 'Datos'], ['structure', 'Estructura'], ['sql', 'SQL'], ['ops', 'Operaciones'], ['io', 'Exportar / Importar']];
+const OPS = [['', '—'], ['like', 'contiene'], ['eq', '='], ['ne', '≠'], ['gt', '>'], ['lt', '<'], ['starts', 'empieza con'], ['null', 'es NULL'], ['notnull', 'no es NULL']];
+const $ = id => document.getElementById(id);
+const esc = escapeHtml;
+
+const S = {engine: null, db: null, schema: null, table: null, tab: null, dbs: [], tree: {}, meta: null, grid: null,
+           nav: 0, create: null, imp: null, qres: null, sqlDraft: {}};
+
+// ── Utilidades ─────────────────────────────────────────────────────
+const api = (p, params) => BASE + S.engine + '/' + p + (params ? '?' + new URLSearchParams(params) : '');
+async function getJSON(url) {
+  try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; }
+}
+async function postForm(url, fd) {
+  try { return await (await fetch(url, {method: 'POST', body: fd})).json(); } catch (e) { return {ok: false, error: String(e)}; }
+}
+const loc = extra => ({db: S.db, schema: S.schema || '', table: S.table, ...(extra || {})});
+const fmtN = n => n == null ? '—' : Number(n).toLocaleString('es');
+const fmtApprox = n => n == null ? '' : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + ' M' : n >= 1e4 ? Math.round(n / 1e3) + ' k' : String(n);
+const qid = name => S.engine === 'mysql' ? '`' + name.replace(/`/g, '``') + '`' : '"' + name.replace(/"/g, '""') + '"';
+const isNum = k => k === 'int' || k === 'num';
+const ICON = {
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="10" x2="9" y2="20"/>',
+  view: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+  db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  schema: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  caret: '<polyline points="9 6 15 12 9 18"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+};
+const svg = (name, cls = 'dbx-ic', size = 14) =>
+  `<svg class="${cls}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name]}</svg>`;
+const flash = (msg, kind = 'error') => `<div class="flash flash-${kind} dbx-pre">${esc(msg)}</div>`;
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+
+function download(name, text, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: mime}));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+function toCSV(cols, rows) {
+  const f = v => v === null || v === undefined ? '' :
+    (v === '' || v !== v.trim() || /[",\r\n]/.test(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  return [cols, ...rows].map(r => r.map(f).join(',')).join('\r\n') + '\r\n';
+}
+
+// ── Modal propio (formularios grandes); los avisos usan ui.* ───────
+const M = {act: null, change: null};
+function modal(html, wide = true) {
+  const box = $('dbx-modal-box');
+  box.className = 'modal-box' + (wide ? ' wide' : '');
+  box.innerHTML = html;
+  M.act = M.change = null;
+  $('dbx-modal').classList.add('open');
+  return box;
+}
+function closeModal() {
+  $('dbx-modal').classList.remove('open');
+  $('dbx-modal-box').innerHTML = '';
+  M.act = M.change = null;
+}
+$('dbx-modal').addEventListener('click', e => {
+  if (e.target.id === 'dbx-modal') return closeModal();
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  if (b.dataset.act === 'close') return closeModal();
+  if (M.act) M.act(b.dataset.act, b, e);
+});
+$('dbx-modal').addEventListener('change', e => { if (M.change) M.change(e); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('dbx-modal').classList.contains('open') && !document.querySelector('dialog[open]')) closeModal();
+});
+
+// ── Navegación (estado en la URL) ──────────────────────────────────
+function readUrl() {
+  const p = new URLSearchParams(location.search);
+  let engine = p.get('engine');
+  if (!ENGINES.includes(engine)) engine = ENGINES[0];
+  return {engine, db: p.get('db') || null, schema: engine === 'pg' ? (p.get('schema') || 'public') : null,
+          table: p.get('table') || null, tab: p.get('tab') || null};
+}
+
+async function go(next, push = true) {
+  const prev = {engine: S.engine, db: S.db, schema: S.schema, table: S.table};
+  Object.assign(S, next);
+  if (S.engine !== 'pg') S.schema = null; else if (!S.schema) S.schema = 'public';
+  if (!S.db) S.table = null;
+  if (prev.engine !== S.engine) { S.tree = {}; S.dbs = []; await loadDbs(); }
+  if (prev.engine !== S.engine || prev.db !== S.db || prev.schema !== S.schema || prev.table !== S.table) {
+    S.meta = null; S.grid = null; S.imp = null; S.qres = null;
+  }
+  if (push) {
+    const p = new URLSearchParams();
+    for (const k of ['engine', 'db', 'schema', 'table', 'tab']) if (S[k]) p.set(k, S[k]);
+    history.pushState(null, '', '?' + p);
+  }
+  render();
+}
+window.addEventListener('popstate', () => go(readUrl(), false));
+
+async function render() {
+  const tok = ++S.nav;
+  renderEngineSeg();
+  renderCrumbs();
+  if (S.db) await ensureOpen(S.db, S.schema);
+  if (tok !== S.nav) return;
+  renderTree();
+  if (!S.db) return viewHome(tok);
+  if (!S.table) return viewDb(tok);
+  return viewTable(tok);
+}
+
+function renderEngineSeg() {
+  document.querySelectorAll('#eng-seg button').forEach(b => b.classList.toggle('active', b.dataset.eng === S.engine));
+}
+$('eng-seg')?.addEventListener('click', e => {
+  const b = e.target.closest('[data-eng]');
+  if (b && b.dataset.eng !== S.engine) go({engine: b.dataset.eng, db: null, schema: null, table: null, tab: null});
+});
+
+function renderCrumbs() {
+  const parts = [`<button type="button" data-nav="home">${esc(ENG_LABEL[S.engine])}</button>`];
+  if (S.db) parts.push(`<button type="button" data-nav="db">${svg('db')} ${esc(S.db)}</button>`);
+  if (S.db && S.engine === 'pg') parts.push(`<button type="button" data-nav="db">${svg('schema')} ${esc(S.schema)}</button>`);
+  if (S.table) parts.push(`<span class="dbx-crumb-cur">${svg('table')} ${esc(S.table)}</span>`);
+  $('crumbs').innerHTML = parts.join('<span class="sep">›</span>');
+}
+$('crumbs').addEventListener('click', e => {
+  const b = e.target.closest('[data-nav]');
+  if (!b) return;
+  if (b.dataset.nav === 'home') go({db: null, table: null, tab: null});
+  else go({table: null, tab: 'tables'});
+});
+
+function renderTabs(list) {
+  $('tabs').innerHTML = list.map(([k, l]) => `<button type="button" class="tab ${S.tab === k ? 'active' : ''}" data-tab="${k}">${esc(l)}</button>`).join('');
+  $('tabs').hidden = !list.length;
+}
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-tab]');
+  if (b && b.dataset.tab !== S.tab) go({tab: b.dataset.tab});
+});
+
+// ── Árbol lateral ──────────────────────────────────────────────────
+function node(db) {
+  return S.tree[db] || (S.tree[db] = {open: false, schemas: null, openSchemas: new Set(), tables: {}, ro: {}});
+}
+
+async function loadDbs() {
+  $('tree').innerHTML = '<div class="dbx-tree-msg">Cargando…</div>';
+  const d = await getJSON(api('dbs'));
+  S.dbs = d.ok ? d.dbs : [];
+  S.dbsError = d.ok ? null : (d.error || 'No se pudo conectar');
+}
+
+async function loadTables(db, schema) {
+  const n = node(db), key = schema || '';
+  const d = await getJSON(api('tables', {db, schema: key}));
+  n.tables[key] = d.ok ? d.tables : {error: d.error || 'No se pudieron listar las tablas'};
+  n.ro[key] = d.ok ? d.readonly : null;
+  return n.tables[key];
+}
+
+async function loadSchemas(db) {
+  const d = await getJSON(BASE + 'pg/schemas?' + new URLSearchParams({db}));
+  node(db).schemas = d.ok ? d.schemas : [];
+}
+
+async function ensureOpen(db, schema) {
+  const n = node(db);
+  n.open = true;
+  if (S.engine === 'pg') {
+    if (!n.schemas) await loadSchemas(db);
+    n.openSchemas.add(schema || 'public');
+    if (!n.tables[schema]) await loadTables(db, schema);
+  } else if (!n.tables['']) {
+    await loadTables(db, '');
+  }
+}
+
+function invalidateTables() {
+  const n = S.db && S.tree[S.db];
+  if (n) delete n.tables[S.schema || ''];
+}
+
+function renderTree() {
+  const f = $('tree-filter').value.trim().toLowerCase();
+  const match = s => !f || s.toLowerCase().includes(f);
+  if (S.dbsError) { $('tree').innerHTML = `<div class="dbx-tree-msg err">${esc(S.dbsError)}</div>`; return; }
+  const leaves = (db, schema, list) => {
+    if (!list) return '<div class="dbx-tree-msg">Cargando…</div>';
+    if (list.error) return `<div class="dbx-tree-msg err">${esc(list.error)}</div>`;
+    const items = list.filter(t => match(t.name));
+    if (!items.length) return `<div class="dbx-tree-msg">${f ? 'Sin coincidencias' : 'Sin tablas'}</div>`;
+    return items.map(t => {
+      const active = S.db === db && (S.schema || '') === (schema || '') && S.table === t.name;
+      const count = t.type === 'view' ? 'vista' : (t.rows == null ? '' : '≈' + fmtApprox(t.rows));
+      return `<button type="button" class="dbx-node dbx-leaf ${active ? 'active' : ''}" data-act="table" data-db="${esc(db)}" data-schema="${esc(schema || '')}" data-table="${esc(t.name)}" title="${esc(t.name)}">${svg(t.type === 'table' ? 'table' : 'view')}<span class="dbx-name">${esc(t.name)}</span><span class="dbx-count">${esc(count)}</span></button>`;
+    }).join('');
+  };
+  const html = S.dbs.map(db => {
+    const n = S.tree[db.name];
+    const loaded = n && Object.values(n.tables).some(l => Array.isArray(l) && l.some(t => match(t.name)));
+    if (f && !match(db.name) && !loaded) return '';
+    const open = n && (n.open || (f && loaded));
+    let kids = '';
+    if (open) {
+      if (S.engine === 'pg') {
+        kids = (n.schemas || []).map(sc => {
+          const so = n.openSchemas.has(sc.name);
+          const list = n.tables[sc.name];
+          if (f && !so && !(Array.isArray(list) && list.some(t => match(t.name)))) return '';
+          const active = S.db === db.name && S.schema === sc.name && !S.table;
+          return `<button type="button" class="dbx-node ${active ? 'active' : ''}" data-act="schema" data-db="${esc(db.name)}" data-schema="${esc(sc.name)}" aria-expanded="${so}">${svg('caret', 'dbx-caret', 10)}${svg('schema')}<span class="dbx-name">${esc(sc.name)}</span>${sc.system ? '<span class="dbx-count">sistema</span>' : ''}</button>` +
+            (so || f ? `<div class="dbx-children">${leaves(db.name, sc.name, list)}</div>` : '');
+        }).join('') || '<div class="dbx-tree-msg">Cargando…</div>';
+      } else {
+        kids = leaves(db.name, '', n.tables['']);
+      }
+    }
+    const active = S.db === db.name && !S.table && S.engine === 'mysql';
+    const title = db.supported ? db.name : db.name + ' (nombre no admitido por el explorador)';
+    return `<button type="button" class="dbx-node ${active ? 'active' : ''}" data-act="db" data-db="${esc(db.name)}" aria-expanded="${!!open}" ${db.supported ? '' : 'disabled'} title="${esc(title)}">${svg('caret', 'dbx-caret', 10)}${svg('db')}<span class="dbx-name">${esc(db.name)}</span>${db.system ? '<span class="dbx-count">sistema</span>' : ''}</button>` +
+      (open ? `<div class="dbx-children">${kids}</div>` : '');
+  }).join('');
+  $('tree').innerHTML = html || `<div class="dbx-tree-msg">${f ? 'Sin coincidencias (abre una base para buscar en sus tablas)' : 'Sin bases de datos'}</div>`;
+}
+
+$('tree').addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const {act, db, schema, table} = b.dataset;
+  if (act === 'db') {
+    const n = node(db);
+    if (n.open && S.db === db && !S.table) { n.open = false; renderTree(); return; }
+    go({db, schema: S.engine === 'pg' ? 'public' : null, table: null, tab: 'tables'});
+  } else if (act === 'schema') {
+    const n = node(db);
+    if (S.db === db && S.schema === schema && !S.table && n.openSchemas.has(schema)) { n.openSchemas.delete(schema); renderTree(); return; }
+    go({db, schema, table: null, tab: 'tables'});
+  } else if (act === 'table') {
+    go({db, schema: schema || null, table, tab: S.table && S.tab && TABLE_TABS.some(t => t[0] === S.tab) ? S.tab : 'data'});
+  }
+});
+$('tree-filter').addEventListener('input', renderTree);
+$('tree-reload').addEventListener('click', async () => {
+  S.tree = {};
+  await loadDbs();
+  render();
+});
+
+// ── Inicio: lista de bases ─────────────────────────────────────────
+function viewHome(tok) {
+  renderTabs([]);
+  const rows = S.dbs.map(db => `<tr>
+      <td class="mono">${esc(db.name)} ${db.system ? '<span class="pill mute">sistema · solo lectura</span>' : ''}</td>
+      <td class="right">${db.supported ? `<button type="button" class="btn btn-sm" data-act="open-db" data-db="${esc(db.name)}">Explorar</button>` : '<span class="small muted">nombre no admitido</span>'}</td>
+    </tr>`).join('');
+  $('view').innerHTML = `<div class="card">
+    <div class="card-head"><h3>Bases de datos · ${esc(ENG_LABEL[S.engine])}</h3></div>
+    ${S.dbsError ? flash(S.dbsError) : ''}
+    <p class="small muted">Elige una base en la lista o en el panel izquierdo para ver sus tablas.</p>
+    <div class="table-wrap"><table class="lx"><thead><tr><th>Base de datos</th><th></th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="2" class="muted center">Sin bases de datos</td></tr>'}</tbody></table></div></div>`;
+}
+
+// ── Vista de una base ──────────────────────────────────────────────
+function dbReadonly() {
+  const n = S.tree[S.db];
+  return n ? n.ro[S.schema || ''] : null;
+}
+
+async function viewDb(tok) {
+  if (!DB_TABS.some(t => t[0] === S.tab)) S.tab = 'tables';
+  renderTabs(DB_TABS);
+  const v = $('view');
+  if (S.tab === 'tables') return viewOverview(v, tok);
+  if (S.tab === 'sql') return viewConsole(v);
+  if (S.tab === 'create') return viewCreate(v);
+  return viewDbExport(v);
+}
+
+async function viewOverview(v, tok) {
+  v.innerHTML = '<div class="card"><div class="empty">Cargando…</div></div>';
+  const list = await loadTables(S.db, S.schema || '');
+  if (tok !== S.nav) return;
+  renderTree();
+  const ro = dbReadonly(), my = S.engine === 'mysql';
+  const n = node(S.db);
+  const schemaSel = S.engine === 'pg' && n.schemas ? `<label class="small muted">Esquema
+      <select class="input" data-act="schema-select">${n.schemas.map(s => `<option value="${esc(s.name)}" ${s.name === S.schema ? 'selected' : ''}>${esc(s.name)}${s.system ? ' (sistema)' : ''}</option>`).join('')}</select></label>` : '';
+  let body;
+  if (list.error) body = flash(list.error);
+  else if (!list.length) body = '<div class="empty">Esta base no tiene tablas todavía.</div>';
+  else {
+    const total = list.reduce((a, t) => a + (t.size || 0), 0);
+    body = `<div class="table-wrap"><table class="lx"><thead><tr><th>Tabla</th><th>Tipo</th><th class="right">Filas (aprox.)</th><th class="right">Tamaño</th>
+      ${my ? '<th>Motor</th><th>Cotejamiento</th>' : ''}<th>Comentario</th><th></th></tr></thead><tbody>` +
+      list.map(t => `<tr>
+        <td class="mono"><a href="#" data-act="open-table" data-table="${esc(t.name)}" data-tab="data">${esc(t.name)}</a></td>
+        <td>${t.type === 'table' ? 'tabla' : t.type === 'view' ? '<span class="pill mute">vista</span>' : esc(t.type)}</td>
+        <td class="right">${t.type === 'view' ? '—' : esc(fmtN(t.rows))}</td>
+        <td class="right">${esc(t.size_h || '—')}</td>
+        ${my ? `<td class="small">${esc(t.engine || '—')}</td><td class="small mono">${esc(t.collation || '—')}</td>` : ''}
+        <td class="small muted dbx-ellipsis" title="${esc(t.comment)}">${esc(t.comment)}</td>
+        <td class="right dbx-nowrap">
+          <button type="button" class="btn btn-sm" data-act="open-table" data-table="${esc(t.name)}" data-tab="data">Datos</button>
+          <button type="button" class="btn btn-sm" data-act="open-table" data-table="${esc(t.name)}" data-tab="structure">Estructura</button>
+          ${!ro && t.type === 'table' ? `<button type="button" class="btn btn-sm btn-danger" data-act="ov-truncate" data-table="${esc(t.name)}">Vaciar</button>` : ''}
+          ${!ro ? `<button type="button" class="btn btn-sm btn-danger" data-act="ov-drop" data-table="${esc(t.name)}">Eliminar</button>` : ''}
+        </td></tr>`).join('') +
+      `</tbody></table></div><div class="small muted dbx-foot">${list.length} objeto(s) · ${esc(fmtSize(total))} en total</div>`;
+  }
+  v.innerHTML = `<div class="card">
+    <div class="toolbar dbx-toolbar">${schemaSel}
+      ${ro ? '' : '<button type="button" class="btn btn-primary btn-sm" data-act="go-tab" data-tab="create">+ Crear tabla</button>'}
+      <button type="button" class="btn btn-sm" data-act="go-tab" data-tab="sql">Consola SQL</button>
+      <button type="button" class="btn btn-sm" data-act="reload-overview">Refrescar</button>
+    </div>
+    ${ro ? flash(ro, 'info') : ''}${body}</div>`;
+}
+
+function fmtSize(n) {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(1) + ' ' + u[i];
+}
+
+function viewDbExport(v) {
+  const href = api('export', {db: S.db, format: 'sql'});
+  v.innerHTML = `<div class="card"><h3>Exportar la base completa</h3>
+    <p class="small muted">Descarga un volcado SQL comprimido (<span class="mono">.sql.gz</span>) de <b class="mono">${esc(S.db)}</b> con estructura y datos${S.engine === 'mysql' ? ', rutinas y triggers' : ' (todos los esquemas)'}. Es el mismo volcado que el botón <b>Backup</b> de Bases de datos.</p>
+    <a class="btn btn-primary" href="${esc(href)}">Descargar SQL (.sql.gz)</a>
+    <p class="small muted" style="margin-top:12px;">Para exportar una sola tabla en SQL, CSV o JSON, ábrela y usa la pestaña <b>Exportar / Importar</b>.</p></div>`;
+}
+
+// ── Vista de una tabla ─────────────────────────────────────────────
+async function viewTable(tok) {
+  if (!TABLE_TABS.some(t => t[0] === S.tab)) S.tab = 'data';
+  renderTabs(TABLE_TABS);
+  const v = $('view');
+  if (!S.meta) {
+    v.innerHTML = '<div class="card"><div class="empty">Cargando…</div></div>';
+    const d = await getJSON(api('table', {db: S.db, schema: S.schema || '', table: S.table}));
+    if (tok !== S.nav) return;
+    if (!d.ok) { v.innerHTML = `<div class="card">${flash(d.error)}</div>`; return; }
+    S.meta = d.meta;
+  }
+  ({data: viewData, structure: viewStructure, sql: viewConsole, ops: viewOps, io: viewIO})[S.tab](v, tok);
+}
+
+async function reloadMeta() {
+  S.meta = null;
+  invalidateTables();
+  await ensureOpen(S.db, S.schema);
+  renderTree();
+  return viewTable(S.nav);
+}
+
+// ── Datos: rejilla ─────────────────────────────────────────────────
+function gridState() {
+  return S.grid || (S.grid = {page: 1, per: 50, sort: null, dir: 'asc', filters: {}, sel: new Set(), rows: [],
+                               count: null, est: null, has_more: false, filtered: false, truncated: false});
+}
+
+function viewData(v) {
+  const g = gridState(), m = S.meta;
+  v.innerHTML = `<div class="card dbx-data">
+    ${m.editable ? '' : flash(m.edit_reason, 'info')}
+    <div class="toolbar dbx-toolbar">
+      ${m.editable ? '<button type="button" class="btn btn-primary btn-sm" data-act="insert">+ Insertar fila</button>' : ''}
+      <button type="button" class="btn btn-sm" data-act="reload-rows">Refrescar</button>
+      <button type="button" class="btn btn-sm" data-act="clear-filters" id="g-clear" hidden>Quitar filtros</button>
+      <span class="dbx-spacer"></span>
+      <label class="small muted dbx-nowrap">Filas por página
+        <select class="input dbx-per" data-act="per">${PER_PAGE.map(n => `<option ${n === g.per ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    </div>
+    <div class="fm-selbar" id="g-selbar" hidden><span id="g-selcount"></span>
+      <div class="fm-selbar-actions">
+        <button type="button" class="btn btn-sm btn-danger" data-act="delete-sel">Eliminar seleccionadas</button>
+        <button type="button" class="btn btn-sm" data-act="unselect">Quitar selección</button>
+      </div></div>
+    <div class="table-wrap dbx-gridwrap" id="g-wrap"><div class="empty">Cargando…</div></div>
+    <div class="dbx-pager" id="g-pager"></div>
+  </div>`;
+  loadRows();
+}
+
+function activeFilters() {
+  return Object.entries(S.grid.filters)
+    .filter(([, f]) => f.op && (f.op === 'null' || f.op === 'notnull' || (f.value || '') !== ''))
+    .map(([col, f]) => ({col, op: f.op, value: f.value || ''}));
+}
+
+async function loadRows(opts = {}) {
+  const g = gridState(), tok = S.nav;
+  const wrap = $('g-wrap');
+  if (!wrap) return;
+  wrap.classList.add('dbx-loading');
+  const d = await postJSON(api('rows'), {...loc(), page: g.page, per_page: g.per,
+    sort: g.sort ? {col: g.sort, dir: g.dir} : null, filters: activeFilters(), count: !!opts.count});
+  if (tok !== S.nav || !$('g-wrap')) return;
+  wrap.classList.remove('dbx-loading');
+  if (!d.ok) { wrap.innerHTML = flash(d.error); $('g-pager').innerHTML = ''; return; }
+  if (JSON.stringify(d.columns) !== JSON.stringify(S.meta.columns.map(c => c.name))) return reloadMeta();
+  Object.assign(g, {rows: d.rows, has_more: d.has_more, count: d.count, est: d.estimate, filtered: d.filtered, truncated: d.truncated});
+  g.sel.clear();
+  renderGrid();
+  renderPager();
+}
+
+function isLong(v) {
+  return v !== null && v !== undefined && (typeof v === 'object' || v.length > 80 || /[\n\r]/.test(v));
+}
+
+function cellView(v) {
+  if (v === null || v === undefined) return '<span class="dbx-null">NULL</span>';
+  if (typeof v === 'object') {
+    if ('hex' in v) {
+      const more = v.hex.length > 32 || v.len * 2 > v.hex.length;
+      return `<span class="dbx-hex">0x${esc(v.hex.slice(0, 32))}${more ? '…' : ''}</span> <span class="dbx-len">${esc(fmtN(v.len))} B</span>`;
+    }
+    if ('t' in v) return `<span class="dbx-trunc">${esc(v.t.slice(0, 80).replace(/\s+/g, ' '))}…</span> <span class="dbx-len">${esc(fmtN(v.len))}</span>`;
+    return '';
+  }
+  if (v === '') return '<span class="dbx-empty" title="Texto vacío">vacío</span>';
+  if (isLong(v)) return `<span class="dbx-trunc">${esc(v.slice(0, 80).replace(/\s+/g, ' '))}${v.length > 80 ? '…' : ''}</span>`;
+  return esc(v);
+}
+
+function renderGrid() {
+  const g = S.grid, m = S.meta, cols = m.columns, ed = m.editable, key = m.key || [];
+  const focus = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.fcol : undefined;
+  const lead = ed ? `<th class="dbx-cb"><input type="checkbox" data-act="sel-all" aria-label="Seleccionar todas" ${g.rows.length && g.sel.size === g.rows.length ? 'checked' : ''}></th><th></th>` : '';
+  const head = cols.map((c, j) => {
+    const sorted = g.sort === c.name;
+    const arrow = sorted ? (g.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="${c.sortable ? 'sortable' : ''} ${sorted ? 'sorted' : ''}" ${c.sortable ? `data-act="sort" data-c="${j}"` : ''} title="${esc(c.name + ' · ' + c.type + (c.sortable ? ' · clic para ordenar' : ''))}">${esc(c.name)}${esc(arrow)}${key.includes(c.name) ? ' <span class="dbx-pk">clave</span>' : ''}<span class="dbx-type">${esc(c.type)}</span></th>`;
+  }).join('');
+  const frow = cols.map((c, j) => {
+    const f = g.filters[c.name] || {};
+    const noval = f.op === 'null' || f.op === 'notnull';
+    return `<th><div class="dbx-fcell"><select class="input" data-act="fop" data-c="${j}" aria-label="Operador para ${esc(c.name)}">${OPS.map(([k, l]) => `<option value="${k}" ${(f.op || '') === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><input class="input" data-act="fval" data-c="${j}" data-fcol="${j}" value="${esc(f.value || '')}" placeholder="filtrar…" aria-label="Valor para ${esc(c.name)}" ${noval ? 'disabled' : ''}></div></th>`;
+  }).join('');
+  const span = cols.length + (ed ? 2 : 0);
+  const body = g.rows.length ? g.rows.map((r, i) => `<tr data-r="${i}" class="${g.sel.has(i) ? 'sel' : ''}">` +
+      (ed ? `<td class="dbx-cb"><input type="checkbox" data-act="sel" data-r="${i}" aria-label="Seleccionar fila" ${g.sel.has(i) ? 'checked' : ''}></td>
+        <td class="dbx-rowact"><button type="button" class="icon-btn" data-act="edit" data-r="${i}" title="Editar">${svg('edit')}</button><button type="button" class="icon-btn" data-act="dup" data-r="${i}" title="Duplicar">${svg('copy')}</button></td>` : '') +
+      r.map((v, j) => `<td data-act="cell" data-r="${i}" data-c="${j}" class="${isLong(v) ? 'dbx-x' : ''}">${cellView(v)}</td>`).join('') + '</tr>').join('')
+    : `<tr><td colspan="${span}" class="muted center">${g.filtered ? 'Ningún registro coincide con los filtros.' : g.page > 1 ? 'No hay más filas.' : 'La tabla está vacía.'}</td></tr>`;
+  $('g-wrap').innerHTML = `<table class="lx dbx-grid"><thead><tr>${lead}${head}</tr><tr class="dbx-filters">${ed ? '<th></th><th></th>' : ''}${frow}</tr></thead><tbody>${body}</tbody></table>`;
+  if (focus !== undefined) {
+    const el = $('g-wrap').querySelector(`input[data-fcol="${focus}"]`);
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+  $('g-clear').hidden = !activeFilters().length;
+  updateSelbar();
+}
+
+function updateSelbar() {
+  const g = S.grid;
+  $('g-selbar').hidden = !g.sel.size;
+  $('g-selcount').textContent = `${g.sel.size} fila(s) seleccionada(s)`;
+}
+
+function renderPager() {
+  const g = S.grid, total = g.count;
+  const from = g.rows.length ? (g.page - 1) * g.per + 1 : 0, to = (g.page - 1) * g.per + g.rows.length;
+  const pages = total != null ? Math.max(1, Math.ceil(total / g.per)) : null;
+  let info = g.rows.length ? `Filas ${fmtN(from)}–${fmtN(to)}` : 'Sin filas';
+  if (total != null) info += ` de ${fmtN(total)}`;
+  else if (!g.filtered && g.est != null) info += ` de ≈ ${fmtN(g.est)} (estimado)`;
+  $('g-pager').innerHTML = `<span class="small muted">${esc(info)}</span>
+    ${total == null ? '<button type="button" class="btn btn-sm" data-act="count">Contar exacto</button>' : ''}
+    ${g.truncated ? '<span class="pill warn">resultado recortado (máx. 2 MB)</span>' : ''}
+    <span class="dbx-spacer"></span>
+    <button type="button" class="btn btn-sm" data-act="page" data-p="1" ${g.page <= 1 ? 'disabled' : ''} title="Primera">«</button>
+    <button type="button" class="btn btn-sm" data-act="page" data-p="${g.page - 1}" ${g.page <= 1 ? 'disabled' : ''}>‹ Anterior</button>
+    <span class="small dbx-nowrap">Página <input class="input dbx-pageinput" data-act="goto" value="${g.page}" inputmode="numeric" aria-label="Página"> ${pages ? 'de ' + esc(fmtN(pages)) : ''}</span>
+    <button type="button" class="btn btn-sm" data-act="page" data-p="${g.page + 1}" ${g.has_more ? '' : 'disabled'}>Siguiente ›</button>
+    ${pages ? `<button type="button" class="btn btn-sm" data-act="page" data-p="${pages}" ${g.page >= pages ? 'disabled' : ''} title="Última">»</button>` : ''}`;
+}
+
+function keyOf(row) {
+  const m = S.meta;
+  if (!m.key) return null;
+  const k = {};
+  for (const name of m.key) {
+    const v = row[m.columns.findIndex(c => c.name === name)];
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'object') {
+      if (!('hex' in v)) return null;
+      k[name] = {hex: v.hex};
+    } else k[name] = v;
+  }
+  return k;
+}
+
+function hexDump(h) {
+  const out = [];
+  for (let i = 0; i < h.length; i += 32) out.push(h.slice(i, i + 32).replace(/(..)/g, '$1 ').trim());
+  return out.join('\n');
+}
+
+function openViewer(title, type, v, loader) {
+  let text, note = '';
+  if (v && typeof v === 'object') {
+    if ('hex' in v) {
+      text = hexDump(v.hex);
+      note = `${fmtN(v.len)} bytes` + (v.len * 2 > v.hex.length ? ` · se muestran los primeros ${fmtN(v.hex.length / 2)}` : '');
+    } else {
+      text = v.t;
+      note = `${fmtN(v.len)} caracteres · se muestran los primeros ${fmtN(v.t.length)}`;
+    }
+  } else text = v;
+  if (typeof text === 'string' && /^\s*[[{]/.test(text)) {
+    try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* no es JSON */ }
+  }
+  modal(`<h3><span class="mono">${esc(title)}</span> <span class="muted small mono">${esc(type || '')}</span></h3>
+    <div class="small muted" id="vw-note">${esc(note)}</div>
+    <pre class="terminal dbx-viewer" id="vw-pre"></pre>
+    <div class="form-actions">
+      ${loader && v && typeof v === 'object' ? '<button type="button" class="btn" data-act="vw-full">Cargar valor completo</button>' : ''}
+      <button type="button" class="btn" data-act="vw-copy">Copiar</button>
+      <button type="button" class="btn btn-primary" data-act="close">Cerrar</button>
+    </div>`);
+  $('vw-pre').textContent = text;
+  M.act = async (act, b) => {
+    if (act === 'vw-copy') {
+      try { await navigator.clipboard.writeText($('vw-pre').textContent); ui.toast('Copiado'); }
+      catch (e) { window.getSelection().selectAllChildren($('vw-pre')); ui.toast('Selecciona y copia con Ctrl+C', 'info'); }
+    } else if (act === 'vw-full') {
+      b.disabled = true;
+      const d = await loader();
+      if (!d.ok) { b.disabled = false; return ui.alert(d.error, {title: 'No se pudo cargar', icon: 'error'}); }
+      $('vw-pre').textContent = d.hex ? hexDump((d.value || '').toLowerCase()) : d.value;
+      $('vw-note').textContent = `${fmtN(d.len)} ${d.hex ? 'bytes' : 'caracteres'}` + (d.complete ? '' : ' · valor recortado a 256 KB');
+      b.remove();
+    }
+  };
+}
+
+function cellLoader(row, col) {
+  const key = keyOf(row);
+  return key ? () => postJSON(api('cell'), {...loc(), col, key}) : null;
+}
+
+// ── Formulario de fila (editar / insertar / duplicar) ──────────────
+function normVal(c, v) {
+  if (c.kind === 'bool' && (v === 't' || v === 'f')) return v === 't' ? 'true' : 'false';
+  return v;
+}
+
+function fieldHtml(c, j, mode, v) {
+  const id = 'rf' + j;
+  const label = `<label class="dbx-flabel" for="${id}"><b class="mono">${esc(c.name)}</b><span class="dbx-type">${esc(c.type)}${c.nullable ? '' : ' · NOT NULL'}${c.extra ? ' · ' + esc(c.extra) : ''}</span></label>`;
+  if (!c.editable) {
+    return `<div class="dbx-field" data-j="${j}" data-skip="1">${label}<div class="small muted">No editable (${esc(c.generated ? 'columna generada' : c.kind === 'geo' ? 'dato espacial' : 'identidad ALWAYS')}).</div><div></div></div>`;
+  }
+  if (mode === 'dup' && c.kind === 'bin' && v && typeof v === 'object' && v.len * 2 > v.hex.length) {
+    return `<div class="dbx-field" data-j="${j}" data-skip="1">${label}<div class="small muted">Binario de ${esc(fmtN(v.len))} bytes: no se duplica (queda el valor predeterminado).</div><div></div></div>`;
+  }
+  if (v && typeof v === 'object' && 'big' in v) {
+    return `<div class="dbx-field" data-j="${j}" data-skip="1">${label}<div class="small muted">Valor de ${esc(fmtN(v.big))} caracteres: demasiado grande para editarlo aquí (usa la consola SQL).</div><div></div></div>`;
+  }
+  const isNull = v === null && mode !== 'insert';
+  const defOn = mode === 'insert' ? (c.auto || c.default !== null || c.nullable) : mode === 'dup' ? c.auto : false;
+  const showDef = mode !== 'edit' && (c.auto || c.default !== null || c.nullable);
+  const dis = isNull || (showDef && defOn) ? 'disabled' : '';
+  const sv = v === null || v === undefined || typeof v === 'object' ? '' : String(normVal(c, v));
+  let input;
+  if (c.kind === 'bin') {
+    const cur = v && typeof v === 'object' && 'hex' in v ? `binario, ${fmtN(v.len)} bytes` : '';
+    input = (mode === 'edit' && v !== null ? `<label class="dbx-check"><input type="checkbox" data-role="rep"> Reemplazar (${esc(cur)})</label>` : '') +
+      `<textarea class="input mono" id="${id}" data-role="val" rows="2" placeholder="Hexadecimal, p.ej. 0x48656c6c6f" ${dis || (mode === 'edit' && v !== null ? 'disabled' : '')}>${mode === 'dup' && v && v.hex && v.len * 2 === v.hex.length ? esc(v.hex) : ''}</textarea>`;
+  } else if ((c.kind === 'enum' || (c.values && c.values.length)) && c.kind !== 'set') {
+    const vals = c.values || [];
+    input = `<select class="input" id="${id}" data-role="val" ${dis}>${['', ...vals].map(o => `<option value="${esc(o)}" ${o === sv ? 'selected' : ''}>${esc(o === '' ? '(vacío)' : o)}</option>`).join('')}</select>`;
+  } else if (c.kind === 'bool') {
+    input = `<select class="input" id="${id}" data-role="val" ${dis}>${['true', 'false'].map(o => `<option ${o === sv ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  } else if (['json', 'array', 'other', 'set'].includes(c.kind) || /text|blob|json|xml/.test(c.data_type || '') || (c.maxlen || 0) > 255 || sv.length > 100 || /[\n\r]/.test(sv)) {
+    input = `<textarea class="input mono" id="${id}" data-role="val" rows="${c.kind === 'json' ? 6 : 3}" ${dis}>${esc(sv)}</textarea>`;
+  } else if (c.kind === 'date' && (sv === '' || /^\d{4}-\d{2}-\d{2}$/.test(sv)) && !sv.startsWith('0000')) {
+    input = `<input class="input" type="date" id="${id}" data-role="val" value="${esc(sv)}" ${dis}>`;
+  } else {
+    const ph = {datetime: 'AAAA-MM-DD hh:mm:ss', time: 'hh:mm:ss', int: 'número entero', num: 'número', bit: 'bits, p.ej. 101'}[c.kind] || '';
+    input = `<input class="input ${isNum(c.kind) ? 'mono' : ''}" type="text" id="${id}" data-role="val" value="${esc(sv)}" placeholder="${esc(ph)}" ${isNum(c.kind) ? 'inputmode="decimal"' : ''} ${dis} autocomplete="off">`;
+  }
+  const checks = (showDef ? `<label class="dbx-check" title="${esc(c.auto ? 'Lo asigna el motor' : c.default !== null ? 'Predeterminado: ' + c.default : 'NULL')}"><input type="checkbox" data-role="def" ${defOn ? 'checked' : ''}> Predeterminado</label>` : '') +
+    (c.nullable ? `<label class="dbx-check"><input type="checkbox" data-role="null" ${isNull ? 'checked' : ''} ${showDef && defOn ? 'disabled' : ''}> NULL</label>` : '');
+  return `<div class="dbx-field" data-j="${j}">${label}<div>${input}</div><div class="dbx-fchecks">${checks}</div></div>`;
+}
+
+function syncField(f) {
+  const def = f.querySelector('[data-role=def]'), nul = f.querySelector('[data-role=null]');
+  const rep = f.querySelector('[data-role=rep]'), val = f.querySelector('[data-role=val]');
+  const defOn = def && def.checked;
+  if (nul) nul.disabled = !!defOn;
+  if (val) val.disabled = !!defOn || (nul && nul.checked) || (rep && !rep.checked);
+}
+
+async function openRowForm(mode, i) {
+  const m = S.meta, g = S.grid, row = i != null ? g.rows[i] : null;
+  const vals = row ? row.slice() : m.columns.map(() => undefined);
+  if (row) {
+    const key = keyOf(row);
+    for (const [j, c] of m.columns.entries()) {
+      const v = vals[j];
+      if (v && typeof v === 'object' && 't' in v) {
+        const d = key ? await postJSON(api('cell'), {...loc(), col: c.name, key}) : {ok: false};
+        vals[j] = d.ok && d.complete ? d.value : {big: v.len};
+      }
+    }
+  }
+  const orig = vals.map((v, j) => normVal(m.columns[j], v));
+  const title = {edit: 'Editar fila', insert: 'Insertar fila', dup: 'Duplicar fila'}[mode];
+  modal(`<h3>${esc(title)} · <span class="mono">${esc(S.table)}</span></h3>
+    <div class="dbx-rowform" id="rf">${m.columns.map((c, j) => fieldHtml(c, j, mode, vals[j])).join('')}</div>
+    <div class="dlg-error" id="rf-err" hidden></div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-act="close">Cancelar</button>
+      <button type="button" class="btn btn-primary" data-act="rf-save">${mode === 'edit' ? 'Guardar cambios' : 'Insertar'}</button>
+    </div>`);
+  M.change = e => { const f = e.target.closest('.dbx-field'); if (f) syncField(f); };
+  M.act = async (act, b) => {
+    if (act !== 'rf-save') return;
+    const err = $('rf-err');
+    let values;
+    try { values = collectRow(mode, orig); } catch (e) { err.textContent = e.message; err.hidden = false; return; }
+    if (mode === 'edit' && !Object.keys(values).length) { closeModal(); return ui.toast('Sin cambios', 'info'); }
+    b.disabled = true;
+    const d = await postJSON(api('row/save'), {...loc(), key: mode === 'edit' ? keyOf(row) : null, values});
+    b.disabled = false;
+    if (!d.ok) { err.textContent = d.error || 'Error desconocido'; err.hidden = false; return; }
+    closeModal();
+    ui.toast(d.note || (mode === 'edit' ? 'Fila actualizada' : 'Fila insertada'), d.note ? 'info' : 'success');
+    loadRows();
+  };
+}
+
+function collectRow(mode, orig) {
+  const out = {};
+  for (const f of document.querySelectorAll('#rf .dbx-field')) {
+    if (f.dataset.skip) continue;
+    const j = +f.dataset.j, c = S.meta.columns[j];
+    const def = f.querySelector('[data-role=def]'), nul = f.querySelector('[data-role=null]');
+    const rep = f.querySelector('[data-role=rep]'), val = f.querySelector('[data-role=val]');
+    if (def && def.checked) continue;
+    let v;
+    if (nul && nul.checked) v = null;
+    else if (c.kind === 'bin') {
+      if (rep && !rep.checked) continue;
+      const hex = val.value.replace(/\s+/g, '').replace(/^0x/i, '');
+      if (!/^([0-9a-fA-F]{2})*$/.test(hex)) throw new Error(`${c.name}: hexadecimal inválido (pares de 0-9 y a-f)`);
+      v = {hex};
+    } else v = val.value;
+    if (mode === 'edit' && (c.kind !== 'bin' || v === null) && v === orig[j]) continue;
+    if (v === '' && isNum(c.kind)) throw new Error(`${c.name}: escribe un número${c.nullable ? ' o marca NULL' : ''}`);
+    out[c.name] = v;
+  }
+  return out;
+}
+
+async function deleteSelected() {
+  const g = S.grid;
+  const keys = [...g.sel].map(i => keyOf(g.rows[i])).filter(Boolean);
+  if (!keys.length) return;
+  const n = keys.length;
+  const ok = await ui.confirm(`Se eliminarán ${n} fila(s) de ${S.table}. Esta acción no se puede deshacer.`,
+    {title: 'Eliminar filas', danger: true, confirmText: 'Eliminar', typed: n > 10 ? 'ELIMINAR' : undefined});
+  if (!ok) return;
+  const d = await postJSON(api('row/delete'), {...loc(), keys});
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudieron eliminar', icon: 'error'});
+  ui.toast(`${d.deleted} fila(s) eliminada(s)` + (d.missing ? ` · ${d.missing} ya no existían` : ''), d.missing ? 'warning' : 'success');
+  loadRows();
+}
+
+// ── Estructura ─────────────────────────────────────────────────────
+function viewStructure(v) {
+  const m = S.meta, can = m.writable && m.type === 'table';
+  const cols = m.columns.map((c, j) => `<tr>
+      <td class="muted small">${j + 1}</td>
+      <td class="mono"><b>${esc(c.name)}</b>${(m.key || []).includes(c.name) ? ' <span class="dbx-pk">clave</span>' : ''}</td>
+      <td class="mono small">${esc(c.type)}</td>
+      <td>${c.nullable ? 'sí' : '<span class="muted">no</span>'}</td>
+      <td class="mono small dbx-ellipsis" title="${esc(c.default ?? '')}">${c.default === null ? '<span class="dbx-null">ninguno</span>' : esc(c.default)}</td>
+      <td class="small">${esc(c.key)}</td>
+      <td class="small">${esc(c.extra)}</td>
+      <td class="small muted dbx-ellipsis" title="${esc(c.comment)}">${esc(c.comment)}</td>
+      <td class="right dbx-nowrap">${can ? `<button type="button" class="btn btn-sm" data-act="col-edit" data-c="${j}">Modificar</button>
+        <button type="button" class="btn btn-sm btn-danger" data-act="col-drop" data-c="${j}">Eliminar</button>` : ''}</td></tr>`).join('');
+  const idx = m.indexes.map((ix, k) => `<tr>
+      <td class="mono">${esc(ix.name)}</td>
+      <td class="mono small">${esc(ix.columns.join(', '))}</td>
+      <td>${ix.primary ? '<span class="pill ok">PRIMARY</span>' : ix.unique ? '<span class="pill warn">UNIQUE</span>' : '<span class="pill mute">INDEX</span>'} <span class="small muted">${esc(ix.type || '')}</span></td>
+      <td class="right">${can ? `<button type="button" class="btn btn-sm btn-danger" data-act="idx-drop" data-k="${k}">Eliminar</button>` : ''}</td></tr>`).join('');
+  const fks = m.fks.map(f => `<tr>
+      <td class="mono">${esc(f.name)}</td>
+      <td class="mono small">${esc(f.columns.join(', '))}</td>
+      <td class="mono small"><a href="#" data-act="goto-table" data-db="${esc(f.ref_db || S.db)}" data-schema="${esc(f.ref_schema || '')}" data-table="${esc(f.ref_table)}">${esc((f.ref_schema && f.ref_schema !== S.schema ? f.ref_schema + '.' : (f.ref_db && f.ref_db !== S.db ? f.ref_db + '.' : '')) + f.ref_table)}</a> (${esc(f.ref_columns.join(', '))})</td>
+      <td class="small">${esc(f.on_update || '')}</td><td class="small">${esc(f.on_delete || '')}</td></tr>`).join('');
+  const inf = m.info;
+  v.innerHTML = `<div class="card">
+      <div class="card-head"><h3>Columnas</h3>${can ? '<button type="button" class="btn btn-primary btn-sm" data-act="col-add">+ Agregar columna</button>' : ''}</div>
+      ${!m.writable ? flash(m.readonly_reason, 'info') : m.type !== 'table' ? flash('Es una vista: su estructura se define con SQL (consola).', 'info') : ''}
+      <div class="table-wrap"><table class="lx"><thead><tr><th>#</th><th>Nombre</th><th>Tipo</th><th>Nulo</th><th>Predeterminado</th><th>Clave</th><th>Extra</th><th>Comentario</th><th></th></tr></thead><tbody>${cols}</tbody></table></div>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Índices</h3>${can ? '<button type="button" class="btn btn-sm" data-act="idx-add">+ Agregar índice</button>' : ''}</div>
+        ${m.indexes.length ? `<div class="table-wrap"><table class="lx"><thead><tr><th>Nombre</th><th>Columnas</th><th>Tipo</th><th></th></tr></thead><tbody>${idx}</tbody></table></div>` : '<div class="empty">Sin índices.</div>'}
+      </div>
+      <div class="card">
+        <h3>Información</h3>
+        <dl class="dbx-kv">
+          <dt>Tipo</dt><dd>${esc({table: 'tabla', view: 'vista', matview: 'vista materializada', foreign: 'tabla externa'}[m.type] || m.type)}</dd>
+          ${inf.engine ? `<dt>Motor</dt><dd>${esc(inf.engine)}</dd>` : ''}
+          ${inf.collation ? `<dt>Cotejamiento</dt><dd class="mono">${esc(inf.collation)}</dd>` : ''}
+          <dt>Filas (aprox.)</dt><dd>${esc(fmtN(inf.rows_est))}</dd>
+          <dt>Tamaño</dt><dd>${esc(inf.size_h || '—')}</dd>
+          ${inf.auto_increment ? `<dt>Siguiente AUTO_INCREMENT</dt><dd>${esc(inf.auto_increment)}</dd>` : ''}
+          <dt>Clave de fila</dt><dd>${m.key ? esc(m.key.join(', ')) + ` <span class="small muted">(${m.key_kind === 'primary' ? 'primaria' : 'índice único'})</span>` : '<span class="muted">ninguna (datos de solo lectura)</span>'}</dd>
+          ${inf.comment ? `<dt>Comentario</dt><dd>${esc(inf.comment)}</dd>` : ''}
+        </dl>
+      </div>
+    </div>
+    <div class="card"><h3>Claves foráneas</h3>
+      ${m.fks.length ? `<div class="table-wrap"><table class="lx"><thead><tr><th>Nombre</th><th>Columnas</th><th>Referencia</th><th>ON UPDATE</th><th>ON DELETE</th></tr></thead><tbody>${fks}</tbody></table></div>` : '<div class="empty">Sin claves foráneas.</div>'}
+    </div>`;
+}
+
+function typeInfo(name) {
+  return (TYPES[S.engine] || []).find(t => t[0] === name) || null;
+}
+
+function colFormHtml(c, mode) {
+  const my = S.engine === 'mysql';
+  const spec = c ? {name: c.name, type: c.base || '__keep__', length: c.base ? (c.length || '') : '', unsigned: c.unsigned,
+                    nullable: c.nullable, def: c.default_form || {kind: 'none'}, auto: c.auto, comment: c.comment, values: c.values || []}
+                 : {name: '', type: my ? 'VARCHAR' : 'text', length: my ? '255' : '', unsigned: false, nullable: true,
+                    def: {kind: 'none'}, auto: false, comment: '', values: []};
+  const types = (TYPES[S.engine] || []).map(([t]) => `<option ${t === spec.type ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  const keep = c ? `<option value="__keep__" ${spec.type === '__keep__' ? 'selected' : ''}>(mantener: ${esc(c.type)})</option>` : '';
+  const defKinds = [['none', 'Sin valor por defecto'], ['null', 'NULL'], ['value', 'Valor…'], ['expr', 'Expresión…']];
+  if (spec.def.kind === 'keep') defKinds.unshift(['keep', 'Mantener: ' + spec.def.value]);
+  const pos = my && mode === 'add' ? `<label class="form-row"><span>Posición</span><select class="input" id="cf-pos"><option value="">Al final</option><option value="first">Al principio</option>${S.meta.columns.map(x => `<option value="after:${esc(x.name)}">Después de ${esc(x.name)}</option>`).join('')}</select></label>` : '';
+  const autoLbl = my ? 'AUTO_INCREMENT' : 'Identidad (GENERATED BY DEFAULT AS IDENTITY)';
+  const showAuto = my || mode === 'add';
+  return `<div class="grid grid-2 dbx-cf">
+      <label class="form-row"><span>Nombre</span><input class="input mono" id="cf-name" value="${esc(spec.name)}" maxlength="63" autocomplete="off" spellcheck="false"></label>
+      <label class="form-row"><span>Tipo</span><select class="input" id="cf-type">${keep}${types}</select></label>
+      <label class="form-row" id="cf-len-row"><span id="cf-len-lbl">Longitud</span><input class="input mono" id="cf-len" value="${esc(spec.length)}" autocomplete="off"></label>
+      <label class="form-row" id="cf-vals-row"><span>Valores permitidos (uno por línea)</span><textarea class="input mono" id="cf-vals" rows="3">${esc(spec.values.join('\n'))}</textarea></label>
+      <label class="form-row"><span>Valor por defecto</span><select class="input" id="cf-defk">${defKinds.map(([k, l]) => `<option value="${k}" ${k === spec.def.kind ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label class="form-row" id="cf-defv-row"><span>Valor</span><input class="input mono" id="cf-defv" value="${esc(spec.def.kind === 'value' ? spec.def.value : '')}" autocomplete="off"></label>
+      <label class="form-row" id="cf-defx-row"><span>Expresión</span><select class="input" id="cf-defx">${(EXPRS[S.engine] || []).map(x => `<option ${spec.def.kind === 'expr' && spec.def.value === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
+      <label class="form-row"><span>Comentario</span><input class="input" id="cf-comment" value="${esc(spec.comment)}" maxlength="1024" autocomplete="off"></label>
+      ${pos}
+    </div>
+    <div class="dbx-checks">
+      <label class="dbx-check"><input type="checkbox" id="cf-null" ${spec.nullable ? 'checked' : ''}> Permite NULL</label>
+      ${my ? `<label class="dbx-check" id="cf-uns-row"><input type="checkbox" id="cf-uns" ${spec.unsigned ? 'checked' : ''}> UNSIGNED</label>` : ''}
+      ${showAuto ? `<label class="dbx-check" id="cf-auto-row"><input type="checkbox" id="cf-auto" ${spec.auto ? 'checked' : ''}> ${esc(autoLbl)}</label>` : ''}
+    </div>`;
+}
+
+function syncColForm() {
+  const ti = typeInfo($('cf-type').value), param = ti ? ti[2] : null, kind = ti ? ti[1] : null;
+  const lenParam = ['len', 'len?', 'prec', 'fsp'].includes(param);
+  $('cf-len-row').hidden = !lenParam;
+  $('cf-len-lbl').textContent = {len: 'Longitud (obligatoria)', 'len?': 'Longitud (opcional)', prec: 'Precisión (p o p,s; p.ej. 10,2)', fsp: 'Decimales de segundo (0-6, opcional)'}[param] || 'Longitud';
+  $('cf-vals-row').hidden = param !== 'values';
+  if ($('cf-uns-row')) $('cf-uns-row').hidden = !(kind === 'int' || kind === 'num');
+  if ($('cf-auto-row')) $('cf-auto-row').hidden = !(kind === 'int' || $('cf-type').value === '__keep__');
+  const k = $('cf-defk').value;
+  $('cf-defv-row').hidden = k !== 'value';
+  $('cf-defx-row').hidden = k !== 'expr';
+}
+
+function readColForm() {
+  const k = $('cf-defk').value;
+  const def = k === 'value' ? {kind: k, value: $('cf-defv').value} : k === 'expr' ? {kind: k, value: $('cf-defx').value} : {kind: k};
+  const ti = typeInfo($('cf-type').value);
+  return {
+    name: $('cf-name').value.trim(), type: $('cf-type').value,
+    length: ti && ['len', 'len?', 'prec', 'fsp'].includes(ti[2]) ? $('cf-len').value.trim() : '',
+    values: ti && ti[2] === 'values' ? $('cf-vals').value.split('\n').map(s => s.trim()).filter(Boolean) : undefined,
+    unsigned: !!($('cf-uns') && $('cf-uns').checked && !$('cf-uns-row').hidden),
+    nullable: $('cf-null').checked, default: def,
+    auto: !!($('cf-auto') && $('cf-auto').checked && !$('cf-auto-row').hidden),
+    comment: $('cf-comment').value,
+  };
+}
+
+function openColForm(mode, j) {
+  const c = mode === 'edit' ? S.meta.columns[j] : null;
+  modal(`<h3>${mode === 'edit' ? 'Modificar columna' : 'Agregar columna'} · <span class="mono">${esc(S.table)}</span></h3>
+    ${colFormHtml(c, mode === 'edit' ? 'edit' : 'add')}
+    <p class="small muted">Antes de ejecutar verás el SQL exacto que se aplicará.</p>
+    <div class="form-actions"><button type="button" class="btn" data-act="close">Cancelar</button>
+      <button type="button" class="btn btn-primary" data-act="cf-save">Vista previa y aplicar…</button></div>`);
+  syncColForm();
+  M.change = syncColForm;
+  M.act = async act => {
+    if (act !== 'cf-save') return;
+    const spec = readColForm();
+    const body = mode === 'edit' ? {op: 'modify_column', column: c.name, spec}
+      : {op: 'add_column', column: spec, position: $('cf-pos') ? $('cf-pos').value : ''};
+    const d = await runDdl(body, {title: mode === 'edit' ? 'Modificar columna' : 'Agregar columna'});
+    if (d) { closeModal(); reloadMeta(); }
+  };
+}
+
+function openIndexForm() {
+  const my = S.engine === 'mysql', hasPk = S.meta.indexes.some(i => i.primary);
+  const order = [];
+  modal(`<h3>Agregar índice · <span class="mono">${esc(S.table)}</span></h3>
+    <div class="grid grid-2">
+      <label class="form-row"><span>Tipo</span><select class="input" id="ix-kind"><option value="index">INDEX</option><option value="unique">UNIQUE</option>${hasPk ? '' : '<option value="primary">PRIMARY KEY</option>'}${my ? '<option value="fulltext">FULLTEXT</option>' : ''}</select></label>
+      <label class="form-row"><span>Nombre (opcional)</span><input class="input mono" id="ix-name" maxlength="63" autocomplete="off" placeholder="automático"></label>
+    </div>
+    <div class="form-row"><span>Columnas (en el orden en que las marques)</span>
+      <div class="dbx-colpick">${S.meta.columns.map((c, j) => `<label class="dbx-check"><input type="checkbox" data-ix="${j}"> <span class="mono">${esc(c.name)}</span> <span class="dbx-type">${esc(c.type)}</span> <b class="dbx-ord" id="ix-o${j}"></b></label>`).join('')}</div></div>
+    ${my ? '<p class="small muted">Las columnas TEXT/BLOB se indexan por sus primeros 191 caracteres.</p>' : ''}
+    <div class="form-actions"><button type="button" class="btn" data-act="close">Cancelar</button>
+      <button type="button" class="btn btn-primary" data-act="ix-save">Vista previa y crear…</button></div>`);
+  M.change = e => {
+    const j = e.target.dataset.ix;
+    if (j === undefined) return;
+    const k = order.indexOf(+j);
+    if (e.target.checked && k < 0) order.push(+j);
+    if (!e.target.checked && k >= 0) order.splice(k, 1);
+    S.meta.columns.forEach((_, x) => { $('ix-o' + x).textContent = order.includes(x) ? String(order.indexOf(x) + 1) : ''; });
+  };
+  M.act = async act => {
+    if (act !== 'ix-save') return;
+    if (!order.length) return ui.alert('Marca al menos una columna.', {icon: 'warning'});
+    const d = await runDdl({op: 'add_index', kind: $('ix-kind').value, name: $('ix-name').value.trim(),
+                            columns: order.map(x => S.meta.columns[x].name)}, {title: 'Crear índice'});
+    if (d) { closeModal(); reloadMeta(); }
+  };
+}
+
+async function runDdl(body, {title, danger = false, typed, after} = {}) {
+  const base = {...loc(), ...body};
+  const pre = await postJSON(api('ddl'), {...base, dry_run: true});
+  if (!pre.ok) { await ui.alert(pre.error || 'Error desconocido', {title: 'No se puede aplicar', icon: 'error'}); return null; }
+  if (!await ui.confirm(pre.sql, {title: title + ': se ejecutará este SQL', danger, typed, confirmText: 'Ejecutar'})) return null;
+  const d = await postJSON(api('ddl'), base);
+  if (!d.ok) { await ui.alert(d.error || 'Error desconocido', {title: 'El servidor rechazó la operación', icon: 'error'}); return null; }
+  ui.toast('Operación aplicada');
+  if (d.output) await ui.alert(d.output, {title: 'Resultado'});
+  invalidateTables();
+  if (after) await after(d);
+  return d;
+}
+
+// ── Consola SQL ────────────────────────────────────────────────────
+const histKey = () => `dbx-hist:${S.engine}:${S.db}`;
+function history_() {
+  try { return JSON.parse(localStorage.getItem(histKey()) || '[]').filter(x => typeof x === 'string'); } catch (e) { return []; }
+}
+function saveHistory(sql) {
+  const h = [sql, ...history_().filter(x => x !== sql)].slice(0, 30);
+  try { localStorage.setItem(histKey(), JSON.stringify(h)); } catch (e) { /* almacenamiento lleno o desactivado */ }
+}
+function histOptions() {
+  return '<option value="">Historial…</option>' + history_().map((s, i) => `<option value="${i}">${esc(s.replace(/\s+/g, ' ').slice(0, 90))}</option>`).join('');
+}
+
+function viewConsole(v) {
+  const scope = `${S.db}${S.engine === 'pg' ? ' · ' + S.schema : ''}`;
+  const ro = S.meta ? S.meta.readonly_reason : dbReadonly();
+  const draftKey = `${S.engine}|${S.db}|${S.schema}|${S.table || ''}`;
+  const prefill = S.table ? `SELECT * FROM ${qid(S.table)} LIMIT 100` : '';
+  v.innerHTML = `<div class="card">
+    <div class="toolbar dbx-toolbar">
+      <button type="button" class="btn btn-primary" data-act="q-run">Ejecutar</button>
+      <select class="input dbx-hist" data-act="q-hist" id="q-hist" aria-label="Historial">${histOptions()}</select>
+      <button type="button" class="btn" data-act="q-export" id="q-export" disabled>Exportar resultado (CSV)</button>
+      <span class="small muted">Ctrl+Enter · en <b class="mono">${esc(scope)}</b> · máx. 1000 filas / 2 MB / 60 s${ro ? ' · <span class="pill mute">solo lectura</span>' : ''}</span>
+    </div>
+    <textarea class="input dbx-sql" id="q-sql" spellcheck="false" placeholder="SELECT …"></textarea>
+    <div id="q-out" class="dbx-qout"></div></div>`;
+  $('q-sql').value = S.sqlDraft[draftKey] ?? prefill;
+  $('q-sql').addEventListener('input', () => { S.sqlDraft[draftKey] = $('q-sql').value; });
+  $('q-sql').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
+  });
+  if (S.qres) renderQuery(S.qres);
+}
+
+async function runQuery() {
+  const sql = $('q-sql').value;
+  if (!sql.trim()) return;
+  saveHistory(sql);
+  $('q-hist').innerHTML = histOptions();
+  $('q-out').innerHTML = '<div class="muted small">Ejecutando…</div>';
+  const tok = S.nav;
+  const d = await postJSON(api('query'), {db: S.db, schema: S.schema || '', sql});
+  if (tok !== S.nav || !$('q-out')) return;
+  S.qres = d;
+  renderQuery(d);
+  if (/\b(create|drop|alter|rename|truncate)\b/i.test(sql) && d.ok) {
+    invalidateTables();
+    if (S.table) S.meta = null;
+    await ensureOpen(S.db, S.schema);
+    renderTree();
+  }
+}
+
+function resultGrid(cols, rows, b) {
+  return `<div class="table-wrap dbx-gridwrap"><table class="lx dbx-grid"><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>` +
+    (rows.length ? rows.map((r, i) => `<tr>${r.map((v, j) => `<td data-act="qcell" data-b="${b}" data-r="${i}" data-c="${j}" class="${isLong(v) ? 'dbx-x' : ''}">${cellView(v)}</td>`).join('')}</tr>`).join('')
+      : `<tr><td colspan="${cols.length || 1}" class="muted center">0 filas</td></tr>`) + '</tbody></table></div>';
+}
+
+function renderQuery(d) {
+  const res = d.results || [];
+  let html = `<div class="small muted dbx-qinfo">${d.time_ms != null ? esc(fmtN(d.time_ms)) + ' ms · ' : ''}${res.length} de ${d.total || res.length} sentencia(s) ejecutada(s)${d.truncated ? ' · <span class="pill warn">salida recortada (2 MB)</span>' : ''}</div>`;
+  if (d.error) html += flash(d.error);
+  res.forEach((r, b) => {
+    html += `<div class="dbx-qblock"><div class="dbx-qhead mono small" title="${esc(r.sql)}">${esc(r.sql.replace(/\s+/g, ' ').slice(0, 160))}</div>`;
+    if (r.columns && r.columns.length) {
+      html += `<div class="small muted">${r.rows.length} fila(s)${r.truncated ? ' · <span class="pill warn">se muestran las primeras 1000</span>' : ''}</div>` + resultGrid(r.columns, r.rows, b);
+    } else if (r.output) {
+      html += `<pre class="terminal output">${esc(r.output)}</pre>`;
+    } else if (r.rows && !r.rows.length && r.affected == null) {
+      html += '<div class="small muted">Consulta ejecutada (0 filas o sin resultado).</div>';
+    }
+    if (r.affected != null) html += `<div class="small"><span class="pill ok">${esc(fmtN(r.affected))} fila(s) afectada(s)</span></div>`;
+    html += '</div>';
+  });
+  $('q-out').innerHTML = html;
+  $('q-export').disabled = !res.some(r => r.columns && r.columns.length);
+}
+
+function exportQuery() {
+  const r = (S.qres && S.qres.results || []).filter(x => x.columns && x.columns.length).pop();
+  if (!r) return;
+  download(`${S.db}-consulta-${stamp()}.csv`, toCSV(r.columns, r.rows), 'text/csv;charset=utf-8');
+}
+
+// ── Operaciones ────────────────────────────────────────────────────
+function viewOps(v) {
+  const m = S.meta, my = S.engine === 'mysql', isT = m.type === 'table';
+  if (!m.writable) { v.innerHTML = `<div class="card">${flash(m.readonly_reason, 'info')}</div>`; return; }
+  const maint = my ? [['optimize', 'OPTIMIZE TABLE', 'Reorganiza el almacenamiento y recupera espacio.'], ['analyze', 'ANALYZE TABLE', 'Actualiza las estadísticas (y el número estimado de filas).']]
+                   : [['vacuum', 'VACUUM (ANALYZE)', 'Recupera espacio de filas borradas y actualiza estadísticas.'], ['analyze', 'ANALYZE', 'Actualiza las estadísticas (y el número estimado de filas).']];
+  v.innerHTML = `<div class="grid grid-2">
+    <div class="card"><h3>Renombrar ${isT ? 'tabla' : 'vista'}</h3>
+      <div class="toolbar"><input class="input mono" id="op-rename" value="${esc(m.name)}" maxlength="63" autocomplete="off" spellcheck="false">
+        <button type="button" class="btn" data-act="op-rename">Renombrar…</button></div>
+      <p class="small muted">Solo letras, números y _ (empieza con letra o _). Revisa vistas, código y permisos que usen el nombre anterior.</p></div>
+    ${isT ? `<div class="card"><h3>Copiar tabla</h3>
+      <div class="toolbar"><input class="input mono" id="op-copy" value="${esc(m.name)}_copia" maxlength="63" autocomplete="off" spellcheck="false">
+        <button type="button" class="btn" data-act="op-copy">Copiar…</button></div>
+      <div class="dbx-checks"><label class="dbx-check"><input type="radio" name="op-copy-mode" value="0"> Solo estructura</label>
+        <label class="dbx-check"><input type="radio" name="op-copy-mode" value="1" checked> Estructura y datos</label></div>
+      <p class="small muted">${my ? 'Copia columnas, índices y claves (CREATE TABLE … LIKE); las claves foráneas no se copian.' : 'Copia columnas, valores por defecto, restricciones e índices (LIKE … INCLUDING ALL). Las columnas serial siguen usando la secuencia original.'}</p></div>
+    <div class="card"><h3>Mantenimiento</h3>
+      ${maint.map(([a, l, t]) => `<div class="dbx-oprow"><button type="button" class="btn" data-act="op-maint" data-a="${a}">${esc(l)}</button><span class="small muted">${esc(t)}</span></div>`).join('')}</div>` : ''}
+    <div class="card dbx-danger"><h3>Zona peligrosa</h3>
+      ${isT ? `<div class="dbx-oprow"><button type="button" class="btn btn-danger" data-act="op-truncate">Vaciar tabla (TRUNCATE)…</button><span class="small muted">Borra todas las filas y reinicia el contador; conserva la estructura.</span></div>` : ''}
+      <div class="dbx-oprow"><button type="button" class="btn btn-danger" data-act="op-drop">Eliminar ${isT ? 'tabla' : 'vista'}…</button><span class="small muted">Borra ${isT ? 'la tabla con todos sus datos' : 'la vista'}. No se puede deshacer.</span></div>
+    </div></div>`;
+}
+
+async function truncateTable(table) {
+  return runDdl({op: 'truncate', table, confirm: table}, {title: `Vaciar ${table}`, danger: true, typed: table});
+}
+async function dropTable(table) {
+  return runDdl({op: 'drop_table', table, confirm: table}, {title: `Eliminar ${table}`, danger: true, typed: table});
+}
+
+// ── Exportar / importar ────────────────────────────────────────────
+function viewIO(v) {
+  const m = S.meta;
+  const href = f => esc(api('export', {db: S.db, schema: S.schema || '', table: m.name, format: f}));
+  const canImport = m.writable && m.type === 'table';
+  v.innerHTML = `<div class="card"><h3>Exportar <span class="mono">${esc(m.name)}</span></h3>
+      <div class="toolbar">
+        <a class="btn" href="${href('sql')}">SQL (.sql.gz)</a>
+        <a class="btn" href="${href('csv')}">CSV</a>
+        <a class="btn" href="${href('json')}">JSON</a>
+      </div>
+      <p class="small muted">Se exporta la tabla completa en streaming. En CSV, NULL es un campo vacío y el texto vacío va entre comillas (<span class="mono">""</span>); los binarios van en hexadecimal. Para exportar el resultado de una consulta usa la pestaña <b>SQL</b>.</p>
+    </div>
+    <div class="card"><h3>Importar CSV en <span class="mono">${esc(m.name)}</span></h3>
+      ${canImport ? `<div class="toolbar">
+          <input type="file" id="imp-file" accept=".csv,.tsv,.txt,text/csv">
+          <label class="small muted">Codificación <select class="input" id="imp-enc"><option value="utf-8">UTF-8</option><option value="latin-1">Latin-1 (Windows)</option></select></label>
+          <button type="button" class="btn" data-act="imp-preview">Vista previa</button>
+        </div>
+        <p class="small muted">Máximo 100 MB. Todo se inserta en una sola transacción: si una fila falla, no se inserta ninguna.</p>
+        <div id="imp-box"></div>` : flash(m.readonly_reason || 'Solo se puede importar en tablas.', 'info')}
+    </div>`;
+  if (canImport && S.imp) renderImport();
+}
+
+async function importPreview(delimiter) {
+  const file = S.imp && !$('imp-file').files[0] ? S.imp.file : $('imp-file').files[0];
+  if (!file) return ui.alert('Elige un archivo CSV.', {icon: 'warning'});
+  if (file.size > 100 * 1024 * 1024) return ui.alert('El archivo supera 100 MB.', {title: 'Archivo demasiado grande', icon: 'warning'});
+  const fd = new FormData();
+  fd.append('file', file.slice(0, 256 * 1024), 'vista.csv');
+  fd.append('encoding', $('imp-enc').value);
+  fd.append('partial', file.size > 256 * 1024 ? '1' : '0');
+  if (delimiter) fd.append('delimiter', delimiter);
+  const d = await postForm(api('import/preview'), fd);
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudo leer el archivo', icon: 'error'});
+  const cols = S.meta.columns.filter(c => c.editable);
+  const first = d.rows[0] || [];
+  const byName = name => cols.find(c => c.name.toLowerCase() === String(name).trim().toLowerCase());
+  const header = first.length > 0 && first.filter(byName).length >= Math.max(1, Math.ceil(first.length / 2));
+  const mapping = first.map((h, k) => header ? (byName(h) ? byName(h).name : '') : (cols[k] ? cols[k].name : ''));
+  S.imp = {file, delimiter: d.delimiter, rows: d.rows, header, mapping, empty_null: true, ignore_dup: false, result: null};
+  renderImport();
+}
+
+function renderImport() {
+  const im = S.imp, cols = S.meta.columns.filter(c => c.editable);
+  const ncols = Math.max(0, ...im.rows.map(r => r.length));
+  const body = im.rows.slice(im.header ? 1 : 0, (im.header ? 1 : 0) + 20);
+  const delims = [[',', 'coma (,)'], [';', 'punto y coma (;)'], ['\t', 'tabulador'], ['|', 'barra (|)']];
+  const opts = cur => '<option value="">(ignorar)</option>' + cols.map(c => `<option value="${esc(c.name)}" ${c.name === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  $('imp-box').innerHTML = `<div class="dbx-imp">
+    <div class="toolbar">
+      <span class="small"><b class="mono">${esc(im.file.name)}</b> · ${esc(fmtSize(im.file.size))}</span>
+      <label class="small muted">Separador <select class="input" id="imp-delim">${delims.map(([k, l]) => `<option value="${esc(k)}" ${k === im.delimiter ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label class="dbx-check"><input type="checkbox" id="imp-header" ${im.header ? 'checked' : ''}> La primera fila son encabezados</label>
+      <label class="dbx-check"><input type="checkbox" id="imp-null" ${im.empty_null ? 'checked' : ''}> Celdas vacías como NULL</label>
+      <label class="dbx-check"><input type="checkbox" id="imp-dup" ${im.ignore_dup ? 'checked' : ''}> Omitir filas duplicadas</label>
+    </div>
+    <div class="table-wrap dbx-gridwrap"><table class="lx dbx-grid"><thead>
+      <tr>${Array.from({length: ncols}, (_, k) => `<th>${esc(im.header ? (im.rows[0][k] ?? '') : 'Columna ' + (k + 1))}</th>`).join('')}</tr>
+      <tr class="dbx-filters">${Array.from({length: ncols}, (_, k) => `<th><select class="input" data-imp-map="${k}" aria-label="Destino de la columna ${k + 1}">${opts(im.mapping[k] || '')}</select></th>`).join('')}</tr>
+    </thead><tbody>${body.map(r => `<tr>${Array.from({length: ncols}, (_, k) => `<td>${r[k] === undefined ? '' : cellView(r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="small muted dbx-foot">Vista previa de las primeras ${body.length} fila(s). Elige en la segunda fila del encabezado a qué columna de la tabla va cada columna del CSV. <span class="mono">\\N</span> siempre se importa como NULL.</div>
+    <div class="toolbar"><button type="button" class="btn btn-primary" data-act="imp-run">Importar…</button></div>
+    <div id="imp-result">${im.result || ''}</div></div>`;
+}
+
+async function importRun(btn) {
+  const im = S.imp;
+  const mapping = Array.from(document.querySelectorAll('[data-imp-map]')).map(s => s.value || null);
+  const used = mapping.filter(Boolean);
+  if (!used.length) return ui.alert('Asigna al menos una columna del CSV a una columna de la tabla.', {icon: 'warning'});
+  if (new Set(used).size !== used.length) return ui.alert('Cada columna de la tabla solo puede recibir una columna del CSV.', {icon: 'warning'});
+  if (!await ui.confirm(`Se insertarán las filas de ${im.file.name} en ${S.table} (${used.length} columna(s)).`, {title: 'Importar CSV', confirmText: 'Importar'})) return;
+  const opts = {...loc(), delimiter: $('imp-delim').value, header: $('imp-header').checked, encoding: $('imp-enc').value,
+                mapping, empty_null: $('imp-null').checked, ignore_dup: $('imp-dup').checked};
+  const fd = new FormData();
+  fd.append('opts', JSON.stringify(opts));
+  fd.append('file', im.file);
+  btn.disabled = true;
+  $('imp-result').innerHTML = '<div class="muted small">Importando… no cierres esta ventana.</div>';
+  const d = await postForm(api('import'), fd);
+  btn.disabled = false;
+  const errs = (d.row_errors || []).length ? `<pre class="terminal output">${esc(d.row_errors.join('\n'))}</pre>` : '';
+  im.result = d.ok
+    ? `<div class="flash flash-success">Importación completada: <b>${esc(fmtN(d.inserted))}</b> fila(s) insertada(s)` +
+      (d.skipped ? ` · ${esc(fmtN(d.skipped))} omitida(s) por duplicadas` : '') +
+      (d.errors ? ` · ${esc(fmtN(d.errors))} fila(s) con errores no se enviaron` : '') + '.</div>' + errs
+    : flash(d.error || 'Error desconocido') + errs;
+  $('imp-result').innerHTML = im.result;
+  if (d.ok) { S.grid = null; invalidateTables(); }
+}
+
+// ── Crear tabla ────────────────────────────────────────────────────
+function blankCol(first) {
+  const my = S.engine === 'mysql';
+  if (first) return {name: 'id', type: my ? 'INT' : 'bigint', length: '', unsigned: my, nullable: false, defk: 'none', defv: '', primary: true, auto: true, comment: ''};
+  return {name: '', type: my ? 'VARCHAR' : 'text', length: my ? '255' : '', unsigned: false, nullable: true, defk: 'none', defv: '', primary: false, auto: false, comment: ''};
+}
+
+function viewCreate(v) {
+  const ro = dbReadonly();
+  if (ro) { v.innerHTML = `<div class="card">${flash(ro, 'info')}</div>`; return; }
+  if (!S.create || S.create.engine !== S.engine) S.create = {engine: S.engine, name: '', cols: [blankCol(true), blankCol(false)]};
+  const c = S.create, my = S.engine === 'mysql';
+  const typeOpts = cur => (TYPES[S.engine] || []).map(([t]) => `<option ${t === cur ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  const defOpts = cur => [['none', '—'], ['null', 'NULL'], ['value', 'Valor:'], ...(EXPRS[S.engine] || []).map(x => ['expr:' + x, x])]
+    .map(([k, l]) => `<option value="${esc(k)}" ${k === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const rows = c.cols.map((col, i) => {
+    const ti = typeInfo(col.type), p = ti ? ti[2] : null;
+    return `<tr data-cc="${i}">
+      <td><input class="input mono" data-f="name" value="${esc(col.name)}" maxlength="63" placeholder="nombre" autocomplete="off" spellcheck="false" aria-label="Nombre"></td>
+      <td><select class="input" data-f="type" aria-label="Tipo">${typeOpts(col.type)}</select></td>
+      <td>${p === 'values' ? `<input class="input mono" data-f="length" value="${esc(col.length)}" placeholder="a, b, c" aria-label="Valores">`
+          : ['len', 'len?', 'prec', 'fsp'].includes(p) ? `<input class="input mono dbx-len-in" data-f="length" value="${esc(col.length)}" placeholder="${p === 'prec' ? '10,2' : p === 'fsp' ? '0-6' : p === 'len' ? 'oblig.' : ''}" aria-label="Longitud">` : ''}</td>
+      <td class="center-cell"><input type="checkbox" data-f="nullable" ${col.nullable ? 'checked' : ''} ${col.primary ? 'disabled' : ''} aria-label="NULL"></td>
+      <td><div class="dbx-defcell"><select class="input" data-f="defk" aria-label="Predeterminado">${defOpts(col.defk)}</select>${col.defk === 'value' ? `<input class="input mono" data-f="defv" value="${esc(col.defv)}" aria-label="Valor predeterminado">` : ''}</div></td>
+      <td class="center-cell"><input type="checkbox" data-f="primary" ${col.primary ? 'checked' : ''} aria-label="Clave primaria"></td>
+      <td class="center-cell"><input type="checkbox" data-f="auto" ${col.auto ? 'checked' : ''} ${ti && ti[1] === 'int' ? '' : 'disabled'} aria-label="Auto-incremento"></td>
+      ${my ? `<td class="center-cell"><input type="checkbox" data-f="unsigned" ${col.unsigned ? 'checked' : ''} ${ti && (ti[1] === 'int' || ti[1] === 'num') ? '' : 'disabled'} aria-label="UNSIGNED"></td>` : ''}
+      <td><input class="input" data-f="comment" value="${esc(col.comment)}" placeholder="opcional" aria-label="Comentario"></td>
+      <td><button type="button" class="btn btn-sm btn-danger" data-act="cc-del" data-cc="${i}" ${c.cols.length < 2 ? 'disabled' : ''} title="Quitar columna">✕</button></td></tr>`;
+  }).join('');
+  v.innerHTML = `<div class="card">
+    <h3>Crear tabla en <span class="mono">${esc(S.db)}${S.engine === 'pg' ? '.' + esc(S.schema) : ''}</span></h3>
+    <label class="form-row dbx-narrow"><span>Nombre de la tabla</span><input class="input mono" id="ct-name" value="${esc(c.name)}" maxlength="63" placeholder="clientes" autocomplete="off" spellcheck="false"></label>
+    <div class="table-wrap"><table class="lx dbx-create" id="ct-cols"><thead><tr><th>Columna</th><th>Tipo</th><th>Longitud / valores</th><th>NULL</th><th>Predeterminado</th><th>Clave primaria</th><th>${my ? 'AUTO_INCREMENT' : 'Identidad'}</th>${my ? '<th>UNSIGNED</th>' : ''}<th>Comentario</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="toolbar dbx-toolbar" style="margin-top:12px;">
+      <button type="button" class="btn" data-act="cc-add">+ Columna</button>
+      <span class="dbx-spacer"></span>
+      <button type="button" class="btn" data-act="cc-reset">Empezar de nuevo</button>
+      <button type="button" class="btn btn-primary" data-act="cc-create">Vista previa y crear…</button>
+    </div>
+    <p class="small muted">Nombres: letras, números y _ (empiezan con letra o _). Antes de crear verás el SQL exacto.</p></div>`;
+}
+
+function createSpec() {
+  const c = S.create;
+  return c.cols.map(col => {
+    const ti = typeInfo(col.type);
+    const k = col.defk || 'none';
+    const def = k === 'value' ? {kind: 'value', value: col.defv} : k.startsWith('expr:') ? {kind: 'expr', value: k.slice(5)} : {kind: k};
+    const isVals = ti && ti[2] === 'values';
+    return {name: col.name.trim(), type: col.type, length: isVals ? '' : col.length.trim(),
+            values: isVals ? col.length.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+            unsigned: col.unsigned, nullable: col.nullable && !col.primary, default: def, primary: col.primary, auto: col.auto, comment: col.comment};
+  });
+}
+
+// ── Eventos de la vista principal (delegación) ─────────────────────
+const view = $('view');
+view.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b || b.disabled) return;
+  const act = b.dataset.act, g = S.grid;
+  switch (act) {
+    case 'open-db': return go({db: b.dataset.db, schema: S.engine === 'pg' ? 'public' : null, table: null, tab: 'tables'});
+    case 'open-table': e.preventDefault(); return go({table: b.dataset.table, tab: b.dataset.tab || 'data'});
+    case 'goto-table': e.preventDefault(); return go({db: b.dataset.db || S.db, schema: b.dataset.schema || S.schema, table: b.dataset.table, tab: 'data'});
+    case 'go-tab': return go({tab: b.dataset.tab});
+    case 'reload-overview': return viewOverview(view, S.nav);
+    case 'ov-truncate': if (await truncateTable(b.dataset.table)) viewOverview(view, S.nav); return;
+    case 'ov-drop': if (await dropTable(b.dataset.table)) { await loadTables(S.db, S.schema || ''); renderTree(); viewOverview(view, S.nav); } return;
+    case 'reload-rows': return loadRows();
+    case 'clear-filters': g.filters = {}; g.page = 1; return loadRows();
+    case 'count': {
+      b.disabled = true;
+      const d = await postJSON(api('count'), {...loc(), filters: activeFilters()});
+      b.disabled = false;
+      if (!d.ok) return ui.alert(d.error, {title: 'No se pudo contar', icon: 'error'});
+      g.count = d.count;
+      return renderPager();
+    }
+    case 'page': g.page = Math.max(1, +b.dataset.p); return loadRows();
+    case 'sort': {
+      const name = S.meta.columns[+b.dataset.c].name;
+      if (g.sort !== name) { g.sort = name; g.dir = 'asc'; } else if (g.dir === 'asc') g.dir = 'desc'; else g.sort = null;
+      g.page = 1;
+      return loadRows();
+    }
+    case 'sel': {
+      const i = +b.dataset.r;
+      if (b.checked) g.sel.add(i); else g.sel.delete(i);
+      b.closest('tr').classList.toggle('sel', b.checked);
+      return updateSelbar();
+    }
+    case 'sel-all':
+      g.sel = new Set(b.checked ? g.rows.map((_, i) => i) : []);
+      return renderGrid();
+    case 'unselect': g.sel.clear(); return renderGrid();
+    case 'delete-sel': return deleteSelected();
+    case 'insert': return openRowForm('insert', null);
+    case 'edit': return openRowForm('edit', +b.dataset.r);
+    case 'dup': return openRowForm('dup', +b.dataset.r);
+    case 'cell': {
+      const i = +b.dataset.r, j = +b.dataset.c, v = g.rows[i][j];
+      if (!isLong(v) && !(typeof v === 'string' && v.length > 30)) return;
+      const c = S.meta.columns[j];
+      return openViewer(c.name, c.type, v, cellLoader(g.rows[i], c.name));
+    }
+    case 'qcell': {
+      const r = S.qres.results[+b.dataset.b], v = r.rows[+b.dataset.r][+b.dataset.c];
+      if (!isLong(v) && !(typeof v === 'string' && v.length > 30)) return;
+      return openViewer(r.columns[+b.dataset.c], '', v, null);
+    }
+    case 'col-add': return openColForm('add');
+    case 'col-edit': return openColForm('edit', +b.dataset.c);
+    case 'col-drop': {
+      const c = S.meta.columns[+b.dataset.c];
+      if (await runDdl({op: 'drop_column', column: c.name}, {title: `Eliminar columna ${c.name}`, danger: true, typed: c.name})) reloadMeta();
+      return;
+    }
+    case 'idx-add': return openIndexForm();
+    case 'idx-drop': {
+      const ix = S.meta.indexes[+b.dataset.k];
+      if (await runDdl({op: 'drop_index', name: ix.name}, {title: `Eliminar índice ${ix.name}`, danger: true})) reloadMeta();
+      return;
+    }
+    case 'q-run': return runQuery();
+    case 'q-export': return exportQuery();
+    case 'op-rename': {
+      const new_name = $('op-rename').value.trim();
+      if (new_name === S.table) return;
+      const d = await runDdl({op: 'rename_table', new_name}, {title: 'Renombrar'});
+      if (d) { await loadTables(S.db, S.schema || ''); go({table: d.table}); }
+      return;
+    }
+    case 'op-copy': {
+      const new_name = $('op-copy').value.trim();
+      const data = document.querySelector('input[name=op-copy-mode]:checked').value === '1';
+      const d = await runDdl({op: 'copy_table', new_name, data}, {title: 'Copiar tabla'});
+      if (d) { await loadTables(S.db, S.schema || ''); renderTree(); }
+      return;
+    }
+    case 'op-maint': if (await runDdl({op: 'maintenance', action: b.dataset.a}, {title: 'Mantenimiento'})) S.meta = null; return;
+    case 'op-truncate': if (await truncateTable(S.table)) { S.grid = null; S.meta = null; } return;
+    case 'op-drop': if (await dropTable(S.table)) { await loadTables(S.db, S.schema || ''); go({table: null, tab: 'tables'}); } return;
+    case 'imp-preview': return importPreview();
+    case 'imp-run': return importRun(b);
+    case 'cc-add': S.create.cols.push(blankCol(false)); return viewCreate(view);
+    case 'cc-del': S.create.cols.splice(+b.dataset.cc, 1); return viewCreate(view);
+    case 'cc-reset': S.create = null; return viewCreate(view);
+    case 'cc-create': {
+      const name = $('ct-name').value.trim();
+      const d = await runDdl({op: 'create_table', name, columns: createSpec(), table: null}, {title: `Crear tabla ${name}`});
+      if (d) { S.create = null; await loadTables(S.db, S.schema || ''); go({table: d.table, tab: 'structure'}); }
+      return;
+    }
+  }
+});
+
+view.addEventListener('dblclick', e => {
+  const td = e.target.closest('td[data-act=cell]');
+  if (td && S.meta && S.meta.editable) openRowForm('edit', +td.dataset.r);
+});
+
+view.addEventListener('change', e => {
+  const t = e.target, g = S.grid;
+  if (t.dataset.act === 'per') { g.per = +t.value; g.page = 1; return loadRows(); }
+  if (t.dataset.act === 'fop') {
+    const name = S.meta.columns[+t.dataset.c].name;
+    const f = g.filters[name] || (g.filters[name] = {op: '', value: ''});
+    f.op = t.value;
+    const inp = t.parentElement.querySelector('input');
+    inp.disabled = f.op === 'null' || f.op === 'notnull';
+    if (!f.op || inp.disabled || f.value) { g.page = 1; loadRows(); } else inp.focus();
+    return;
+  }
+  if (t.dataset.act === 'schema-select') return go({schema: t.value, table: null, tab: 'tables'});
+  if (t.dataset.act === 'q-hist' && t.value !== '') {
+    $('q-sql').value = history_()[+t.value] || '';
+    $('q-sql').dispatchEvent(new Event('input'));
+    t.value = '';
+    return;
+  }
+  if (t.id === 'imp-delim') return importPreview(t.value);
+  if (t.id === 'imp-header' || t.id === 'imp-null' || t.id === 'imp-dup') {
+    S.imp.header = $('imp-header').checked; S.imp.empty_null = $('imp-null').checked; S.imp.ignore_dup = $('imp-dup').checked;
+    S.imp.mapping = Array.from(document.querySelectorAll('[data-imp-map]')).map(s => s.value);
+    if (t.id === 'imp-header') renderImport();
+    return;
+  }
+  if (t.dataset.impMap !== undefined) { S.imp.mapping[+t.dataset.impMap] = t.value; return; }
+  const row = t.closest('tr[data-cc]');
+  if (row && S.create) {
+    const col = S.create.cols[+row.dataset.cc], f = t.dataset.f;
+    col[f] = t.type === 'checkbox' ? t.checked : t.value;
+    if (f === 'type') {
+      const ti = typeInfo(col.type);
+      col.length = col.type === 'VARCHAR' ? '255' : '';
+      if (!ti || ti[1] !== 'int') col.auto = false;
+    }
+    if (f === 'primary' && col.primary) col.nullable = false;
+    if (['type', 'defk', 'primary'].includes(f)) viewCreate(view);
+  }
+});
+
+view.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.act === 'fval') {
+    const name = S.meta.columns[+t.dataset.c].name;
+    const f = S.grid.filters[name] || (S.grid.filters[name] = {op: '', value: ''});
+    f.value = t.value;
+    if (!f.op && t.value) {
+      f.op = 'like';
+      t.parentElement.querySelector('select').value = 'like';
+    }
+    return;
+  }
+  if (t.id === 'ct-name' && S.create) { S.create.name = t.value; return; }
+  const row = t.closest('tr[data-cc]');
+  if (row && S.create && t.dataset.f && t.type !== 'checkbox') S.create.cols[+row.dataset.cc][t.dataset.f] = t.value;
+});
+
+view.addEventListener('keydown', e => {
+  const t = e.target;
+  if (e.key !== 'Enter') return;
+  if (t.dataset.act === 'fval') { e.preventDefault(); S.grid.page = 1; loadRows(); }
+  else if (t.dataset.act === 'goto') {
+    e.preventDefault();
+    const p = parseInt(t.value, 10);
+    if (p > 0) { S.grid.page = p; loadRows(); }
+  }
+});
+
+// ── Arranque ───────────────────────────────────────────────────────
+go(readUrl(), false);
+})();
+</script>
+{% endif %}
+{% endblock %}

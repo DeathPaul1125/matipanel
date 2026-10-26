@@ -1,6 +1,6 @@
 # Paquetes
 
-Este módulo instala, elimina y actualiza el software del servidor con APT, y controla las actualizaciones automáticas de seguridad. Lo encuentras en **Menú → Herramientas → Paquetes**.
+Este módulo instala, elimina y actualiza el software del servidor con APT, y controla las actualizaciones automáticas de seguridad. Lo encuentras en **Menú → Sistema → Paquetes**.
 
 ## Antes de empezar
 

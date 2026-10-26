@@ -15,7 +15,7 @@ Esta página te guía en tu primera visita al panel: cómo entrar, cómo está o
 
 | Zona | Qué contiene |
 |---|---|
-| **Barra lateral** (izquierda) | El menú, agrupado en Sistema, Acceso, Red, Servidores, Herramientas y Cuenta. Abajo verás tu usuario y **Cerrar sesión**. |
+| **Barra lateral** (izquierda) | El menú, en secciones plegables: Sistema, Archivos y discos, Red y acceso, Web y aplicaciones, Bases de datos y Herramientas. Arriba, el buscador de módulos. Abajo, tu **menú de usuario** y el 💙. |
 | **Barra superior** | El nombre de la pantalla, el servidor, el botón **?** (ayuda de esa pantalla) y el botón de tema claro/oscuro. |
 | **Contenido** | La pantalla elegida. |
 
@@ -26,6 +26,13 @@ En el celular, la barra lateral se abre con el botón **☰**.
 - Las acciones correctas muestran un aviso breve abajo a la derecha. Haz clic sobre él para cerrarlo.
 - Los errores aparecen en una ventana con el detalle que devolvió el sistema.
 - Las acciones peligrosas piden confirmación con un botón rojo. Las más delicadas te piden **escribir un nombre** (por ejemplo, el de la base de datos o el del servidor) antes de habilitar el botón.
+
+## Moverte por el menú
+
+- **Secciones plegables:** haz clic en el título de una sección (por ejemplo **Web y aplicaciones**) para abrirla o cerrarla. El panel recuerda tu elección; la sección de la pantalla en la que estás siempre queda abierta.
+- **Buscar un módulo:** pulsa la tecla `/` (o haz clic en **Buscar módulo…**), escribe parte del nombre, por ejemplo `fire` o `php`, y pulsa `Enter` para abrir el primero. `Esc` limpia la búsqueda. No importan los acentos.
+- **Menú de usuario:** haz clic en tu nombre, abajo a la izquierda, para abrir **Seguridad (2FA)**, **Apariencia**, **Ayuda**, **Acerca de** y **Cerrar sesión**.
+- **Barra compacta:** en [Apariencia](31-apariencia.md) puedes dejar la barra lateral solo con iconos.
 
 ## Qué configurar primero
 
@@ -44,11 +51,12 @@ En el celular, la barra lateral se abre con el botón **☰**.
 | **Tab** | Editor de archivos | Insertar tabulación |
 | **Ctrl+Enter** | Consola SQL | Ejecutar la consulta |
 | **Ctrl+Shift+C / V** | Terminal | Copiar / pegar |
+| **/** | Cualquier pantalla | Buscar un módulo en el menú |
 | **Escape** | Ventanas y menú móvil | Cerrar |
 
 ## Cerrar sesión
 
-Pulsa **Cerrar sesión** al pie de la barra lateral. La sesión también caduca tras 1 hora sin actividad.
+Haz clic en tu nombre al pie de la barra lateral y elige **Cerrar sesión**. La sesión también caduca tras 1 hora sin actividad.
 
 ## Preguntas frecuentes
 

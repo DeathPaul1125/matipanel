@@ -1,6 +1,6 @@
 # PHP
 
-Este módulo administra las versiones de PHP instaladas: `php.ini`, PHP-FPM y sus pools, módulos y extensiones. Lo encuentras en **Menú → Servidores → PHP**. Trabaja con la estructura de Debian: `/etc/php/<versión>/<sapi>/`.
+Este módulo administra las versiones de PHP instaladas: `php.ini`, PHP-FPM y sus pools, módulos y extensiones. Lo encuentras en **Menú → Web y aplicaciones → PHP**. Trabaja con la estructura de Debian: `/etc/php/<versión>/<sapi>/`.
 
 ## Requisitos e instalación de PHP
 

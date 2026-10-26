@@ -1,6 +1,6 @@
 # Discos
 
-El módulo Discos muestra las particiones montadas en el servidor, cuánto espacio tienen y cuánto está en uso. Es de solo consulta: sirve para detectar a tiempo un disco que se está llenando. Lo encuentras en **Menú → Sistema → Discos**.
+El módulo Discos muestra las particiones montadas en el servidor, cuánto espacio tienen y cuánto está en uso. Es de solo consulta: sirve para detectar a tiempo un disco que se está llenando. Lo encuentras en **Menú → Archivos y discos → Discos**.
 
 ## Ver el uso de las particiones
 

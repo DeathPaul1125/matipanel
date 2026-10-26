@@ -1,6 +1,6 @@
 # Almacenamiento avanzado
 
-El módulo Almacenamiento avanzado te permite organizar los discos del servidor sin escribir comandos: crear volúmenes LVM que puedes ampliar sin reiniciar, montar RAID por software para que un disco dañado no te haga perder datos y limitar cuánto espacio usa cada usuario con cuotas. Lo encuentras en **Menú → Sistema → Almacenamiento**.
+El módulo Almacenamiento avanzado te permite organizar los discos del servidor sin escribir comandos: crear volúmenes LVM que puedes ampliar sin reiniciar, montar RAID por software para que un disco dañado no te haga perder datos y limitar cuánto espacio usa cada usuario con cuotas. Lo encuentras en **Menú → Archivos y discos → LVM, RAID y cuotas**.
 
 La pantalla tiene tres pestañas: **Discos y LVM**, **RAID** y **Cuotas**. Arriba verás un indicador con el estado general:
 

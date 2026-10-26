@@ -1,6 +1,6 @@
 # Bases de datos
 
-Este módulo administra MariaDB/MySQL y PostgreSQL: bases de datos, usuarios, permisos, consola SQL, respaldo y restauración. Lo encuentras en **Menú → Servidores → Bases de datos**.
+Este módulo administra MariaDB/MySQL y PostgreSQL: bases de datos, usuarios, permisos, consola SQL, respaldo y restauración. Lo encuentras en **Menú → Bases de datos → Servidores de BD**.
 
 ## Requisitos y cómo se conecta el panel
 

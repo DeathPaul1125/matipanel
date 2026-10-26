@@ -1,6 +1,6 @@
 # Servidor DNS (BIND 9)
 
-El DNS traduce nombres como `www.ejemplo.com` a direcciones IP. Con este módulo el servidor puede **publicar tus dominios** (zonas primarias), guardar una **copia** de un dominio que se administra en otro servidor (zonas secundarias), resolver **IP a nombre** (zonas inversas) y servir de **resolvedor** para tu red. Usa BIND 9 (`named`), el servidor DNS estándar de Debian. Lo encuentras en **Menú → Servidores → DNS**.
+El DNS traduce nombres como `www.ejemplo.com` a direcciones IP. Con este módulo el servidor puede **publicar tus dominios** (zonas primarias), guardar una **copia** de un dominio que se administra en otro servidor (zonas secundarias), resolver **IP a nombre** (zonas inversas) y servir de **resolvedor** para tu red. Usa BIND 9 (`named`), el servidor DNS estándar de Debian. Lo encuentras en **Menú → Red y acceso → DNS**.
 
 ## Conceptos en un minuto
 

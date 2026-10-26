@@ -1,6 +1,6 @@
 # Docker
 
-Este módulo muestra los contenedores, imágenes y volúmenes de Docker, y permite iniciar, detener y reiniciar contenedores y ver sus logs. Lo encuentras en **Menú → Servidores → Docker**.
+Este módulo muestra los contenedores, imágenes y volúmenes de Docker, y permite iniciar, detener y reiniciar contenedores y ver sus logs. Lo encuentras en **Menú → Web y aplicaciones → Docker**.
 
 ## Requisitos
 

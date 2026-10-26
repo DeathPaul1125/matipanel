@@ -60,7 +60,7 @@ En los rangos largos (6 h, 24 h y 7 días) cada punto es el **promedio** de vari
 
 > **Nota:** si el servidor o el panel estuvieron apagados, la línea se **corta** en ese tramo en lugar de unir los puntos. Así distingues un apagón de un periodo de poca actividad.
 
-> **Nota:** El botón de rango que eliges aquí solo dura mientras tengas la página abierta. Para cambiar el rango predeterminado, usa **Menú → Cuenta → Apariencia → Rango del historial**.
+> **Nota:** El botón de rango que eliges aquí solo dura mientras tengas la página abierta. Para cambiar el rango predeterminado, usa **menú de usuario (tu nombre, abajo a la izquierda) → Apariencia → Rango del historial**.
 
 ## Revisar la información del sistema
 
@@ -96,7 +96,7 @@ La tarjeta **Accesos rápidos** tiene enlaces directos a **Terminal**, **Archivo
 
 Puedes ocultar las secciones que no uses. La configuración es por usuario.
 
-1. Haz clic en **Personalizar →** en la tarjeta **Accesos rápidos**, o ve a **Menú → Cuenta → Apariencia**.
+1. Haz clic en **Personalizar →** en la tarjeta **Accesos rápidos**, o ve a **menú de usuario (tu nombre, abajo a la izquierda) → Apariencia**.
 2. En la tarjeta **Dashboard**, marca o desmarca las **Secciones visibles**: **Tacómetros**, **Historial**, **Información del sistema**, **Procesos y almacenamiento**, **Accesos rápidos**.
 3. Los cambios se guardan solos.
 

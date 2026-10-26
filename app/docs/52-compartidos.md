@@ -1,6 +1,6 @@
 # Recursos compartidos (Samba y NFS)
 
-Este módulo convierte el servidor en un servidor de archivos. Con **Samba** compartes carpetas con equipos Windows, macOS y Linux de la red (se abren como `\\servidor\recurso`). Con **NFS** compartes carpetas con otros servidores Linux, que las montan como si fueran un disco local. Lo encuentras en **Menú → Servidores → Compartidos**.
+Este módulo convierte el servidor en un servidor de archivos. Con **Samba** compartes carpetas con equipos Windows, macOS y Linux de la red (se abren como `\\servidor\recurso`). Con **NFS** compartes carpetas con otros servidores Linux, que las montan como si fueran un disco local. Lo encuentras en **Menú → Archivos y discos → Compartidos**.
 
 La pantalla tiene dos pestañas: **Samba (Windows y red local)** y **NFS (Linux)**.
 

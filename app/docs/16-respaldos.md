@@ -1,6 +1,6 @@
 # Respaldos
 
-El módulo Respaldos crea copias comprimidas (`.tar.gz`) de las carpetas que elijas, las guarda en el servidor y te permite descargarlas o restaurarlas. También puedes programar respaldos diarios o semanales con limpieza automática de copias antiguas. Lo encuentras en **Menú → Sistema → Respaldos**.
+El módulo Respaldos crea copias comprimidas (`.tar.gz`) de las carpetas que elijas, las guarda en el servidor y te permite descargarlas o restaurarlas. También puedes programar respaldos diarios o semanales con limpieza automática de copias antiguas. Lo encuentras en **Menú → Archivos y discos → Respaldos**.
 
 ## Cómo está organizada la página
 

@@ -1,6 +1,6 @@
 # Multi-servidor
 
-Si administras varios servidores con MatiPanel, puedes vigilarlos todos desde un solo panel: ves de un vistazo cuáles están en línea, su CPU, memoria y disco, los servicios con fallo y las actualizaciones pendientes, y saltas al panel de cualquiera con un clic. Lo encuentras en **Menú → Red → Multi-servidor**.
+Si administras varios servidores con MatiPanel, puedes vigilarlos todos desde un solo panel: ves de un vistazo cuáles están en línea, su CPU, memoria y disco, los servicios con fallo y las actualizaciones pendientes, y saltas al panel de cualquiera con un clic. Lo encuentras en **Menú → Red y acceso → Multi-servidor**.
 
 Cada servidor sigue siendo independiente. El panel que vigila solo **lee** métricas de los demás: no puede cambiar nada en ellos.
 
@@ -26,7 +26,7 @@ El panel que vigila consulta a cada servidor cada **15 segundos** por HTTPS, en 
 
 Hazlo en el servidor **vigilado**.
 
-1. Entra a su panel y ve a **Menú → Red → Multi-servidor**.
+1. Entra a su panel y ve a **Menú → Red y acceso → Multi-servidor**.
 2. Baja hasta la tarjeta **Acceso remoto a este servidor**.
 3. Pulsa **Generar token**.
 4. Escribe una etiqueta para reconocer quién lo usa, por ejemplo `monitor-central`, y pulsa **Generar**.
@@ -39,7 +39,7 @@ Hazlo en el servidor **vigilado**.
 
 Hazlo en el panel **que vigila**.
 
-1. Ve a **Menú → Red → Multi-servidor** y pulsa **Agregar servidor**.
+1. Ve a **Menú → Red y acceso → Multi-servidor** y pulsa **Agregar servidor**.
 2. Completa el formulario:
 
 | Campo | Qué escribir |
@@ -98,7 +98,7 @@ Hay dos causas posibles:
 Qué hacer:
 
 1. Entra al otro servidor por un camino de confianza (consola, SSH o su panel desde la red interna).
-2. Abre **Menú → Red → Multi-servidor** y mira la **Huella SHA-256** en **Acceso remoto a este servidor**.
+2. Abre **Menú → Red y acceso → Multi-servidor** y mira la **Huella SHA-256** en **Acceso remoto a este servidor**.
 3. Si es igual a la **Recibida**, el cambio es legítimo: en el panel que vigila pulsa **Editar**, luego **Obtener huella**, confirma y pulsa **Guardar servidor**.
 4. Si no es igual, **no actualices la huella**. Alguien está interceptando el tráfico: avisa al responsable de la red.
 
@@ -115,7 +115,7 @@ Qué hacer:
 
 Hazlo en el servidor **vigilado** cuando un panel ya no deba verlo, o si crees que un token se filtró.
 
-1. Ve a **Menú → Red → Multi-servidor**, tarjeta **Acceso remoto a este servidor**.
+1. Ve a **Menú → Red y acceso → Multi-servidor**, tarjeta **Acceso remoto a este servidor**.
 2. En la tabla, busca el token por su **Etiqueta**. Las columnas **Último uso** y **Desde** te dicen cuándo y desde qué IP se usó por última vez.
 3. Pulsa **Revocar** y confirma.
 

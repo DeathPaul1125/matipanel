@@ -45,5 +45,6 @@ def register_modules(app, sock):
         app.register_blueprint(bp, url_prefix=prefix)
 
     app.jinja_env.globals["HELP_CONTEXT"] = HELP_CONTEXT  # botón "?" de cada pantalla
+    app.jinja_env.globals["VIEW_FUNCS"] = app.view_functions  # el menú oculta módulos no registrados
     register_terminal_ws(sock)
     register_logs_ws(sock)

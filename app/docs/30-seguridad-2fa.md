@@ -1,6 +1,6 @@
 # Seguridad y autenticación en dos pasos (2FA)
 
-Esta página explica cómo protege MatiPanel el inicio de sesión y cómo activar la autenticación en dos pasos (2FA) con una app de códigos. La configuración de 2FA está en **Menú → Cuenta → Seguridad**.
+Esta página explica cómo protege MatiPanel el inicio de sesión y cómo activar la autenticación en dos pasos (2FA) con una app de códigos. La configuración de 2FA está en **menú de usuario (tu nombre, abajo a la izquierda) → Seguridad**.
 
 ## Cómo funciona el inicio de sesión
 
@@ -9,7 +9,7 @@ Esta página explica cómo protege MatiPanel el inicio de sesión y cómo activa
 - Si el usuario, la contraseña o el grupo no son correctos, verás siempre el mismo mensaje: **Usuario o contraseña incorrectos, o sin permiso para el panel.** Así no se revela qué usuarios existen.
 - El panel comprueba tus grupos en cada clic. Si un administrador te quita del grupo, tu sesión se cierra en la siguiente acción.
 - Si tienes 2FA activo, después de la contraseña se pide un código.
-- Para salir, pulsa **Cerrar sesión** al pie de la barra lateral.
+- Para salir, haz clic en tu nombre al pie de la barra lateral y elige **Cerrar sesión**.
 
 ## Bloqueo por intentos fallidos
 
@@ -32,7 +32,7 @@ Después de **5 intentos fallidos en 5 minutos**, el panel bloquea los nuevos in
 
 ### Pasos
 
-1. Ve a **Menú → Cuenta → Seguridad** y pulsa **Configurar 2FA**.
+1. Ve a **menú de usuario (tu nombre, abajo a la izquierda) → Seguridad** y pulsa **Configurar 2FA**.
 2. **Paso 1 · Escanea el QR con tu app.** Abre la app y escanea el código QR. Si no puedes escanearlo, pulsa **¿No puedes escanear? Mostrar secret manualmente** y escribe esa clave en la app (tipo "basada en tiempo", 6 dígitos).
 3. **Paso 2 · Guarda estos códigos de recuperación.** Verás 8 códigos. Guárdalos fuera del teléfono: impresos en un lugar seguro o en el gestor de contraseñas de la institución.
 4. **Paso 3 · Confirma con tu primer código.** Escribe el código de 6 dígitos que muestra la app y pulsa **Activar 2FA**.
@@ -69,7 +69,7 @@ Cada código sirve **una sola vez**. Táchalo de tu lista.
 
 ## Desactivar 2FA
 
-1. Ve a **Menú → Cuenta → Seguridad**.
+1. Ve a **menú de usuario (tu nombre, abajo a la izquierda) → Seguridad**.
 2. Escribe en **Código actual** el código de 6 dígitos de tu app, o uno de tus códigos de recuperación.
 3. Pulsa **Desactivar 2FA**.
 4. Confirma en **Desactivar 2FA** con **Desactivar**.

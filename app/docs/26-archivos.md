@@ -1,6 +1,6 @@
 # Archivos
 
-El administrador de archivos te permite navegar, editar, crear, mover, copiar, borrar, subir y descargar archivos del servidor, y cambiar permisos y propietarios. Lo encuentras en **Menú → Herramientas → Archivos**.
+El administrador de archivos te permite navegar, editar, crear, mover, copiar, borrar, subir y descargar archivos del servidor, y cambiar permisos y propietarios. Lo encuentras en **Menú → Archivos y discos → Archivos**.
 
 > **Importante:** El administrador de archivos trabaja como `root`. Puedes leer y modificar cualquier archivo del sistema, incluidos los críticos. Un error aquí puede dejar el servidor sin arrancar. Trabaja con calma y verifica la ruta antes de cada acción.
 

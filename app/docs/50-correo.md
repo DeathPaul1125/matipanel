@@ -1,6 +1,6 @@
 # Correo (Postfix y Dovecot)
 
-Este módulo administra el correo del servidor: **Postfix** (el servidor SMTP, que envía y recibe correo) y **Dovecot** (el servidor IMAP/POP3, que permite leer los buzones desde un programa de correo). Desde aquí puedes instalarlos, cambiar la configuración principal, revisar la cola de mensajes, editar los alias, ver el registro y enviar un correo de prueba. Lo encuentras en **Menú → Servidores → Correo**.
+Este módulo administra el correo del servidor: **Postfix** (el servidor SMTP, que envía y recibe correo) y **Dovecot** (el servidor IMAP/POP3, que permite leer los buzones desde un programa de correo). Desde aquí puedes instalarlos, cambiar la configuración principal, revisar la cola de mensajes, editar los alias, ver el registro y enviar un correo de prueba. Lo encuentras en **Menú → Web y aplicaciones → Correo**.
 
 ## Qué necesitas saber antes de empezar
 

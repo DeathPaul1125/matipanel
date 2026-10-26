@@ -1,6 +1,6 @@
 # Apariencia
 
-Esta página te permite personalizar cómo se ve el panel: tema claro u oscuro, colores, barra lateral, tamaño del texto, densidad y secciones del dashboard. La encuentras en **Menú → Cuenta → Apariencia**.
+Esta página te permite personalizar cómo se ve el panel: tema claro u oscuro, colores, barra lateral, tamaño del texto, densidad y secciones del dashboard. La encuentras en **menú de usuario (tu nombre, abajo a la izquierda) → Apariencia**.
 
 ## Dónde se guarda cada preferencia
 

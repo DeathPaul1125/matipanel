@@ -1,6 +1,6 @@
 # Usuarios y grupos
 
-Este módulo administra las cuentas de usuario y los grupos del sistema Linux: crear y eliminar usuarios, cambiar contraseñas, bloquear cuentas, asignar grupos y decidir quién puede entrar al panel. Lo encuentras en **Menú → Acceso → Usuarios y grupos**.
+Este módulo administra las cuentas de usuario y los grupos del sistema Linux: crear y eliminar usuarios, cambiar contraseñas, bloquear cuentas, asignar grupos y decidir quién puede entrar al panel. Lo encuentras en **Menú → Red y acceso → Usuarios y grupos**.
 
 ## Quién puede entrar al panel
 

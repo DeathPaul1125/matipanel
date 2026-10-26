@@ -1,6 +1,6 @@
 # Servidor web (Apache y Nginx)
 
-Este módulo administra Apache y Nginx: estado del servicio, sitios (virtual hosts), módulos de Apache y logs. Lo encuentras en **Menú → Servidores → Servidor web**.
+Este módulo administra Apache y Nginx: estado del servicio, sitios (virtual hosts), módulos de Apache y logs. Lo encuentras en **Menú → Web y aplicaciones → Servidor web**.
 
 ## Requisitos para usar el módulo
 
@@ -88,7 +88,7 @@ Este ejemplo publica `sistema.ejemplo.gob.gt` con PHP y certificado gratuito de 
 
 ### 2. Verifica PHP-FPM
 
-1. Ve a **Menú → Servidores → PHP**.
+1. Ve a **Menú → Web y aplicaciones → PHP**.
 2. Revisa que la versión que quieres usar muestre **PHP-FPM** `activo`.
 3. Si no está instalado, instala `php-fpm` desde [Paquetes](27-paquetes.md). En Debian 13 la versión por defecto es PHP 8.4.
 
@@ -103,7 +103,7 @@ Este ejemplo publica `sistema.ejemplo.gob.gt` con PHP y certificado gratuito de 
 
 ### 4. Sube el contenido
 
-1. Ve a **Menú → Herramientas → Archivos** y entra en `/var/www/sistema.ejemplo.gob.gt/public_html`.
+1. Ve a **Menú → Archivos y discos → Archivos** y entra en `/var/www/sistema.ejemplo.gob.gt/public_html`.
 2. Pulsa **Subir…** y arrastra tus archivos. Si subes un `.zip`, elige **Extraer y borrar el comprimido**.
 3. Borra el `index.html` de ejemplo si tu sitio usa `index.php`.
 4. Los archivos subidos quedan con propietario `root`. Abre **Permisos** sobre la carpeta `public_html`, pon **Propietario** `www-data`, **Grupo** `www-data`, marca **Aplicar recursivamente** y pulsa **Aplicar**.
@@ -114,7 +114,7 @@ Abre `http://sistema.ejemplo.gob.gt` en el navegador. Debes ver tu sitio.
 
 ### 6. Obtén el certificado HTTPS
 
-1. Ve a **Menú → Servidores → SSL / Let's Encrypt**.
+1. Ve a **Menú → Web y aplicaciones → SSL / Let's Encrypt**.
 2. Pulsa **+ Obtener certificado**.
 3. **Dominios:** `sistema.ejemplo.gob.gt` (agrega el alias si lo usaste, separado por coma).
 4. **Email:** una cuenta institucional que reciba los avisos de caducidad.

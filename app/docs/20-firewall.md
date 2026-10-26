@@ -1,6 +1,6 @@
 # Firewall
 
-El firewall decide qué conexiones pueden llegar al servidor. Desde esta pantalla puedes instalar UFW, activarlo, abrir puertos de servicios comunes con un clic, crear reglas propias y cambiar las políticas por defecto. Lo encuentras en **Menú → Red → Firewall**.
+El firewall decide qué conexiones pueden llegar al servidor. Desde esta pantalla puedes instalar UFW, activarlo, abrir puertos de servicios comunes con un clic, crear reglas propias y cambiar las políticas por defecto. Lo encuentras en **Menú → Red y acceso → Firewall**.
 
 ## Qué firewall usa tu servidor
 

@@ -1,6 +1,6 @@
 # Red (Interfaces)
 
-El módulo Interfaces muestra las tarjetas de red del servidor con sus direcciones IP y tráfico, y las conexiones de red activas con el programa que las usa. Es de solo consulta. Lo encuentras en **Menú → Red → Interfaces**.
+El módulo Interfaces muestra las tarjetas de red del servidor con sus direcciones IP y tráfico, y las conexiones de red activas con el programa que las usa. Es de solo consulta. Lo encuentras en **Menú → Red y acceso → Interfaces**.
 
 ## Ver las interfaces de red
 
@@ -61,7 +61,7 @@ La tarjeta **Conexiones activas (LISTEN/ESTABLISHED)** lista:
 
 Úsalo cuando un servicio aparece `active` pero no responde.
 
-1. Abre **Menú → Red → Interfaces**.
+1. Abre **Menú → Red y acceso → Interfaces**.
 2. En **Conexiones activas**, busca el puerto esperado en la columna **Local** con estado `LISTEN` (usa Ctrl+F del navegador).
 3. Revisa la columna **Proceso**:
    - Si aparece el programa correcto, el servicio escucha bien. El problema suele estar en el [Firewall](20-firewall.md).
