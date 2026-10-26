@@ -52,10 +52,13 @@ def _save_store(data):
 
 def is_enabled(username):
     """¿El usuario tiene 2FA configurado y activo?"""
-    if not HAS_PYOTP:
-        return False
     data = _load_store().get(username, {})
-    return bool(data.get("secret") and data.get("active"))
+    active = bool(data.get("secret") and data.get("active"))
+    if active and not HAS_PYOTP:
+        # Fallar cerrado: sin pyotp no se puede verificar el código, nunca saltarse el 2FA
+        raise StoreError("pyotp no está instalado: no se puede verificar el 2FA "
+                         "(reinstala con /opt/matipanel/venv/bin/pip install pyotp)")
+    return active
 
 
 def generate_secret(username):

@@ -1,0 +1,750 @@
+{% extends "base.html" %}
+{% block title %}Compartidos{% endblock %}
+{% block heading %}Recursos compartidos{% endblock %}
+
+{% block content %}
+<div class="tabs" id="tabs">
+  <button class="tab active" data-tab="samba" onclick="selectTab('samba')">Samba (Windows y red local)</button>
+  <button class="tab" data-tab="nfs" onclick="selectTab('nfs')">NFS (Linux)</button>
+</div>
+
+<!-- ───────────── Samba ───────────── -->
+<div id="pane-samba">
+  <section class="health" id="samba-head" data-level="ok" style="margin-bottom:12px;">
+    <span class="led lg" id="samba-led"></span>
+    <div class="health-main">
+      <h1 class="health-verdict" id="samba-title">Consultando Samba…</h1>
+      <div class="health-sub" id="samba-sub"></div>
+    </div>
+    <div class="health-chips">
+      <span id="samba-actions"></span>
+      <button class="btn" onclick="loadSamba()">Refrescar</button>
+    </div>
+  </section>
+
+  <div class="card" id="samba-install" hidden>
+    <div class="card-head"><h3>Comparte carpetas con Samba</h3></div>
+    <p class="muted" style="margin-top:0;">Samba convierte este servidor en un servidor de archivos compatible con
+      Windows: los equipos de la red abren las carpetas compartidas desde el Explorador de archivos
+      (<span class="mono">\\servidor\recurso</span>) y también funcionan macOS y Linux. Cada persona entra con un
+      usuario y contraseña de Samba, y puedes decidir quién lee y quién escribe en cada carpeta.</p>
+    {% if apt %}
+    <button class="btn btn-primary" id="samba-install-btn" onclick="install('samba')">Instalar</button>
+    {% else %}
+    <p class="muted small">La instalación automática solo está disponible en Debian/Ubuntu. Instálalo desde la terminal:</p>
+    <pre class="terminal">apt install samba smbclient</pre>
+    {% endif %}
+  </div>
+
+  <div id="samba-main" hidden>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Conexiones activas</h3><span class="muted small" id="samba-conn-note"></span></div>
+        <div class="table-wrap">
+          <table class="lx" id="samba-sessions">
+            <thead><tr><th>Usuario</th><th>Equipo</th><th>Protocolo</th><th>Cifrado</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h4 style="margin:14px 0 6px;">Recursos en uso</h4>
+        <div id="samba-tcons" class="small"></div>
+        <h4 style="margin:14px 0 6px;">Archivos abiertos</h4>
+        <div class="table-wrap">
+          <table class="lx" id="samba-files">
+            <thead><tr><th>Archivo</th><th>Usuario</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>Configuración global</h3>
+          <a href="#" onclick="editFile(SMB_CONF); return false;">Editar smb.conf</a>
+        </div>
+        <div class="grid grid-2" style="margin:0;">
+          <label class="form-row"><span>Grupo de trabajo (workgroup)</span>
+            <input class="input mono" id="g-workgroup" maxlength="15" placeholder="WORKGROUP"></label>
+          <label class="form-row"><span>Nombre NetBIOS (vacío = nombre del equipo)</span>
+            <input class="input mono" id="g-netbios_name" maxlength="15"></label>
+        </div>
+        <label class="form-row"><span>Descripción del servidor (server string)</span>
+          <input class="input" id="g-server_string" maxlength="120" placeholder="%h server (Samba)"></label>
+        <div class="grid grid-3" style="margin:0;">
+          <label class="form-row"><span>Seguridad</span>
+            <select class="input" id="g-security">
+              <option value="user">user (usuarios locales)</option>
+              <option value="auto">auto</option>
+              <option value="ads">ads (Active Directory)</option>
+              <option value="domain">domain (dominio NT)</option>
+            </select></label>
+          <label class="form-row"><span>Invitados (map to guest)</span>
+            <select class="input" id="g-map_to_guest">
+              <option value="Never">Never (nunca)</option>
+              <option value="Bad User">Bad User (usuario inexistente)</option>
+              <option value="Bad Password">Bad Password</option>
+              <option value="Bad Uid">Bad Uid</option>
+            </select></label>
+          <label class="form-row"><span>Protocolo mínimo</span>
+            <select class="input" id="g-min_protocol">
+              <option value="">Predeterminado (SMB2)</option>
+              <option value="SMB2">SMB2</option>
+              <option value="SMB2_10">SMB2.1</option>
+              <option value="SMB3">SMB3</option>
+              <option value="SMB3_11">SMB3.1.1</option>
+            </select></label>
+        </div>
+        <p class="small muted" style="margin:0;">Para recursos con acceso de invitados usa <b>Bad User</b>. Antes de guardar,
+          el panel valida la configuración con <span class="mono">testparm</span>; si hay errores, no se aplica.</p>
+        <div class="form-actions"><button class="btn btn-primary" id="g-save" onclick="saveGlobal()">Guardar configuración global</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0;">Recursos compartidos</h3>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" onclick="loadSmbConfig()">Refrescar</button>
+        <button class="btn btn-sm btn-primary" onclick="openShare()">+ Nuevo recurso</button>
+      </div>
+      <div class="table-wrap">
+        <table class="lx" id="samba-shares">
+          <thead><tr><th>Recurso</th><th>Carpeta</th><th>Acceso</th><th>Usuarios</th><th>Máscaras</th><th class="right">Acciones</th></tr></thead>
+          <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0;">Usuarios de Samba</h3>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" onclick="loadSmbUsers()">Refrescar</button>
+        <button class="btn btn-sm btn-primary" onclick="addSmbUser()">+ Agregar usuario</button>
+      </div>
+      <div class="table-wrap">
+        <table class="lx" id="samba-users">
+          <thead><tr><th>Usuario</th><th>Nombre completo</th><th>Estado</th><th>Contraseña cambiada</th><th class="right">Acciones</th></tr></thead>
+          <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="small muted">Samba usa su propia contraseña, distinta de la de Linux, pero cada cuenta debe corresponder a un
+        usuario de Linux existente (créalo en <a href="{{ url_for('users.index') }}">Usuarios y grupos</a>). Los permisos de
+        Linux de la carpeta siguen aplicándose: el usuario necesita permiso de escritura en la carpeta además de en el recurso.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Cómo conectarse</h3><span class="muted small">Pulsa «Conectar» en un recurso para ver sus comandos</span></div>
+      <dl class="kv">
+        <div><dt>Windows</dt><dd class="mono">\\{{ server }}\recurso</dd></div>
+        <div><dt>macOS</dt><dd class="mono">smb://{{ server }}/recurso</dd></div>
+        <div><dt>Linux (escritorio)</dt><dd class="mono">smb://{{ server }}/recurso</dd></div>
+        <div><dt>Linux (terminal)</dt><dd class="mono">mount -t cifs //{{ server }}/recurso /mnt/recurso -o username=USUARIO</dd></div>
+      </dl>
+      <p class="small muted">Firewall: Samba usa los puertos <b>445/TCP</b> y <b>139/TCP</b> (y 137-138/UDP para la
+        búsqueda de equipos). Ábrelos solo para tu red interna en <a href="{{ url_for('firewall.index') }}">Firewall</a>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────── NFS ───────────── -->
+<div id="pane-nfs" hidden>
+  <section class="health" id="nfs-head" data-level="ok" style="margin-bottom:12px;">
+    <span class="led lg" id="nfs-led"></span>
+    <div class="health-main">
+      <h1 class="health-verdict" id="nfs-title">Consultando NFS…</h1>
+      <div class="health-sub" id="nfs-sub"></div>
+    </div>
+    <div class="health-chips">
+      <span id="nfs-actions"></span>
+      <button class="btn" onclick="loadNfs()">Refrescar</button>
+    </div>
+  </section>
+
+  <div class="card" id="nfs-install" hidden>
+    <div class="card-head"><h3>Comparte carpetas con NFS</h3></div>
+    <p class="muted" style="margin-top:0;">NFS (<i>Network File System</i>) es la forma nativa de compartir carpetas entre
+      servidores Linux: el otro equipo «monta» la carpeta y la usa como si fuera un disco local. Es ideal para
+      compartir datos entre servidores, respaldos o clústeres. El acceso se controla por dirección IP o red del cliente.</p>
+    {% if apt %}
+    <button class="btn btn-primary" id="nfs-install-btn" onclick="install('nfs')">Instalar</button>
+    {% else %}
+    <p class="muted small">La instalación automática solo está disponible en Debian/Ubuntu. Instálalo desde la terminal:</p>
+    <pre class="terminal">apt install nfs-kernel-server</pre>
+    {% endif %}
+  </div>
+
+  <div id="nfs-main" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0;">Exportaciones</h3>
+        <span class="muted small mono">{{ exports }}</span>
+        <span style="flex:1"></span>
+        <a class="btn btn-sm" href="#" onclick="editFile(EXPORTS_FILE); return false;">Editar archivo</a>
+        <button class="btn btn-sm" onclick="loadExports()">Refrescar</button>
+        <button class="btn btn-sm btn-primary" onclick="openExport()">+ Nueva exportación</button>
+      </div>
+      <div class="table-wrap">
+        <table class="lx" id="nfs-exports">
+          <thead><tr><th>Carpeta</th><th>Clientes y opciones</th><th>Estado</th><th class="right">Acciones</th></tr></thead>
+          <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="small muted">Cada cambio se guarda con respaldo (<span class="mono">{{ exports }}.matipanel.bak</span>) y se
+        aplica con <span class="mono">exportfs -ra</span>. Si falla, el archivo anterior se restaura.</p>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Clientes conectados</h3><span class="muted small">Conexiones TCP al puerto 2049</span></div>
+        <div class="table-wrap">
+          <table class="lx" id="nfs-clients">
+            <thead><tr><th>Equipo</th><th>Conexiones</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Exportado ahora</h3><span class="muted small mono">exportfs -v</span></div>
+        <div class="table-wrap">
+          <table class="lx" id="nfs-active">
+            <thead><tr><th>Carpeta</th><th>Cliente</th><th>Opciones efectivas</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Cómo montar desde un cliente Linux</h3><span class="muted small">Pulsa «Montar» en una exportación para ver sus comandos</span></div>
+      <pre class="terminal output" id="nfs-howto"></pre>
+      <p class="small muted">Firewall: NFS (versión 4) usa el puerto <b>2049/TCP</b>. Ábrelo solo para las IP de los clientes en
+        <a href="{{ url_for('firewall.index') }}">Firewall</a>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────── Ventanas ───────────── -->
+<div class="modal" id="out-modal">
+  <div class="modal-box wide">
+    <h3 id="out-title">Salida</h3>
+    <pre class="terminal output" id="out-content"></pre>
+    <div class="form-actions"><button class="btn" onclick="closeModal('out-modal')">Cerrar</button></div>
+  </div>
+</div>
+
+<div class="modal" id="share-modal">
+  <div class="modal-box">
+    <h3 id="sh-title">Nuevo recurso</h3>
+    <div class="grid grid-2" style="margin:0;">
+      <label class="form-row"><span>Nombre del recurso</span>
+        <input class="input mono" id="sh-name" maxlength="40" placeholder="documentos"></label>
+      <label class="form-row"><span>Carpeta en el servidor</span>
+        <input class="input mono" id="sh-path" maxlength="255" placeholder="/srv/samba/documentos"></label>
+    </div>
+    <label class="form-row"><span>Descripción (opcional)</span>
+      <input class="input" id="sh-comment" maxlength="120" placeholder="Documentos de la oficina"></label>
+    <div class="checks" style="margin-bottom:14px;">
+      <label><input type="checkbox" id="sh-writable"> Permitir escritura</label>
+      <label><input type="checkbox" id="sh-guest"> Acceso de invitados (sin contraseña)</label>
+      <label><input type="checkbox" id="sh-browseable"> Visible en la red</label>
+    </div>
+    <label class="form-row"><span>Usuarios permitidos (vacío = cualquier usuario de Samba; grupos con @)</span>
+      <input class="input mono" id="sh-valid" placeholder="juan ana @contabilidad"></label>
+    <label class="form-row"><span>Pueden escribir aunque el recurso sea de solo lectura (write list)</span>
+      <input class="input mono" id="sh-write" placeholder="@jefes"></label>
+    <div class="grid grid-2" style="margin:0;">
+      <label class="form-row"><span>Permisos de archivos nuevos (create mask)</span>
+        <input class="input mono" id="sh-cmask" maxlength="4" placeholder="0664"></label>
+      <label class="form-row"><span>Permisos de carpetas nuevas (directory mask)</span>
+        <input class="input mono" id="sh-dmask" maxlength="4" placeholder="0775"></label>
+    </div>
+    <p class="small muted" style="margin:0;">Si la carpeta no existe, el panel te ofrecerá crearla. La configuración se valida
+      con <span class="mono">testparm</span> antes de aplicarse.</p>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('share-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="sh-submit" onclick="saveShare()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="export-modal">
+  <div class="modal-box">
+    <h3 id="ex-title">Nueva exportación NFS</h3>
+    <label class="form-row"><span>Carpeta a exportar</span>
+      <input class="input mono" id="ex-path" maxlength="255" placeholder="/srv/nfs/datos"></label>
+    <div class="form-row"><span>Clientes autorizados y opciones</span>
+      <div id="ex-clients"></div>
+      <div><button class="btn btn-sm" onclick="addClientRow('', 'rw,sync,no_subtree_check')">+ Agregar cliente</button></div>
+    </div>
+    <div class="small muted">
+      <p style="margin:0 0 6px;"><b>Cliente:</b> una IP (<span class="mono">192.168.1.20</span>), una red
+        (<span class="mono">192.168.1.0/24</span>), un nombre (<span class="mono">pc01.oficina.local</span>), un comodín
+        (<span class="mono">*.oficina.local</span>) o <span class="mono">*</span> (cualquiera).</p>
+      <p style="margin:0;"><b>Opciones</b> (separadas por comas): <span class="mono">rw</span>/<span class="mono">ro</span>,
+        <span class="mono">sync</span>/<span class="mono">async</span>, <span class="mono">no_subtree_check</span>,
+        <span class="mono">root_squash</span>/<span class="mono">no_root_squash</span>, <span class="mono">all_squash</span>,
+        <span class="mono">anonuid=N</span>, <span class="mono">anongid=N</span>, <span class="mono">secure</span>/<span class="mono">insecure</span>.</p>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('export-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="ex-submit" onclick="saveExport()">Guardar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = "{{ url_for('shares.index') }}";
+const EDIT_URL = "{{ url_for('files.index') }}?edit=";
+const SERVER = {{ server|tojson }};
+const SMB_CONF = {{ smb_conf|tojson }};
+const EXPORTS_FILE = {{ exports|tojson }};
+let smbShares = [], smbUsers = [], smbCandidates = [], nfsExports = [], nfsActive = [];
+let editingShare = null, editingExport = null;
+const loaded = {};
+
+const $ = id => document.getElementById(id);
+function closeModal(id) { $(id).classList.remove('open'); }
+function editFile(path) { location.href = EDIT_URL + encodeURIComponent(path); }
+
+function showOutput(title, text) {
+  $('out-title').textContent = title;
+  $('out-content').textContent = text || '(sin salida)';
+  $('out-modal').classList.add('open');
+}
+
+function report(d, okTitle) {
+  if (d.ok) {
+    ui.toast(okTitle);
+    // guardado, pero Samba no se pudo recargar o está detenido
+    const warn = (d.output || '').split('\n').find(l => /no se pudo recargar|no está activo/i.test(l));
+    if (warn) ui.toast(warn, 'warning', 8000);
+    return true;
+  }
+  if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
+  else ui.alert(d.error || 'Error desconocido', { title: 'Error', icon: 'error' });
+  return false;
+}
+
+function head(p, level, title, sub) {
+  $(p + '-head').dataset.level = level;
+  $(p + '-led').className = 'led lg ' + (level === 'ok' ? '' : level);
+  $(p + '-title').textContent = title;
+  $(p + '-sub').textContent = sub || '';
+}
+
+function emptyRow(cols, text) { return `<tr><td colspan="${cols}" class="muted center">${escapeHtml(text)}</td></tr>`; }
+
+async function getJSON(url) {
+  try { return await (await fetch(url)).json(); }
+  catch (e) { return { error: String(e) }; }
+}
+
+function selectTab(t) {
+  if (!['samba', 'nfs'].includes(t)) t = 'samba';
+  document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  $('pane-samba').hidden = t !== 'samba';
+  $('pane-nfs').hidden = t !== 'nfs';
+  history.replaceState(null, '', '#' + t);
+  if (!loaded[t]) { loaded[t] = true; t === 'samba' ? loadSamba() : loadNfs(); }
+}
+
+function svcButtons(svc, on) {
+  return on
+    ? `<button class="btn" onclick="svcAction(${jsArg(svc)}, 'restart')">Reiniciar</button>
+       <button class="btn btn-danger" onclick="svcAction(${jsArg(svc)}, 'stop')">Detener</button>`
+    : `<button class="btn btn-primary" onclick="svcAction(${jsArg(svc)}, 'start')">Iniciar</button>`;
+}
+
+async function svcAction(svc, act) {
+  const label = { start: 'Iniciar', stop: 'Detener', restart: 'Reiniciar' }[act];
+  const name = svc === 'samba' ? 'Samba' : 'el servidor NFS';
+  if (act !== 'start' && !await ui.confirm(`¿${label} ${name}? Se cortarán las conexiones de los usuarios conectados.`,
+      { title: label + ' ' + name, danger: true, confirmText: label })) return;
+  const d = await postJSON(BASE + 'api/' + svc + '/service', { action: act });
+  if (d.ok && d.output) showOutput(label + ': aviso', d.output);
+  else report(d, label + ': hecho');
+  svc === 'samba' ? loadSamba() : loadNfs();
+}
+
+async function install(svc) {
+  let body = {};
+  if (svc === 'samba') {
+    const f = await ui.form({
+      title: 'Instalar Samba',
+      text: 'Se instalará el paquete samba con apt. El servicio quedará en marcha con la configuración por defecto, sin carpetas compartidas todavía.',
+      fields: [{ name: 'smbclient', label: 'Instalar también smbclient (cliente para hacer pruebas)', type: 'checkbox', value: true }],
+      confirmText: 'Instalar',
+    });
+    if (!f) return;
+    body = f;
+  } else if (!await ui.confirm('Se instalará nfs-kernel-server con apt. No se exporta ninguna carpeta hasta que la agregues.',
+      { title: 'Instalar servidor NFS', confirmText: 'Instalar' })) return;
+  const b = $(svc + '-install-btn');
+  b.disabled = true; b.textContent = 'Instalando…';
+  const d = await postJSON(BASE + 'api/' + svc + '/install', body);
+  b.disabled = false; b.textContent = 'Instalar';
+  if (!report(d, 'Instalado correctamente')) return;
+  svc === 'samba' ? loadSamba() : loadNfs();
+}
+
+// Crea la carpeta si no existe (pregunta propietario, grupo y permisos) y reintenta
+async function postWithCreate(url, payload) {
+  let d = await postJSON(url, payload);
+  if (!d.ok && d.missing_path) {
+    const f = await ui.form({
+      title: 'La carpeta no existe',
+      text: `¿Crear ${payload.path}? Elige quién será su propietario en Linux.`,
+      fields: [
+        { name: 'owner', label: 'Propietario', value: 'root', required: true },
+        { name: 'group', label: 'Grupo', value: 'users', required: true, help: 'Los usuarios que deban escribir deben pertenecer a este grupo.' },
+        { name: 'mode', label: 'Permisos (octal)', value: '2775', required: true,
+          help: '2775: el propietario y el grupo leen y escriben; los demás solo leen; los archivos nuevos heredan el grupo.' },
+      ],
+      confirmText: 'Crear carpeta y guardar',
+    });
+    if (!f) return null;
+    d = await postJSON(url, { ...payload, create: f });
+  }
+  return d;
+}
+
+// ── Samba ───────────────────────────────────────────
+
+async function loadSamba() {
+  const st = await getJSON(BASE + 'api/samba/status');
+  const act = $('samba-actions');
+  act.innerHTML = '';
+  if (st.error) { head('samba', 'err', 'No se pudo consultar Samba', st.error); return; }
+  $('samba-install').hidden = st.installed;
+  $('samba-main').hidden = !st.installed;
+  if (!st.installed) {
+    head('samba', 'warn', 'Samba no está instalado', 'Instálalo para compartir carpetas con equipos Windows, macOS y Linux.');
+    return;
+  }
+  const on = st.smbd === 'active';
+  head('samba', on ? 'ok' : st.smbd === 'failed' ? 'err' : 'warn',
+    on ? 'Samba activo' : 'Samba detenido (' + st.smbd + ')',
+    `${st.version || 'Samba'} · smbd: ${st.smbd} · nmbd: ${st.nmbd} · ${st.sessions.length} sesión(es) · ${st.files.length} archivo(s) abiertos`);
+  act.innerHTML = svcButtons('samba', on);
+
+  $('samba-conn-note').textContent = st.sessions.length ? st.sessions.length + ' sesión(es)' : '';
+  $('samba-sessions').querySelector('tbody').innerHTML = st.sessions.length ? st.sessions.map(s => `<tr>
+      <td class="mono">${escapeHtml(s.user)}</td><td class="mono">${escapeHtml(s.machine)}</td>
+      <td class="mono small">${escapeHtml(s.protocol || '—')}</td><td class="small">${escapeHtml(s.encryption || '—')}</td>
+    </tr>`).join('') : emptyRow(4, 'Nadie conectado ahora');
+  $('samba-tcons').innerHTML = st.shares.length ? st.shares.map(t =>
+      `<span class="pill mute mono" title="${escapeHtml(t.connected_at)}">${escapeHtml(t.service)} · ${escapeHtml(t.machine)}</span>`).join(' ')
+    : '<span class="muted">Ninguno</span>';
+  $('samba-files').querySelector('tbody').innerHTML = st.files.length ? st.files.slice(0, 100).map(f => `<tr>
+      <td class="mono small">${escapeHtml(f.path)}</td><td class="mono small">${escapeHtml(f.users.join(', '))}</td>
+    </tr>`).join('') : emptyRow(2, 'Ningún archivo abierto');
+  if (!st.conf_exists) ui.toast('No existe /etc/samba/smb.conf', 'warning');
+  loadSmbConfig();
+  loadSmbUsers();
+}
+
+async function loadSmbConfig() {
+  const d = await getJSON(BASE + 'api/samba/config');
+  const tbody = $('samba-shares').querySelector('tbody');
+  if (d.error) { tbody.innerHTML = emptyRow(6, d.error); return; }
+  for (const [k, v] of Object.entries(d.global)) { const el = $('g-' + k); if (el) el.value = v ?? ''; }
+  smbShares = d.shares;
+  tbody.innerHTML = smbShares.length ? smbShares.map(s => {
+    const homes = s.name.toLowerCase() === 'homes';
+    const folder = homes && !s.path ? '<span class="muted small">Carpeta personal de cada usuario</span>'
+      : `<span class="mono small">${escapeHtml(s.path || '—')}</span>` + (s.path
+        ? (s.exists ? `<div class="small muted mono">${escapeHtml(s.perm)}</div>` : ' <span class="pill err">no existe</span>') : '');
+    const access = (s.printable ? '<span class="pill mute">impresora</span>'
+        : `<span class="pill ${s.read_only ? 'mute' : 'ok'}">${s.read_only ? 'solo lectura' : 'lectura y escritura'}</span>`)
+      + (s.guest_ok ? ' <span class="pill warn">invitados</span>' : '')
+      + (s.browseable ? '' : ' <span class="pill mute">oculto</span>');
+    const users = (s.valid_users ? `<span class="mono small">${escapeHtml(s.valid_users)}</span>` : '<span class="muted small">todos</span>')
+      + (s.write_list ? `<div class="small muted">escriben: <span class="mono">${escapeHtml(s.write_list)}</span></div>` : '');
+    const masks = s.create_mask || s.directory_mask
+      ? `<span class="mono small">${escapeHtml(s.create_mask || '—')} / ${escapeHtml(s.directory_mask || '—')}</span>` : '<span class="muted">—</span>';
+    return `<tr>
+      <td><b class="mono">${escapeHtml(s.name)}</b>${s.special ? ' <span class="pill mute">especial</span>' : ''}
+        ${s.comment ? `<div class="small muted">${escapeHtml(s.comment)}</div>` : ''}</td>
+      <td>${folder}</td><td>${access}</td><td>${users}</td><td>${masks}</td>
+      <td class="right" style="white-space:nowrap;">
+        ${s.printable ? '' : `<button class="btn btn-sm" onclick="connectShare(${jsArg(s.name)})">Conectar</button>`}
+        <button class="btn btn-sm" onclick="openShare(${jsArg(s.name)})">Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteShare(${jsArg(s.name)})">Eliminar</button>
+      </td></tr>`;
+  }).join('') : emptyRow(6, 'No hay recursos compartidos. Pulsa «+ Nuevo recurso».');
+}
+
+async function saveGlobal() {
+  const body = {};
+  ['workgroup', 'netbios_name', 'server_string', 'security', 'map_to_guest', 'min_protocol'].forEach(k => body[k] = $('g-' + k).value.trim());
+  const b = $('g-save'); b.disabled = true;
+  const d = await postJSON(BASE + 'api/samba/global', body);
+  b.disabled = false;
+  if (report(d, d.output === 'Sin cambios.' ? 'Sin cambios' : 'Configuración global guardada')) loadSmbConfig();
+}
+
+function openShare(name) {
+  const s = name ? smbShares.find(x => x.name === name) : null;
+  editingShare = s ? s.name : null;
+  $('sh-title').textContent = s ? 'Editar recurso: ' + s.name : 'Nuevo recurso';
+  $('sh-name').value = s ? s.name : '';
+  $('sh-name').disabled = !!s;
+  $('sh-path').value = s ? s.path : '';
+  $('sh-path').placeholder = s && s.special ? '(vacío = no cambiar)' : '/srv/samba/documentos';
+  $('sh-comment').value = s ? s.comment : '';
+  $('sh-writable').checked = s ? !s.read_only : true;
+  $('sh-guest').checked = s ? s.guest_ok : false;
+  $('sh-browseable').checked = s ? s.browseable : true;
+  $('sh-valid').value = s ? s.valid_users : '';
+  $('sh-write').value = s ? s.write_list : '';
+  $('sh-cmask').value = s ? s.create_mask : '0664';
+  $('sh-dmask').value = s ? s.directory_mask : '0775';
+  $('share-modal').classList.add('open');
+  (s ? $('sh-path') : $('sh-name')).focus();
+}
+
+async function saveShare() {
+  const payload = {
+    original: editingShare || '', name: $('sh-name').value.trim(), path: $('sh-path').value.trim(),
+    comment: $('sh-comment').value.trim(), writable: $('sh-writable').checked, guest_ok: $('sh-guest').checked,
+    browseable: $('sh-browseable').checked, valid_users: $('sh-valid').value, write_list: $('sh-write').value,
+    create_mask: $('sh-cmask').value.trim(), directory_mask: $('sh-dmask').value.trim(),
+  };
+  if (payload.guest_ok && !await ui.confirm('Cualquier persona de la red podrá entrar a este recurso sin contraseña' +
+      (payload.writable ? ' y modificar o borrar archivos.' : '.') + ' Recuerda poner «Invitados» en Bad User en la configuración global.',
+      { title: 'Acceso de invitados', danger: payload.writable, confirmText: 'Continuar' })) return;
+  const b = $('sh-submit'); b.disabled = true;
+  const d = await postWithCreate(BASE + 'api/samba/share', payload);
+  b.disabled = false;
+  if (!d) return;
+  if (report(d, editingShare ? 'Recurso actualizado' : 'Recurso creado')) { closeModal('share-modal'); loadSmbConfig(); }
+}
+
+async function deleteShare(name) {
+  if (!await ui.confirm(`Se quitará el recurso «${name}» de smb.conf. Los archivos de la carpeta NO se borran.`,
+      { title: 'Eliminar recurso', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(BASE + 'api/samba/share/delete', { name });
+  if (report(d, 'Recurso eliminado')) loadSmbConfig();
+}
+
+function connectShare(name) {
+  const s = smbShares.find(x => x.name === name) || { name };
+  const unc = '\\\\' + SERVER + '\\' + s.name;
+  const remote = '//' + SERVER + '/' + s.name;
+  const q = /\s/.test(remote) ? `"${remote}"` : remote;
+  const mnt = '/mnt/' + (s.name.toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'recurso');
+  const fstabRemote = remote.replace(/ /g, '\\040');
+  showOutput('Conectar a ' + s.name, [
+    '# Windows: Explorador de archivos → barra de direcciones (o Win+R)',
+    unc,
+    '# Windows: asignar la letra Z: desde CMD',
+    `net use Z: "${unc}" /user:USUARIO /persistent:yes`,
+    '',
+    '# macOS (Finder → Ir → Conectarse al servidor)',
+    'smb://' + SERVER + '/' + encodeURIComponent(s.name),
+    '',
+    '# Linux: probar el acceso',
+    `smbclient ${q} -U USUARIO`,
+    '',
+    '# Linux: montar (requiere el paquete cifs-utils)',
+    'apt install cifs-utils',
+    `mkdir -p ${mnt}`,
+    `mount -t cifs ${q} ${mnt} -o username=USUARIO,uid=$(id -u USUARIO),gid=$(id -g USUARIO)`,
+    '',
+    '# Linux: montar al arrancar (/etc/fstab). Guarda las credenciales en /root/.smbcred',
+    '# (líneas "username=USUARIO" y "password=CLAVE", con chmod 600)',
+    `${fstabRemote}  ${mnt}  cifs  credentials=/root/.smbcred,uid=1000,gid=1000,_netdev  0  0`,
+  ].join('\n'));
+}
+
+async function loadSmbUsers() {
+  const d = await getJSON(BASE + 'api/samba/users');
+  const tbody = $('samba-users').querySelector('tbody');
+  if (d.error && !d.users) { tbody.innerHTML = emptyRow(5, d.error); return; }
+  smbUsers = d.users || [];
+  smbCandidates = d.candidates || [];
+  tbody.innerHTML = smbUsers.length ? smbUsers.map(u => `<tr>
+      <td class="mono">${escapeHtml(u.username)}${u.linux ? '' : ' <span class="pill err" title="El usuario de Linux ya no existe">sin cuenta Linux</span>'}</td>
+      <td>${escapeHtml(u.full_name || '—')}</td>
+      <td><span class="pill ${u.disabled ? 'mute' : 'ok'}" title="Indicadores: ${escapeHtml(u.flags)}">${u.disabled ? 'deshabilitado' : 'activo'}</span></td>
+      <td class="small muted">${escapeHtml(u.pwd_last_set || '—')}</td>
+      <td class="right" style="white-space:nowrap;">
+        <button class="btn btn-sm" onclick="smbPasswd(${jsArg(u.username)})">Contraseña</button>
+        <button class="btn btn-sm" onclick="smbUserAction(${jsArg(u.username)}, ${jsArg(u.disabled ? 'enable' : 'disable')})">${u.disabled ? 'Habilitar' : 'Deshabilitar'}</button>
+        <button class="btn btn-sm btn-danger" onclick="smbUserAction(${jsArg(u.username)}, 'delete')">Eliminar</button>
+      </td></tr>`).join('')
+    : emptyRow(5, d.error || 'Todavía no hay usuarios de Samba. Pulsa «+ Agregar usuario».');
+}
+
+const pwFields = [
+  { name: 'pw', label: 'Contraseña de Samba', type: 'password', required: true, help: 'Mínimo 8 caracteres.' },
+  { name: 'pw2', label: 'Repite la contraseña', type: 'password', required: true },
+];
+const pwValidate = v => v.pw.length < 8 ? 'La contraseña debe tener al menos 8 caracteres.'
+  : v.pw !== v.pw2 ? 'Las contraseñas no coinciden.' : null;
+
+async function addSmbUser() {
+  if (!smbCandidates.length) {
+    return ui.alert('Todos los usuarios de Linux (UID 1000 o mayor) ya tienen cuenta de Samba. Crea primero el usuario en «Usuarios y grupos».',
+      { title: 'No hay usuarios disponibles' });
+  }
+  const f = await ui.form({
+    title: 'Agregar usuario de Samba',
+    text: 'Elige un usuario de Linux existente y define su contraseña para acceder a los recursos compartidos.',
+    fields: [{ name: 'user', label: 'Usuario de Linux', type: 'select', options: smbCandidates, value: smbCandidates[0] }, ...pwFields],
+    validate: pwValidate, confirmText: 'Agregar',
+  });
+  if (!f) return;
+  const d = await postJSON(BASE + 'api/samba/user', { action: 'add', user: f.user, password: f.pw });
+  if (report(d, 'Usuario ' + f.user + ' agregado a Samba')) loadSmbUsers();
+}
+
+async function smbPasswd(user) {
+  const f = await ui.form({ title: 'Cambiar contraseña de Samba', text: 'Usuario: ' + user + '. No cambia su contraseña de Linux.',
+    fields: pwFields, validate: pwValidate, confirmText: 'Cambiar' });
+  if (!f) return;
+  const d = await postJSON(BASE + 'api/samba/user', { action: 'passwd', user, password: f.pw });
+  report(d, 'Contraseña actualizada');
+  loadSmbUsers();
+}
+
+async function smbUserAction(user, act) {
+  const txt = {
+    enable: [`¿Habilitar la cuenta de Samba de ${user}?`, 'Habilitar', false],
+    disable: [`${user} ya no podrá conectarse a los recursos compartidos (su cuenta de Linux no cambia).`, 'Deshabilitar', true],
+    delete: [`Se eliminará la cuenta de Samba de ${user}. Su usuario de Linux y sus archivos NO se borran.`, 'Eliminar', true],
+  }[act];
+  if (!await ui.confirm(txt[0], { title: txt[1] + ' usuario de Samba', danger: txt[2], confirmText: txt[1] })) return;
+  const d = await postJSON(BASE + 'api/samba/user', { action: act, user });
+  report(d, txt[1] + ': ' + user);
+  loadSmbUsers();
+}
+
+// ── NFS ─────────────────────────────────────────────
+
+async function loadNfs() {
+  const st = await getJSON(BASE + 'api/nfs/status');
+  const act = $('nfs-actions');
+  act.innerHTML = '';
+  if (st.error) { head('nfs', 'err', 'No se pudo consultar NFS', st.error); return; }
+  $('nfs-install').hidden = st.installed;
+  $('nfs-main').hidden = !st.installed;
+  if (!st.installed) {
+    head('nfs', 'warn', 'El servidor NFS no está instalado', 'Instálalo para compartir carpetas con otros servidores Linux.');
+    return;
+  }
+  const on = st.active === 'active';
+  nfsActive = st.exported || [];
+  head('nfs', on ? 'ok' : st.active === 'failed' ? 'err' : 'warn',
+    on ? 'Servidor NFS activo' : 'Servidor NFS detenido (' + st.active + ')',
+    (st.versions.length ? 'Versiones: ' + st.versions.join(', ') + ' · ' : '')
+    + `${nfsActive.length} carpeta(s) exportada(s) · ${st.clients.length} cliente(s) conectado(s)`
+    + (st.exportfs_error ? ' · exportfs: ' + st.exportfs_error : ''));
+  act.innerHTML = svcButtons('nfs', on);
+  $('nfs-clients').querySelector('tbody').innerHTML = st.clients.length ? st.clients.map(c =>
+    `<tr><td class="mono">${escapeHtml(c.address)}</td><td>${escapeHtml(c.connections)}</td></tr>`).join('')
+    : emptyRow(2, 'Ningún cliente conectado');
+  const rows = nfsActive.flatMap(e => e.clients.map(c => `<tr><td class="mono small">${escapeHtml(e.path)}</td>
+    <td class="mono small">${escapeHtml(c.host)}</td><td class="mono small">${escapeHtml(c.options.join(','))}</td></tr>`));
+  $('nfs-active').querySelector('tbody').innerHTML = rows.length ? rows.join('') : emptyRow(3, 'Nada exportado');
+  loadExports();
+}
+
+async function loadExports() {
+  const d = await getJSON(BASE + 'api/nfs/exports');
+  const tbody = $('nfs-exports').querySelector('tbody');
+  if (d.error) { tbody.innerHTML = emptyRow(4, d.error); return; }
+  nfsExports = d.exports;
+  const active = new Set(nfsActive.map(e => e.path));
+  tbody.innerHTML = nfsExports.length ? nfsExports.map(x => `<tr>
+      <td><span class="mono">${escapeHtml(x.path)}</span>
+        ${x.exists ? `<div class="small muted mono">${escapeHtml(x.perm)}</div>` : ' <span class="pill err">no existe</span>'}</td>
+      <td>${x.clients.map(c => `<span class="pill mute mono">${escapeHtml(c.host)}${c.options.length ? '(' + escapeHtml(c.options.join(',')) + ')' : ''}</span>`).join(' ')}
+        ${x.editable ? '' : '<div class="small muted">Opciones avanzadas: edítala en el archivo.</div>'}</td>
+      <td><span class="pill ${active.has(x.path) ? 'ok' : 'warn'}">${active.has(x.path) ? 'exportada' : 'no activa'}</span></td>
+      <td class="right" style="white-space:nowrap;">
+        <button class="btn btn-sm" onclick="mountHelp(${jsArg(x.path)})">Montar</button>
+        ${x.editable ? `<button class="btn btn-sm" onclick="openExport(${jsArg(x.path)})">Editar</button>`
+          : `<button class="btn btn-sm" onclick="editFile(EXPORTS_FILE)">Editar archivo</button>`}
+        <button class="btn btn-sm btn-danger" onclick="deleteExport(${jsArg(x.path)})">Eliminar</button>
+      </td></tr>`).join('') : emptyRow(4, 'No hay carpetas exportadas. Pulsa «+ Nueva exportación».');
+  $('nfs-howto').textContent = mountText(nfsExports.length ? nfsExports[0].path : '/srv/nfs/datos');
+}
+
+function mountText(path) {
+  const mnt = '/mnt/' + (path.split('/').filter(Boolean).pop() || 'nfs');
+  return [
+    '# En el cliente (como root): instalar el cliente NFS',
+    'apt install nfs-common',
+    '',
+    '# Ver qué exporta este servidor',
+    `showmount -e ${SERVER}`,
+    '',
+    '# Montar una vez',
+    `mkdir -p ${mnt}`,
+    `mount -t nfs ${SERVER}:${path} ${mnt}`,
+    '',
+    '# Montar al arrancar: agrega esta línea a /etc/fstab',
+    `${SERVER}:${path}  ${mnt}  nfs  defaults,_netdev  0  0`,
+  ].join('\n');
+}
+
+function mountHelp(path) { showOutput('Montar ' + path, mountText(path)); }
+
+function addClientRow(host, opts) {
+  const row = document.createElement('div');
+  row.className = 'toolbar';
+  row.style.marginBottom = '6px';
+  row.innerHTML = `<input class="input mono ex-host" placeholder="192.168.1.0/24" style="max-width:200px;">
+    <input class="input mono ex-opts" placeholder="rw,sync,no_subtree_check">
+    <button class="btn btn-sm btn-danger" title="Quitar cliente">✕</button>`;
+  row.querySelector('.ex-host').value = host || '';
+  row.querySelector('.ex-opts').value = opts || '';
+  row.querySelector('button').addEventListener('click', () => row.remove());
+  $('ex-clients').appendChild(row);
+}
+
+function openExport(path) {
+  const x = path ? nfsExports.find(e => e.path === path) : null;
+  editingExport = x ? x.path : null;
+  $('ex-title').textContent = x ? 'Editar exportación' : 'Nueva exportación NFS';
+  $('ex-path').value = x ? x.path : '';
+  $('ex-clients').innerHTML = '';
+  if (x) x.clients.forEach(c => addClientRow(c.host, c.options.join(',')));
+  else addClientRow('', 'rw,sync,no_subtree_check');
+  $('export-modal').classList.add('open');
+  $('ex-path').focus();
+}
+
+async function saveExport() {
+  const clients = [...document.querySelectorAll('#ex-clients .toolbar')].map(r => ({
+    host: r.querySelector('.ex-host').value.trim(), options: r.querySelector('.ex-opts').value.replace(/\s+/g, ''),
+  })).filter(c => c.host || c.options);
+  const payload = { original: editingExport || '', path: $('ex-path').value.trim(), clients };
+  if (clients.some(c => c.options.split(',').includes('no_root_squash')) && !await ui.confirm(
+      'Con no_root_squash, el usuario root del cliente tendrá control total sobre los archivos exportados. Úsalo solo con equipos de confianza.',
+      { title: 'no_root_squash', danger: true, confirmText: 'Continuar' })) return;
+  const b = $('ex-submit'); b.disabled = true;
+  const d = await postWithCreate(BASE + 'api/nfs/export', payload);
+  b.disabled = false;
+  if (!d) return;
+  if (report(d, editingExport ? 'Exportación actualizada' : 'Carpeta exportada')) {
+    closeModal('export-modal');
+    if (d.output) showOutput('exportfs -ra', d.output);
+    loadNfs();
+  }
+}
+
+async function deleteExport(path) {
+  if (!await ui.confirm(`Se dejará de exportar ${path}. Los clientes que la tengan montada perderán el acceso. Los archivos NO se borran.`,
+      { title: 'Eliminar exportación', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(BASE + 'api/nfs/export/delete', { path });
+  if (report(d, 'Exportación eliminada')) loadNfs();
+}
+
+selectTab(location.hash.slice(1));
+</script>
+{% endblock %}

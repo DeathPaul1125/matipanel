@@ -39,7 +39,7 @@ El filtro busca en el nombre de la unidad y en la descripción. Por ejemplo, `sq
 | **⏻ off** | `disable` | Evita que arranque con el sistema (solo aparece si está `enabled`) |
 | **estado** | `status` | Muestra el estado detallado y las últimas 40 líneas de log |
 
-Todas las acciones, salvo **estado**, piden confirmación. El diálogo dice "¿Ejecutar *acción* en *servicio*?" y el botón de confirmar lleva el nombre de la acción en inglés (`start`, `stop`, `restart`, `enable`, `disable`). Las acciones `stop`, `restart` y `disable` se muestran como peligrosas (botón rojo).
+Todas las acciones, salvo **estado**, piden confirmación. El diálogo explica qué va a pasar (por ejemplo "¿Reiniciar el servicio nginx.service? Se cortará unos segundos.") y el botón de confirmar dice **Iniciar**, **Detener**, **Reiniciar**, **Habilitar al arranque** o **Deshabilitar al arranque**. Detener, reiniciar y deshabilitar se muestran como peligrosas (botón rojo).
 
 > **Nota:** Si un servicio está `static`, `masked` u otro estado, no verás los botones **⏻ on** / **⏻ off**. Los servicios `static` arrancan porque otro servicio los necesita, no por sí mismos.
 
@@ -49,7 +49,7 @@ Todas las acciones, salvo **estado**, piden confirmación. El diálogo dice "¿E
 
 1. Busca el servicio con el campo **Buscar servicio…**.
 2. Haz clic en **↻** en su fila.
-3. Confirma con **restart**.
+3. Confirma con **Reiniciar**.
 4. Revisa que el **Estado** quede en `active` y el **Sub** en `running`.
 
 Si el servicio no arranca, verás un diálogo **Error** con el mensaje de systemd. Haz clic en **estado** para ver el detalle y el log.
@@ -60,7 +60,7 @@ Si el servicio no arranca, verás un diálogo **Error** con el mensaje de system
 
 1. Busca el servicio.
 2. Haz clic en **▶** para iniciarlo o en **■** para detenerlo.
-3. Confirma con **start** o **stop**.
+3. Confirma con **Iniciar** o **Detener**.
 
 > **Importante:** Detener un servicio no evita que vuelva a arrancar en el próximo reinicio del servidor. Para eso, además, deshabilítalo con **⏻ off**.
 
@@ -69,8 +69,8 @@ Si el servicio no arranca, verás un diálogo **Error** con el mensaje de system
 ## Hacer que un servicio arranque (o no) con el sistema
 
 1. Busca el servicio.
-2. Si la columna **Arranque** dice `disabled`, haz clic en **⏻ on** y confirma con **enable**.
-3. Si dice `enabled`, haz clic en **⏻ off** y confirma con **disable**.
+2. Si la columna **Arranque** dice `disabled`, haz clic en **⏻ on** y confirma con **Habilitar al arranque**.
+3. Si dice `enabled`, haz clic en **⏻ off** y confirma con **Deshabilitar al arranque**.
 
 Esto solo cambia el comportamiento en el próximo arranque. No inicia ni detiene el servicio ahora. Si quieres ambas cosas, usa también **▶** o **■**.
 
@@ -86,7 +86,7 @@ Esto solo cambia el comportamiento en el próximo arranque. No inicia ni detiene
 
 1. Haz clic en **estado** y lee las últimas líneas. Suelen indicar la causa (archivo de configuración con error, puerto ocupado, permiso denegado).
 2. Corrige la causa (por ejemplo, editando la configuración en [Archivos](26-archivos.md)).
-3. Haz clic en **↻** y confirma con **restart**.
+3. Haz clic en **↻** y confirma con **Reiniciar**.
 4. Si el servicio no lo necesitas, detenlo con **■** y deshabilítalo con **⏻ off** para que deje de aparecer como fallido tras el próximo reinicio.
 
 ## Preguntas frecuentes

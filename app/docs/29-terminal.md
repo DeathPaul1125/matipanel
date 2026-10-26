@@ -17,7 +17,7 @@ La barra de título muestra `usuario@servidor: Terminal MatiPanel`.
 - Se carga tu entorno normal (`/etc/profile`, `~/.profile` y `~/.bashrc`), así que tus alias y variables funcionan.
 - Si tu shell no es `bash`, se abre tu shell de login sin el banner ni el prompt de MatiPanel.
 
-> **Nota:** El `PATH` inicial no incluye `/usr/sbin`. Algunos comandos de administración no se encuentran si no usas `sudo` o la ruta completa (por ejemplo `/usr/sbin/ufw`).
+> **Nota:** El `PATH` inicial incluye `/usr/sbin` y `/sbin`, así que comandos de administración como `ufw` o `useradd` se encuentran sin escribir la ruta completa. Aun así, la mayoría necesitan `sudo` para hacer cambios.
 
 ## Usar sudo para tareas de administración
 
@@ -69,7 +69,7 @@ El prompt tiene segmentos de color:
 
 `Ctrl+C` **no** copia: en la terminal interrumpe el comando que se está ejecutando.
 
-Si el navegador bloquea el acceso al portapapeles, verás un aviso. Permite el acceso al portapapeles para el sitio del panel, o usa el menú contextual del navegador (clic derecho) para pegar.
+Si el navegador bloquea el acceso al portapapeles, verás el aviso **El navegador no permitió leer el portapapeles. Pega con clic derecho → Pegar sobre la terminal, o con Ctrl+V.** Haz eso, o permite el acceso al portapapeles para el sitio del panel.
 
 ## Cambiar el tamaño de letra y usar pantalla completa
 
@@ -100,7 +100,7 @@ En la terminal, `Ctrl+C` interrumpe. Para copiar usa `Ctrl+Shift+C`.
 
 ### Escribo `ufw` o `useradd` y dice "command not found".
 
-Esos comandos están en `/usr/sbin`, que no está en el `PATH` de tu usuario. Usa `sudo ufw status` o la ruta completa (`/usr/sbin/ufw`).
+El `PATH` de la terminal ya incluye `/usr/sbin` y `/sbin`. Si aun así no aparece, el paquete no está instalado (instálalo en [Paquetes](27-paquetes.md)). Si el comando aparece pero dice "permiso denegado", antepón `sudo` (por ejemplo `sudo ufw status`).
 
 ### La terminal se desconectó mientras corría un proceso largo. ¿Sigue corriendo?
 

@@ -38,6 +38,14 @@ systemctl restart matipanel
    ```
    Debe responder `True Success`.
 
+## "No se pudo leer la configuración de 2FA; revisa /var/lib/matipanel/2fa.json"
+
+El archivo de 2FA existe pero está dañado (JSON mal formado) o no se puede leer. Por seguridad el panel **no deja entrar a nadie** mientras tanto, en lugar de saltarse el 2FA, y no sobrescribe el archivo.
+
+1. Revisa el archivo en la consola o por SSH: `sudo python3 -m json.tool /var/lib/matipanel/2fa.json` indica la línea con el error.
+2. Corrígelo, o restáuralo desde un respaldo.
+3. Si no se puede reparar, bórralo con `sudo rm /var/lib/matipanel/2fa.json`. Todos los usuarios entrarán solo con contraseña y tendrán que volver a configurar su 2FA.
+
 ## "Usuario o contraseña incorrectos, o sin permiso para el panel"
 
 El mensaje es el mismo en ambos casos a propósito, para no revelar qué usuarios existen. Revisa:
@@ -54,7 +62,7 @@ Hubo 5 intentos fallidos desde tu IP. Espera 5 minutos. Si es urgente, otro admi
 ## Perdí el teléfono con el código 2FA
 
 1. Entra con uno de tus **códigos de recuperación** (8 caracteres) en lugar del código de 6 dígitos.
-2. Ya dentro, ve a [Seguridad (2FA)](30-seguridad-2fa.md), desactiva el 2FA y vuelve a configurarlo con el teléfono nuevo.
+2. Ya dentro, ve a [Seguridad (2FA)](30-seguridad-2fa.md) y desactiva el 2FA escribiendo **otro** código de recuperación (el que usaste para entrar ya está gastado). Luego vuelve a configurarlo con el teléfono nuevo.
 
 Si tampoco tienes códigos de recuperación, un administrador con acceso a la consola puede borrar tu 2FA:
 

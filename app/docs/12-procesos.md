@@ -46,7 +46,7 @@ El filtro busca dentro del comando completo, el usuario y el PID. Por ejemplo, `
 
 1. Busca el proceso en la tabla.
 2. Haz clic en **Kill** en su fila.
-3. En el diálogo **Terminar proceso** ("¿Enviar SIGTERM al proceso …?"), haz clic en **Terminar**.
+3. En el diálogo **Terminar proceso** ("¿Enviar SIGTERM al proceso …?"), haz clic en **Terminar**. Si el proceso no responde, marca antes **Forzar (SIGKILL)**.
 
 La tabla se recarga medio segundo después. Si el proceso ya no aparece, terminó.
 
@@ -57,9 +57,9 @@ El botón envía la señal `SIGTERM`. Es una petición educada: el programa pued
 Si el proceso sigue apareciendo después de refrescar:
 
 1. Espera unos segundos y vuelve a hacer clic en **Refrescar**.
-2. Si sigue ahí, fuérzalo desde la [Terminal](29-terminal.md) con `kill -9 PID`.
+2. Si sigue ahí, vuelve a pulsar **Kill**, marca **Forzar (SIGKILL)** y pulsa **Terminar**. Equivale a `kill -9 PID`: el proceso muere al instante.
 
-> **Nota:** El panel no tiene un botón para forzar el cierre (`SIGKILL`). Úsalo solo como último recurso: forzar el cierre puede dejar archivos o bases de datos a medio escribir.
+> **Importante:** Usa **Forzar (SIGKILL)** solo como último recurso: el programa no tiene ocasión de cerrar, y puede dejar archivos o bases de datos a medio escribir.
 
 ### Procesos que no se pueden terminar
 

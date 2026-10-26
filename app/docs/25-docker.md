@@ -4,16 +4,10 @@ Este módulo muestra los contenedores, imágenes y volúmenes de Docker, y permi
 
 ## Requisitos
 
-- Docker debe estar instalado. Si no lo está, la página muestra **Docker no está instalado** con un comando de instalación.
-- MatiPanel detecta Docker al arrancar. Si lo instalas con el panel ya funcionando, reinicia el servicio del panel para que aparezca el módulo:
+- Docker debe estar instalado. Si no lo está, la página muestra **Docker no está instalado** con el comando de instalación desde los repositorios de Debian: `sudo apt install docker.io` (también puedes instalar el paquete `docker.io` desde [Paquetes](27-paquetes.md)).
+- MatiPanel detecta Docker cada vez que abres la página. Después de instalarlo, basta con recargarla; no hace falta reiniciar el panel.
 
-```
-sudo systemctl restart matipanel
-```
-
-> **Nota:** El panel corre como `root`, así que no necesita estar en el grupo `docker`. La línea `usermod -aG docker matipanel` que aparece en la pantalla de instalación no es necesaria.
-
-> **Importante:** El comando sugerido (`curl -fsSL https://get.docker.com | sudo sh`) instala Docker desde el repositorio oficial de Docker, no desde Debian. Consulta la política de la institución antes de usarlo. La alternativa de Debian es el paquete `docker.io`, disponible en [Paquetes](27-paquetes.md).
+> **Nota:** El panel corre como `root`, así que no necesita estar en el grupo `docker`.
 
 ## Qué puedes y qué no puedes hacer
 
@@ -65,10 +59,9 @@ En la columna **Acciones** de cada contenedor:
 | **↻** | Reinicia el contenedor (`docker restart`). |
 
 1. Pulsa el botón de la acción.
-2. Espera un momento. La tabla se actualiza sola.
-3. Si algo falla, aparece un diálogo **Error** con el mensaje de Docker.
-
-> **Importante:** Estos botones **no piden confirmación**. Detener o reiniciar un contenedor corta el servicio que presta. Revisa bien la fila antes de pulsar.
+2. Confirma en el diálogo (**Iniciar container**, **Detener container** o **Reiniciar container**). Detener y reiniciar se muestran como peligrosos (botón rojo), porque cortan el servicio que presta el contenedor.
+3. Espera un momento. La tabla se actualiza sola.
+4. Si algo falla, aparece un diálogo **Error** con el mensaje de Docker.
 
 > **Nota:** Si un contenedor tiene una política de reinicio (`--restart always`), Docker puede volver a iniciarlo por su cuenta.
 
@@ -79,8 +72,6 @@ En la columna **Acciones** de cada contenedor:
 3. Pulsa **Cerrar** para volver.
 
 Los logs no se actualizan en vivo. Vuelve a pulsar **logs** para ver las líneas nuevas. Para seguirlos en tiempo real usa la [Terminal](29-terminal.md): `sudo docker logs -f <nombre>`.
-
-> **Consejo:** Si la página es larga y no ves la ventana de logs, sube al inicio de la página.
 
 ## Revisar imágenes y volúmenes
 
@@ -95,7 +86,7 @@ Estas tablas son solo de consulta y se cargan al abrir la página. Recarga la p�
 
 ### Instalé Docker y el panel sigue diciendo "Docker no está instalado".
 
-El panel detecta Docker solo al arrancar. Ejecuta `sudo systemctl restart matipanel` en la [Terminal](29-terminal.md) y recarga la página.
+Recarga la página. Si sigue igual, comprueba en la [Terminal](29-terminal.md) que el comando exista (`which docker`) y que el servicio esté activo (`systemctl status docker`).
 
 ### ¿Cómo elimino un contenedor o una imagen que ya no uso?
 

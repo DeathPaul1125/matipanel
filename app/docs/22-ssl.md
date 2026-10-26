@@ -33,7 +33,7 @@ Let's Encrypt comprueba desde Internet que el dominio es tuyo. Para eso necesita
 | **Ruta webroot** | Solo con **Webroot**. Carpeta pública del sitio, por ejemplo `/var/www/sistema.ejemplo.gob.gt/public_html`. Debe existir. |
 | **Redirigir HTTP a HTTPS** | Solo con Apache o Nginx. Marcado por defecto. Hace que `http://` salte a `https://`. |
 
-> **Importante:** El método preseleccionado es **Apache**. Si tu servidor usa Nginx, cámbialo a **Nginx (instala en el vhost)** antes de pulsar **Obtener**.
+> **Nota:** El método se preselecciona según el servidor web instalado: **Apache** si está Apache, **Nginx** si solo está Nginx, y **Webroot** si no hay ninguno de los dos. Revísalo antes de pulsar **Obtener**.
 
 ## Elegir el método adecuado
 

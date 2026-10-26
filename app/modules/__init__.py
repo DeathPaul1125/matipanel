@@ -15,6 +15,9 @@ from .php import php_bp
 from .databases import databases_bp
 from .docker import docker_bp
 from .appearance import appearance_bp
+from .remote import remote_bp
+from .mail import mail_bp
+from .shares import shares_bp
 from .help import help_bp, CONTEXT as HELP_CONTEXT
 from .files import files_bp
 from .packages import packages_bp
@@ -33,6 +36,8 @@ def register_modules(app, sock):
         (databases_bp, "/databases"), (docker_bp, "/docker"), (files_bp, "/files"),
         (packages_bp, "/packages"), (logs_bp, "/logs"), (terminal_bp, "/terminal"),
         (appearance_bp, "/apariencia"), (help_bp, "/ayuda"),
+        (mail_bp, "/correo"), (shares_bp, "/compartidos"),
+        (remote_bp, "/servidores"),  # ruta fija: los paneles se consultan entre sí en /servidores/api/remote/summary
     ]:
         app.register_blueprint(bp, url_prefix=prefix)
 

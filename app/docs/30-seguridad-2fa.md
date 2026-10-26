@@ -40,7 +40,9 @@ Después de **5 intentos fallidos en 5 minutos**, el panel bloquea los nuevos in
 
 > **Importante:** Los códigos de recuperación se muestran **una sola vez**. No podrás verlos de nuevo.
 
-> **Importante:** Si al activar ves **Código inválido. Intenta de nuevo.**, vuelves a la página de Seguridad. Al pulsar otra vez **Configurar 2FA** se genera un **QR nuevo y códigos nuevos**. Borra en la app la entrada anterior de MatiPanel, escanea el QR nuevo y descarta los códigos viejos.
+Si al activar ves **Código inválido. Revisa la hora del teléfono y vuelve a intentarlo.**, sigues en la misma página, con **el mismo QR y los mismos códigos de recuperación**. No hace falta volver a escanear: espera a que la app muestre un código nuevo y escríbelo.
+
+> **Importante:** Si sales de la página y vuelves a pulsar **Configurar 2FA**, se genera un **QR nuevo y códigos nuevos**. Borra en la app la entrada anterior de MatiPanel, escanea el QR nuevo y descarta los códigos viejos.
 
 Si pulsas **Cancelar** en la página de configuración, el 2FA no se activa.
 
@@ -59,29 +61,30 @@ El panel acepta el código actual y también el inmediatamente anterior o siguie
 
 1. En **Código de verificación**, escribe uno de tus códigos de recuperación en el mismo campo (**Código (o uno de recuperación)**). Son 8 caracteres con números y letras de la `a` a la `f`.
 2. Pulsa **Verificar**.
-3. Verás **Usaste un código de recuperación. Genera uno nuevo en Seguridad.**
+3. Verás **Usaste un código de recuperación; te quedan N. Para obtener códigos nuevos, desactiva y vuelve a activar 2FA en Seguridad.** Si te quedan 2 o menos, el aviso aparece en rojo.
 
 Cada código sirve **una sola vez**. Táchalo de tu lista.
 
-> **Nota:** No hay un botón para generar solo códigos nuevos ni para ver cuántos te quedan. Para tener una lista nueva, desactiva el 2FA y vuelve a configurarlo.
+> **Nota:** No hay un botón para generar solo códigos nuevos. Para tener una lista nueva, desactiva el 2FA y vuelve a configurarlo (ver [Cambiar de teléfono](#cambiar-de-teléfono)).
 
 ## Desactivar 2FA
 
 1. Ve a **Menú → Cuenta → Seguridad**.
-2. Pulsa **Desactivar 2FA**.
-3. Confirma en **Desactivar 2FA** con **Desactivar**.
-4. Verás **2FA desactivado.**
+2. Escribe en **Código actual** el código de 6 dígitos de tu app, o uno de tus códigos de recuperación.
+3. Pulsa **Desactivar 2FA**.
+4. Confirma en **Desactivar 2FA** con **Desactivar**.
+5. Verás **2FA desactivado.**
 
 Se borran la clave y los códigos de recuperación. Desde ese momento entras solo con contraseña.
 
-> **Importante:** Desactivar el 2FA no pide un código, solo tu sesión abierta. Bloquea tu equipo cuando te alejes y cierra la sesión del panel en equipos compartidos.
+Si el código no es válido, verás **Código inválido: para desactivar 2FA ingresa el código actual de tu app o un código de recuperación.** y el 2FA sigue activo. Los códigos erróneos cuentan para el [bloqueo por intentos fallidos](#bloqueo-por-intentos-fallidos). Si usas un código de recuperación aquí, queda gastado.
 
 ## Cambiar de teléfono
 
 Si todavía tienes el teléfono anterior:
 
 1. Entra al panel con el código del teléfono anterior.
-2. Pulsa **Desactivar 2FA** y confirma.
+2. Escribe un código actual del teléfono anterior, pulsa **Desactivar 2FA** y confirma.
 3. Pulsa **Configurar 2FA** y sigue los pasos con el teléfono nuevo.
 4. Guarda los códigos de recuperación nuevos y descarta los viejos.
 
@@ -90,7 +93,7 @@ Si todavía tienes el teléfono anterior:
 ### Si tienes códigos de recuperación
 
 1. Entra con un código de recuperación.
-2. Ve a **Seguridad**, pulsa **Desactivar 2FA** y confirma.
+2. Ve a **Seguridad**, escribe **otro** código de recuperación (el que usaste para entrar ya no sirve), pulsa **Desactivar 2FA** y confirma.
 3. Pulsa **Configurar 2FA** con tu teléfono nuevo.
 4. Guarda la lista nueva de códigos.
 
@@ -104,7 +107,7 @@ sudo python3 -c "import json; p='/var/lib/matipanel/2fa.json'; d=json.load(open(
 
 Cambia `USUARIO` por tu nombre de usuario de Linux. No hace falta reiniciar el panel. Después entra solo con contraseña y vuelve a configurar el 2FA.
 
-> **Importante:** No edites `2fa.json` a mano con un editor de texto. Si el archivo queda con un error de formato, el panel deja de pedir el 2FA a **todos** los usuarios.
+> **Importante:** No edites `2fa.json` a mano con un editor de texto. Si el archivo queda con un error de formato o no se puede leer, el panel **bloquea el inicio de sesión de todos los usuarios** (con o sin 2FA) y muestra **No se pudo leer la configuración de 2FA; revisa /var/lib/matipanel/2fa.json**. El panel no sobrescribe el archivo dañado. Para salir del paso, corrígelo por SSH, o bórralo (`sudo rm /var/lib/matipanel/2fa.json`) si aceptas quitar el 2FA a todos.
 
 ## Recomendaciones de seguridad
 
@@ -130,7 +133,7 @@ No. Cada usuario activa su propio 2FA desde su sesión, porque necesita escanear
 
 ### ¿Cuánto dura mi sesión en el panel?
 
-Hasta que pulses **Cerrar sesión** o cierres el navegador. Algunos navegadores restauran la sesión al volver a abrirse, así que en equipos compartidos pulsa siempre **Cerrar sesión**.
+La sesión caduca tras **1 hora sin actividad**; después el panel vuelve a pedir usuario y contraseña (y el código 2FA). Cada clic o recarga reinicia ese plazo, y las páginas que se actualizan solas (como el Dashboard) también la mantienen abierta mientras estén a la vista. En equipos compartidos pulsa siempre **Cerrar sesión** al terminar.
 
 ## Ver también
 

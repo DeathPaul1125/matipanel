@@ -63,9 +63,9 @@ La pestaña **Usuarios** muestra una tabla con:
 ### Filtrar la lista
 
 - Escribe en **Filtrar usuario…** para buscar por nombre de usuario o nombre completo.
-- Usa el selector para ver **Todos**, **Regulares (UID ≥ 1000)** (opción por defecto) o **Sistema**.
+- Usa el selector para ver **Todos**, **Regulares (UID ≥ 1000, sin nobody)** (opción por defecto) o **Sistema**.
 
-> **Nota:** Por defecto solo ves las cuentas regulares. Para ver `root`, `www-data` u otras cuentas de servicio, elige **Todos** o **Sistema**.
+> **Nota:** Por defecto solo ves las cuentas regulares. Para ver `root`, `www-data` u otras cuentas de servicio, elige **Todos** o **Sistema**. La cuenta `nobody` (UID 65534) se cuenta como de sistema aunque su UID sea alto.
 
 ## Crear un usuario
 
@@ -159,7 +159,7 @@ El panel evita que te quites el acceso a ti mismo por accidente:
 2. La tabla muestra **Grupo**, **GID**, **Miembros** y **Acciones**.
 3. Para crear uno, haz clic en **+ Nuevo grupo**, escribe el **Nombre** (mismas reglas que un usuario) y haz clic en **Crear**.
 
-> **Importante:** Por defecto el filtro muestra solo **Regulares (GID ≥ 1000)**. Los grupos `sudo` y `matipanel` son grupos del sistema, así que **no aparecen** hasta que elijas **Todos** o **Sistema** en el selector.
+> **Nota:** Por defecto el filtro muestra **Todos** los grupos, incluidos `sudo` y `matipanel` (que son grupos del sistema). Elige **Regulares (GID ≥ 1000)** para ver solo los grupos creados para personas.
 
 > **Nota:** La columna **Miembros** muestra los miembros adicionales. Un usuario cuyo grupo primario es ese grupo no aparece en la lista.
 

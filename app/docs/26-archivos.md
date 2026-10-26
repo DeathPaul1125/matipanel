@@ -60,7 +60,7 @@ Atajos del editor:
 
 - Solo abre archivos de hasta **2 MB**. Si es más grande verás **Archivo > 2048 KB (descárgalo)**.
 - No abre archivos binarios. Verás **Archivo binario (descárgalo)**.
-- El editor trabaja en UTF-8. Si el archivo usa otra codificación (por ejemplo Latin-1), los acentos se ven como `�`. **No guardes** ese archivo: los caracteres se dañarían.
+- El editor trabaja en UTF-8. Si el archivo usa otra codificación (por ejemplo Latin-1), se abre en **solo lectura**: los acentos se ven como `�`, el botón **Guardar** desaparece y la línea de información bajo el nombre lo explica (**solo lectura: no es UTF-8…**). Así no se puede dañar el archivo por accidente.
 
 ### Qué pasa al guardar
 
@@ -68,7 +68,7 @@ Atajos del editor:
 - El archivo se reemplaza de forma segura y conserva sus permisos y su propietario.
 - Si el archivo es un enlace simbólico, se modifica el archivo al que apunta.
 
-> **Importante:** **Cerrar** descarta los cambios sin preguntar. Guarda antes de cerrar.
+Si pulsas **Cerrar** con cambios sin guardar, aparece **Cambios sin guardar**: pulsa **Descartar cambios** para cerrar perdiéndolos, o **Seguir editando** para volver al editor.
 
 > **Nota:** Solo se guarda **una** copia `.matipanel.bak` por archivo. Cada vez que guardas, la copia anterior se reemplaza.
 
@@ -124,14 +124,14 @@ Si un cambio rompió algo, vuelve a la versión anterior:
 - Las carpetas se copian completas. Los enlaces simbólicos se copian como enlaces.
 - Si el destino es una carpeta existente, la copia se crea dentro.
 - Nunca se sobrescribe: si el destino existe, verás **El destino ya existe**.
-
-> **Importante:** Escribe siempre una ruta absoluta (que empiece con `/`). Una ruta relativa no se calcula desde la carpeta que estás viendo.
+- Igual que al renombrar, una ruta relativa (sin `/` al inicio) se toma desde la carpeta del elemento que copias. Por ejemplo, copiar `/etc/nginx/nginx.conf` a `nginx.conf.orig` crea `/etc/nginx/nginx.conf.orig`.
 
 ## Borrar
 
 1. Pulsa **Borrar** en la fila.
 2. Lee el diálogo **Borrar archivo** o **Borrar carpeta**. Para carpetas dice **¿Borrar la carpeta y TODO su contenido?**
-3. Pulsa **Borrar**.
+3. Si es una **carpeta**, o cualquier cosa dentro de `/etc`, `/boot`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/var/lib` o `/root`, escribe el nombre exacto del elemento en **Escribe … para confirmar**. El botón no se habilita hasta que coincide.
+4. Pulsa **Borrar**.
 
 > **Importante:** No hay papelera. Lo borrado no se puede recuperar. Si borras un enlace simbólico, se borra solo el enlace, no su destino.
 
@@ -212,6 +212,8 @@ Al extraer sin sobrescribir, los archivos que ya existen en el destino se conser
 
 Las carpetas grandes tardan en empezar y el navegador no puede mostrar el porcentaje, porque el tamaño final no se conoce. La descarga funciona también en modo solo lectura.
 
+No se puede descargar la raíz `/` completa: verás **No se puede descargar la raíz del sistema**. Descarga carpetas concretas, o usa [Respaldos](16-respaldos.md).
+
 ## Comprimir y extraer en el servidor
 
 ### Comprimir
@@ -225,10 +227,10 @@ Si ya existe un archivo con ese nombre, verás **Ya existe** con la ruta. La pá
 ### Extraer
 
 1. Pulsa **Extraer** en la fila del comprimido.
-2. Confirma en **Extraer** (**¿Extraer aquí?**).
+2. Lee el aviso (**¿Extraer aquí? Los archivos existentes con el mismo nombre se sobrescribirán.**) y pulsa **Extraer y sobrescribir**.
 3. El contenido se extrae en la misma carpeta del comprimido.
 
-> **Importante:** **Extraer** desde la fila **sobrescribe** los archivos existentes sin preguntar. Si no quieres eso, extrae en una carpeta vacía: crea una carpeta, mueve el comprimido dentro y extrae allí.
+> **Importante:** **Extraer** desde la fila **sobrescribe** los archivos existentes con el mismo nombre. Si no quieres eso, extrae en una carpeta vacía: crea una carpeta, mueve el comprimido dentro y extrae allí.
 
 ## Activar el modo solo lectura (MATIPANEL_FILE_WRITE=0)
 
@@ -275,7 +277,7 @@ Restaura la copia `.matipanel.bak` como se explica en "Restaurar un archivo desd
 
 ### En el editor veo caracteres raros (�) en lugar de acentos.
 
-El archivo no está en UTF-8. Cierra el editor sin guardar. Edítalo desde la [Terminal](29-terminal.md) o conviértelo antes a UTF-8.
+El archivo no está en UTF-8, por eso el editor lo abrió en solo lectura. Edítalo desde la [Terminal](29-terminal.md) o conviértelo antes a UTF-8 (por ejemplo `iconv -f latin1 -t utf-8`).
 
 ## Ver también
 

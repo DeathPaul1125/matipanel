@@ -30,7 +30,7 @@ En la pestaña de usuario, la barra superior tiene:
 
 Si la crontab tiene variables de entorno (por ejemplo `MAILTO=` o `PATH=`), aparecen en una tarjeta aparte, **Variables de entorno**. Esa tarjeta es de solo lectura.
 
-> **Nota:** Los comentarios y las líneas que no son tareas se conservan tal cual al guardar. El panel solo modifica la línea de la tarea que editas.
+> **Nota:** Los comentarios y las líneas que no son tareas se conservan tal cual al guardar, pero no aparecen en la tabla. El panel solo modifica la línea de la tarea que editas. Una línea comentada a mano que parece una tarea (por ejemplo `# 0 5 * * 1 tar …`) es solo un comentario: no se lista como tarea desactivada.
 
 ## Crear una tarea programada
 
@@ -131,11 +131,14 @@ Si no lo escapas, el comando se corta en el primer `%` y fallará sin un error v
 
 ## Desactivar o activar una tarea
 
-1. Haz clic en **Desactivar** en la fila de la tarea. No pide confirmación.
-2. La tarea queda como `desactivada`: el panel la convierte en un comentario (`# ` al inicio de la línea). No se ejecuta, pero se conserva.
-3. Para reactivarla, haz clic en **Activar**.
+1. Haz clic en **Desactivar** en la fila de la tarea.
+2. Confirma en **Desactivar tarea** con **Desactivar**.
+3. La tarea queda como `desactivada`: el panel la convierte en un comentario con la marca `#[matipanel-off] ` al inicio de la línea. No se ejecuta, pero se conserva.
+4. Para reactivarla, haz clic en **Activar** y confirma con **Activar**.
 
 Es la forma segura de pausar una tarea sin perder su configuración.
+
+> **Nota:** Solo las líneas con la marca `#[matipanel-off]` cuentan como tareas desactivadas. Si desactivaste tareas con una versión anterior del panel (que solo ponía `# ` delante), ahora se ven como comentarios y no aparecen en la tabla. Para recuperarlas, quita el `# ` con `crontab -e -u USUARIO` en la [Terminal](29-terminal.md), o vuelve a crearlas con **Nueva tarea**.
 
 ## Eliminar una tarea
 
@@ -158,9 +161,9 @@ Aquí también aparece `/etc/cron.d/matipanel-backups`, que el panel genera para
 
 ## Preguntas frecuentes
 
-### Aparece una tarea "desactivada" que nunca creé: `0 5 * * 1 tar -zcf /var/backups/home.tgz /home/`. ¿Qué es?
+### En la crontab hay una línea `# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/` que nunca creé. ¿Qué es?
 
-Es un ejemplo que Debian incluye como comentario cuando una crontab se crea con `crontab -e`. El panel lo interpreta como una tarea desactivada. No la actives. Puedes eliminarla con **Eliminar** sin ningún riesgo.
+Es un ejemplo que Debian incluye como comentario cuando una crontab se crea con `crontab -e`. Es solo un comentario: el panel no lo muestra como tarea y no se ejecuta. Puedes dejarlo.
 
 ### Mi tarea no se ejecuta. ¿Qué reviso?
 

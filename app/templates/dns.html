@@ -1,0 +1,658 @@
+{% extends "base.html" %}
+{% block title %}DNS{% endblock %}
+{% block heading %}Servidor DNS (BIND 9){% endblock %}
+
+{% block content %}
+<section class="health" id="dns-head" data-level="ok" style="margin-bottom:12px;">
+  <span class="led lg mute" id="dns-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="dns-title">Consultando BIND…</h1>
+    <div class="health-sub" id="dns-sub"></div>
+  </div>
+  <div class="health-chips">
+    <span id="svc-btns" hidden>
+      <button class="btn btn-sm" onclick="serviceAction('test')" title="named-checkconf">Probar config</button>
+      <button class="btn btn-sm btn-primary" onclick="serviceAction('reload')">Recargar</button>
+      <button class="btn btn-sm" onclick="serviceAction('restart')">Reiniciar</button>
+      <button class="btn btn-sm" id="btn-start" onclick="serviceAction('start')" hidden>Iniciar</button>
+      <button class="btn btn-sm btn-danger" id="btn-stop" onclick="serviceAction('stop')" hidden>Detener</button>
+      <button class="btn btn-sm" onclick="viewLog()">Ver log</button>
+    </span>
+    <button class="btn btn-sm" onclick="loadAll()">Refrescar</button>
+  </div>
+</section>
+
+<div class="card" id="install-card" hidden>
+  <div class="card-head"><h3>Ten tu propio servidor DNS con BIND 9</h3></div>
+  <p class="muted" style="margin-top:0;">BIND (<i>named</i>) es el servidor DNS más usado en Linux. Con él este servidor puede
+    <b>publicar tus dominios</b> (zonas primarias con registros A, MX, TXT…), actuar como <b>secundario</b> de otro servidor
+    o servir de <b>resolvedor/caché</b> para tu red interna. Al instalarlo queda activo como resolvedor para el propio
+    servidor y la red local; no publica ningún dominio hasta que crees una zona.</p>
+  <button class="btn btn-primary" id="install-btn" onclick="installBind()" hidden>Instalar</button>
+  <div id="install-manual" hidden>
+    <p class="muted small">La instalación automática solo está disponible en Debian/Ubuntu. En Debian se instalaría con:</p>
+    <pre class="terminal">apt install {{ packages }}</pre>
+  </div>
+</div>
+
+<div id="dns-main" hidden>
+  <div class="tabs" id="dns-tabs">
+    <button class="tab active" data-tab="zones" onclick="showTab('zones')">Zonas</button>
+    <button class="tab" data-tab="records" onclick="showTab('records')">Registros</button>
+    <button class="tab" data-tab="options" onclick="showTab('options')">Opciones</button>
+    <button class="tab" data-tab="test" onclick="showTab('test')">Probar</button>
+  </div>
+
+  <!-- Zonas -->
+  <div data-panel="zones">
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0;">Zonas</h3>
+        <span class="muted small">declaradas en <span class="mono">{{ conf_local }}</span></span>
+        <span style="flex:1"></span>
+        <a class="btn btn-sm" href="{{ url_for('files.index') }}?edit={{ conf_local | urlencode }}">Editar named.conf.local</a>
+        <button class="btn btn-sm" onclick="createSecondary()">+ Secundaria</button>
+        <button class="btn btn-sm" onclick="createReverse()">+ Inversa</button>
+        <button class="btn btn-sm btn-primary" onclick="createPrimary()">+ Zona primaria</button>
+      </div>
+      <div class="table-wrap">
+        <table class="lx" id="zones-table">
+          <thead><tr><th>Zona</th><th>Tipo</th><th>Archivo</th><th>Registros</th><th>Serial</th><th>Acciones</th></tr></thead>
+          <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="small muted">Las zonas por defecto de Debian (localhost, 127.in-addr.arpa…) viven en
+        <span class="mono">named.conf.default-zones</span> y no se muestran.</p>
+    </div>
+  </div>
+
+  <!-- Registros -->
+  <div data-panel="records" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0;">Zona</h3>
+        <select id="rec-zone" class="input" onchange="loadRecords()"></select>
+        <span style="flex:1"></span>
+        <a class="btn btn-sm" id="rec-edit-file" href="#" hidden>Editar archivo</a>
+        <button class="btn btn-sm" id="soa-btn" onclick="editSoa()" hidden>Editar SOA</button>
+        <button class="btn btn-sm" onclick="loadRecords()">Refrescar</button>
+      </div>
+      <div id="rec-empty" class="empty" hidden>No hay zonas primarias. Crea una en la pestaña Zonas.</div>
+      <div id="rec-ro" class="pill warn" style="margin-bottom:12px;" hidden></div>
+      <dl class="kv" id="soa-kv"></dl>
+    </div>
+
+    <div class="card" id="rec-card" hidden>
+      <div class="toolbar">
+        <input id="rec-filter" class="input" placeholder="Buscar nombre o valor…" oninput="renderRecords()">
+        <select id="rec-type-filter" class="input" style="max-width:160px;" onchange="renderRecords()">
+          <option value="">Todos los tipos</option>
+        </select>
+        <span style="flex:1"></span>
+        <select id="add-type" class="input" style="max-width:120px;">
+          <option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option>
+          <option>NS</option><option>SRV</option><option>CAA</option><option>PTR</option>
+        </select>
+        <button class="btn btn-primary" onclick="addRecord()">+ Agregar registro</button>
+      </div>
+      <div class="table-wrap">
+        <table class="lx" id="rec-table">
+          <thead><tr><th>Nombre</th><th>TTL</th><th>Tipo</th><th>Valor</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="small muted">Cada cambio sube el serial (AAAAMMDDnn), se valida con <span class="mono">named-checkzone</span>
+        y recarga la zona. Si la validación falla, el archivo se restaura. Copia previa: <span class="mono">&lt;archivo&gt;.matipanel.bak</span>.</p>
+    </div>
+  </div>
+
+  <!-- Opciones -->
+  <div data-panel="options" hidden>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Opciones efectivas</h3><span class="muted small">named-checkconf -p</span></div>
+        <dl class="kv" id="opt-kv" style="grid-template-columns: minmax(0, 1fr);"></dl>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Reenviadores (forwarders)</h3></div>
+        <p class="muted small" style="margin-top:0;">Servidores DNS a los que BIND pregunta los nombres que no conoce
+          (por ejemplo los DNS de tu proveedor). Vacío = BIND resuelve solo, desde los servidores raíz.</p>
+        <label class="form-row"><span>Direcciones IP (una por línea, máx. 8)</span>
+          <textarea id="fw-ips" class="input mono" rows="4" placeholder="1.1.1.1&#10;8.8.8.8"></textarea></label>
+        <label class="form-row"><span>Modo</span>
+          <select id="fw-mode" class="input">
+            <option value="">Por defecto (first)</option>
+            <option value="first">first — si los reenviadores fallan, resuelve solo</option>
+            <option value="only">only — usar solo los reenviadores</option>
+          </select></label>
+        <p class="small muted" id="fw-error" hidden></p>
+        <div class="form-actions">
+          <a class="btn" href="{{ url_for('files.index') }}?edit={{ conf_options | urlencode }}">Editar named.conf.options</a>
+          <button class="btn btn-primary" onclick="saveForwarders()">Guardar y aplicar</button>
+        </div>
+      </div>
+    </div>
+    <details class="card">
+      <summary style="cursor:pointer; font-weight:600; font-size:13px;">Bloque options completo</summary>
+      <pre id="opt-raw" class="terminal output" style="margin-top:12px;">—</pre>
+    </details>
+  </div>
+
+  <!-- Probar -->
+  <div data-panel="test" hidden>
+    <div class="card">
+      <div class="card-head"><h3>Consultar con dig</h3></div>
+      <div class="grid grid-4" style="margin:0;">
+        <label class="form-row"><span>Nombre (o IP para PTR)</span>
+          <input id="dig-name" class="input mono" placeholder="www.ejemplo.com"></label>
+        <label class="form-row"><span>Tipo</span>
+          <select id="dig-type" class="input">
+            <option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option>
+            <option>NS</option><option>SOA</option><option>SRV</option><option>CAA</option><option>PTR</option><option>ANY</option>
+          </select></label>
+        <label class="form-row"><span>Servidor (IP)</span>
+          <input id="dig-server" class="input mono" value="127.0.0.1"></label>
+        <label class="form-row"><span>Formato</span>
+          <select id="dig-short" class="input"><option value="1">Corto (+short)</option><option value="">Completo</option></select></label>
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="document.getElementById('dig-server').value='8.8.8.8'" title="Comprueba lo que ve internet">Usar 8.8.8.8</button>
+        <button class="btn btn-primary" id="dig-btn" onclick="runDig()">Consultar</button>
+      </div>
+      <p class="small muted mono" id="dig-cmd"></p>
+      <pre class="terminal output" id="dig-out" hidden></pre>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="out-modal">
+  <div class="modal-box wide">
+    <h3 id="out-title">Salida</h3>
+    <pre class="terminal output" id="out-content"></pre>
+    <div class="form-actions"><button class="btn" onclick="closeOut()">Cerrar</button></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = "{{ url_for('dns.index') }}";
+const EDIT_URL = "{{ url_for('files.index') }}?edit=";
+const api = p => BASE + 'api/' + p;
+let st = {}, zones = [], recData = null, curTab = 'zones';
+
+async function getJSON(url) {
+  try { return await (await fetch(url)).json(); }
+  catch (e) { return { ok: false, error: String(e) }; }
+}
+
+function showOutput(title, text) {
+  document.getElementById('out-title').textContent = title;
+  document.getElementById('out-content').textContent = text || '(sin salida)';
+  document.getElementById('out-modal').classList.add('open');
+}
+function closeOut() { document.getElementById('out-modal').classList.remove('open'); }
+
+// Resultado de una mutación: OK → aviso; error con salida del validador → modal con la salida
+function report(d, okMsg) {
+  if (d.ok) {
+    ui.toast(okMsg || 'Hecho');
+    if (d.warning) ui.alert(d.warning, { title: 'Guardado, pero no se pudo recargar', icon: 'warning' });
+    return true;
+  }
+  if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
+  else ui.alert(d.error || 'Error desconocido', { title: 'Error', icon: 'error' });
+  return false;
+}
+
+// ── Estado del servicio ──
+function head(level, title, sub) {
+  document.getElementById('dns-head').dataset.level = level;
+  document.getElementById('dns-led').className = 'led lg ' + (level === 'ok' ? 'live' : level);
+  document.getElementById('dns-title').textContent = title;
+  document.getElementById('dns-sub').textContent = sub || '';
+}
+
+async function loadStatus() {
+  st = await getJSON(api('status'));
+  const inst = !!st.installed;
+  document.getElementById('install-card').hidden = inst;
+  document.getElementById('dns-main').hidden = !inst;
+  document.getElementById('svc-btns').hidden = !inst;
+  if (!inst) {
+    head('warn', 'BIND 9 no está instalado', st.error || 'Este servidor no responde consultas DNS.');
+    document.getElementById('install-btn').hidden = !st.can_install;
+    document.getElementById('install-manual').hidden = !!st.can_install;
+    return false;
+  }
+  const active = st.active === 'active';
+  const listen = st.listen || [];
+  const mine = listen.filter(l => l.proc === 'named');
+  const others = [...new Set(listen.filter(l => l.proc && l.proc !== 'named').map(l => l.proc))];
+  const addrs = [...new Set(mine.map(l => l.addr))];
+  const parts = [st.version, st.zones + (st.zones === 1 ? ' zona' : ' zonas'),
+                 'arranque: ' + (st.enabled || '?')];
+  if (addrs.length) parts.push('escucha en ' + addrs.slice(0, 6).join(', ') + (addrs.length > 6 ? '…' : ''));
+  if (others.length) parts.push('el puerto 53 también lo usa: ' + others.join(', '));
+  if (!active) head('err', 'named está detenido (' + st.active + ')', parts.join(' · '));
+  else if (!mine.length) head('warn', 'named activo, pero no escucha en el puerto 53', parts.join(' · '));
+  else head('ok', 'Servidor DNS activo', parts.join(' · '));
+  document.getElementById('btn-start').hidden = active;
+  document.getElementById('btn-stop').hidden = !active;
+  return true;
+}
+
+async function installBind() {
+  if (!await ui.confirm('Se instalarán los paquetes ' + {{ packages | tojson }} + ' con apt. BIND quedará activo como resolvedor ' +
+      'para este servidor y su red local; no publicará ningún dominio hasta que crees una zona.',
+      { title: 'Instalar BIND 9', confirmText: 'Instalar' })) return;
+  const b = document.getElementById('install-btn');
+  b.disabled = true; b.textContent = 'Instalando…';
+  const d = await postJSON(api('install'), {});
+  b.disabled = false; b.textContent = 'Instalar';
+  if (!report(d, 'BIND 9 instalado')) return;
+  loadAll();
+}
+
+async function serviceAction(act) {
+  const labels = { test: 'Probar config', reload: 'Recargar', restart: 'Reiniciar', start: 'Iniciar', stop: 'Detener' };
+  if (act === 'stop' && !await ui.confirm('Mientras named esté detenido, tus dominios y los equipos que usan este servidor como DNS no podrán resolver nombres.',
+      { title: 'Detener BIND', danger: true, confirmText: 'Detener' })) return;
+  if (act === 'restart' && !await ui.confirm('Se reiniciará named. Durante unos segundos no responderá consultas y se vaciará la caché.',
+      { title: 'Reiniciar BIND', confirmText: 'Reiniciar' })) return;
+  const d = await postJSON(api('service'), { action: act });
+  if (d.ok && act === 'test') showOutput('Configuración válida', d.output);
+  else report(d, labels[act] + ': hecho');
+  setTimeout(loadStatus, 700);
+}
+
+async function viewLog() {
+  showOutput('Log de named (journalctl)', 'Cargando…');
+  const d = await getJSON(api('log'));
+  const pre = document.getElementById('out-content');
+  pre.textContent = d.log || d.error || '(vacío)';
+  pre.scrollTop = pre.scrollHeight;
+}
+
+// ── Pestañas ──
+function showTab(t) {
+  curTab = t;
+  document.querySelectorAll('#dns-tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  document.querySelectorAll('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== t);
+  if (t === 'records') loadRecords();
+  if (t === 'options') loadOptions();
+  history.replaceState(null, '', '#' + t);
+}
+
+// ── Zonas ──
+const TYPE_LABEL = { primary: ['primaria', 'ok'], secondary: ['secundaria', 'mute'], forward: ['reenvío', 'mute'] };
+
+async function loadZones() {
+  const tbody = document.querySelector('#zones-table tbody');
+  const d = await getJSON(api('zones'));
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
+  zones = d.zones;
+  fillZoneSelect();
+  if (!zones.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted center">Aún no hay zonas. Pulsa «+ Zona primaria» para publicar tu primer dominio.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = zones.map(z => {
+    const [lbl, cls] = TYPE_LABEL[z.type] || [z.type || '?', 'mute'];
+    const extra = z.type === 'secondary' && z.primaries.length
+      ? `<div class="small muted">desde ${escapeHtml(z.primaries.join(', '))}</div>`
+      : z.type === 'primary' && z.allow_transfer.length && z.allow_transfer.join() !== 'none'
+        ? `<div class="small muted">transferencia: ${escapeHtml(z.allow_transfer.join(', '))}</div>` : '';
+    const file = z.path
+      ? `<span class="mono small">${escapeHtml(z.path)}</span>${z.exists ? '' : ' <span class="pill err">no existe</span>'}`
+      : '<span class="muted">—</span>';
+    const warn = z.error ? `<div class="small muted">${escapeHtml(z.error)}</div>` : '';
+    const isPrimary = z.type === 'primary';
+    return `<tr>
+      <td class="mono">${escapeHtml(z.name)}${z.dynamic ? ' <span class="pill warn">dinámica</span>' : ''}</td>
+      <td><span class="pill ${cls}">${escapeHtml(lbl)}</span>${extra}</td>
+      <td>${file}${warn}</td>
+      <td>${z.records == null ? '<span class="muted">—</span>' : escapeHtml(z.records)}</td>
+      <td class="mono small">${escapeHtml(z.serial || '—')}</td>
+      <td>
+        ${isPrimary && z.exists ? `<button class="btn btn-sm" onclick="openRecords(${jsArg(z.name)})">Registros</button>` : ''}
+        ${isPrimary ? `<button class="btn btn-sm" onclick="editTransfer(${jsArg(z.name)})" title="Servidores secundarios autorizados">Secundarios</button>` : ''}
+        <button class="btn btn-sm" onclick="zoneStatus(${jsArg(z.name)})">Estado</button>
+        ${z.path && z.exists ? `<a class="btn btn-sm" href="${escapeHtml(EDIT_URL + encodeURIComponent(z.path))}">Editar archivo</a>` : ''}
+        <button class="btn btn-sm btn-danger" onclick="deleteZone(${jsArg(z.name)}, ${jsArg(z.type)})">Eliminar</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function fillZoneSelect() {
+  const sel = document.getElementById('rec-zone');
+  const prev = sel.value;
+  const list = zones.filter(z => z.type === 'primary' && z.exists);
+  sel.innerHTML = list.map(z => `<option value="${escapeHtml(z.name)}">${escapeHtml(z.name)}</option>`).join('');
+  if (list.some(z => z.name === prev)) sel.value = prev;
+}
+
+function serverIp() { return (st.ips || [])[0] || ''; }
+
+async function createPrimary() {
+  const v = await ui.form({
+    title: 'Nueva zona primaria',
+    text: 'Publica un dominio en este servidor. Se crea /etc/bind/zones/db.<dominio> con SOA, NS y registros A, se valida y se recarga BIND.',
+    fields: [
+      { name: 'domain', label: 'Dominio', placeholder: 'ejemplo.com', required: true },
+      { name: 'ns', label: 'Servidor de nombres primario', placeholder: 'ns1.<dominio>', help: 'Vacío = ns1.<dominio>. Debe ser el nombre de ESTE servidor.' },
+      { name: 'ns_ip', label: 'IP de este servidor', value: serverIp(), placeholder: '203.0.113.10', help: 'Se crea el registro A del servidor de nombres (obligatorio si está dentro del dominio).' },
+      { name: 'email', label: 'Correo del administrador', placeholder: 'hostmaster@<dominio>', type: 'email', help: 'Vacío = hostmaster@<dominio>. Se guarda en el SOA.' },
+      { name: 'web_ip', label: 'IP del sitio web (opcional)', placeholder: '203.0.113.20', help: 'Si la indicas se crean registros A para el dominio (@) y www.' },
+    ],
+    confirmText: 'Crear zona',
+  });
+  if (!v) return;
+  const d = await postJSON(api('zones/create'), v);
+  if (report(d, 'Zona ' + v.domain + ' creada')) { await loadAll(); openRecords(v.domain.trim().toLowerCase().replace(/\.$/, '')); }
+}
+
+async function createReverse() {
+  const fwd = zones.find(z => z.type === 'primary' && !z.name.endsWith('.arpa'));
+  const v = await ui.form({
+    title: 'Nueva zona inversa (PTR)',
+    text: 'Traduce direcciones IP a nombres. Solo tiene efecto público si quien te asignó las IP (tu proveedor) te delega la zona inversa; en redes privadas funciona de inmediato para los equipos que usan este DNS.',
+    fields: [
+      { name: 'network', label: 'Red IPv4', placeholder: '192.168.1.0/24', required: true, help: 'Redes /24, /16 o /8.' },
+      { name: 'ns', label: 'Servidor de nombres', value: fwd ? 'ns1.' + fwd.name : '', placeholder: 'ns1.ejemplo.com', required: true },
+      { name: 'email', label: 'Correo del administrador', type: 'email', placeholder: 'hostmaster@ejemplo.com' },
+      { name: 'auto_ptr', label: 'Crear PTR para los registros A de mis zonas que estén en esta red', type: 'checkbox', value: true },
+    ],
+    confirmText: 'Crear zona inversa',
+  });
+  if (!v) return;
+  const d = await postJSON(api('zones/reverse'), v);
+  if (report(d, 'Zona inversa creada' + (d.ptr ? ' con ' + d.ptr + ' PTR' : ''))) loadAll();
+}
+
+async function createSecondary() {
+  const v = await ui.form({
+    title: 'Nueva zona secundaria',
+    text: 'Este servidor guardará una copia de una zona que se administra en otro servidor (el primario) y la mantendrá sincronizada. En el primario debes permitir la transferencia hacia la IP de este servidor.',
+    fields: [
+      { name: 'domain', label: 'Dominio', placeholder: 'ejemplo.com', required: true },
+      { name: 'primaries', label: 'IP de los servidores primarios', placeholder: '203.0.113.10, 2001:db8::10', required: true, help: 'Separadas por coma o espacio.' },
+    ],
+    confirmText: 'Crear secundaria',
+  });
+  if (!v) return;
+  const d = await postJSON(api('zones/secondary'), v);
+  if (report(d, 'Zona secundaria creada')) loadAll();
+}
+
+async function editTransfer(name) {
+  const z = zones.find(x => x.name === name) || { allow_transfer: [] };
+  const cur = z.allow_transfer.filter(x => x !== 'none').map(x => x.split(' ')[0]).join(', ');
+  const v = await ui.form({
+    title: 'Secundarios de ' + name,
+    text: 'IP de los servidores DNS secundarios que pueden copiar esta zona (allow-transfer). También se les avisará de cada cambio (also-notify). Vacío = nadie puede copiarla.',
+    fields: [{ name: 'ips', label: 'Direcciones IP', value: cur, placeholder: '198.51.100.5, 198.51.100.6' }],
+    confirmText: 'Guardar',
+  });
+  if (v === null) return;
+  const d = await postJSON(api('zones/transfer'), { zone: name, ips: v.ips });
+  if (report(d, 'Transferencias actualizadas')) loadZones();
+}
+
+async function zoneStatus(name) {
+  showOutput('Estado de ' + name + ' (rndc zonestatus)', 'Cargando…');
+  const d = await getJSON(api('zonestatus') + '?zone=' + encodeURIComponent(name));
+  document.getElementById('out-content').textContent = d.output || d.error || '(sin salida)';
+}
+
+async function deleteZone(name, type) {
+  const v = await ui.form({
+    title: 'Eliminar zona ' + name,
+    text: 'Se quitará la zona de named.conf.local y BIND dejará de responder por ella. Esta acción no se puede deshacer desde el panel (queda una copia named.conf.local.matipanel.bak).',
+    fields: [{ name: 'delete_file', label: 'Borrar también el archivo de zona del disco', type: 'checkbox', value: type !== 'primary' }],
+    typed: name, confirmText: 'Eliminar zona', danger: true, icon: 'warning',
+  });
+  if (!v) return;
+  const d = await postJSON(api('zones/delete'), { zone: name, delete_file: v.delete_file });
+  if (report(d, 'Zona ' + name + ' eliminada')) loadAll();
+}
+
+// ── Registros ──
+const TYPE_HELP = {
+  A: 'Nombre → dirección IPv4', AAAA: 'Nombre → dirección IPv6', CNAME: 'Alias de otro nombre',
+  MX: 'Servidor de correo del dominio', TXT: 'Texto (SPF, DKIM, DMARC, verificaciones)', NS: 'Servidor de nombres (delegación)',
+  SRV: 'Ubicación de un servicio', CAA: 'Qué autoridades pueden emitir certificados', PTR: 'IP → nombre (zonas inversas)',
+};
+const TARGET_HELP = 'Nombre completo (mail.otro.com) o solo la etiqueta (mail) para un nombre de esta zona.';
+
+function typeFields(t, f) {
+  f = f || {};
+  switch (t) {
+    case 'A': return [{ name: 'address', label: 'Dirección IPv4', value: f.address, placeholder: '203.0.113.10', required: true }];
+    case 'AAAA': return [{ name: 'address', label: 'Dirección IPv6', value: f.address, placeholder: '2001:db8::10', required: true }];
+    case 'CNAME': return [{ name: 'target', label: 'Apunta a', value: f.target, placeholder: 'servidor.ejemplo.com', required: true, help: TARGET_HELP }];
+    case 'NS': return [{ name: 'target', label: 'Servidor de nombres', value: f.target, placeholder: 'ns2.ejemplo.com', required: true, help: TARGET_HELP }];
+    case 'PTR': return [{ name: 'target', label: 'Nombre del equipo', value: f.target, placeholder: 'servidor.ejemplo.com', required: true, help: 'Nombre completo al que corresponde la IP.' }];
+    case 'MX': return [
+      { name: 'priority', label: 'Prioridad', type: 'number', value: f.priority ?? '10', required: true, help: 'Menor número = se prueba primero.' },
+      { name: 'target', label: 'Servidor de correo', value: f.target, placeholder: 'mail.ejemplo.com', required: true, help: TARGET_HELP }];
+    case 'TXT': return [{ name: 'text', label: 'Texto', type: 'textarea', value: f.text, placeholder: 'v=spf1 mx -all', required: true,
+      help: 'Escríbelo sin comillas. Si supera 255 caracteres (DKIM) se divide automáticamente.' }];
+    case 'SRV': return [
+      { name: 'priority', label: 'Prioridad', type: 'number', value: f.priority ?? '10', required: true },
+      { name: 'weight', label: 'Peso', type: 'number', value: f.weight ?? '5', required: true },
+      { name: 'port', label: 'Puerto', type: 'number', value: f.port, placeholder: '5060', required: true },
+      { name: 'target', label: 'Servidor', value: f.target, placeholder: 'sip.ejemplo.com', required: true, help: TARGET_HELP }];
+    case 'CAA': return [
+      { name: 'flags', label: 'Flags', type: 'select', value: f.flags ?? '0', options: [['0', '0 (normal)'], ['128', '128 (crítico)']] },
+      { name: 'tag', label: 'Etiqueta', type: 'select', value: f.tag ?? 'issue',
+        options: [['issue', 'issue — CA autorizada'], ['issuewild', 'issuewild — certificados comodín'], ['iodef', 'iodef — dónde reportar abusos']] },
+      { name: 'value', label: 'Valor', value: f.value, placeholder: 'letsencrypt.org', help: 'Dominio de la CA (letsencrypt.org), «;» para prohibir, o mailto:/https: para iodef.' }];
+  }
+  return [];
+}
+
+function nameHelp(t) {
+  if (t === 'SRV') return '_servicio._protocolo, ej. _sip._tcp o _autodiscover._tcp';
+  if (t === 'PTR') return 'Último octeto (ej. 10) o la IP completa (192.168.1.10).';
+  return '@ = el dominio mismo; www; *.dev para comodín. Vacío = @.';
+}
+
+function openRecords(name) {
+  document.getElementById('rec-zone').value = name;
+  showTab('records');
+}
+
+async function loadRecords() {
+  const zone = document.getElementById('rec-zone').value;
+  const none = !zone;
+  document.getElementById('rec-empty').hidden = !none;
+  document.getElementById('rec-card').hidden = none;
+  ['rec-edit-file', 'soa-btn'].forEach(id => document.getElementById(id).hidden = none);
+  if (none) { document.getElementById('soa-kv').innerHTML = ''; document.getElementById('rec-ro').hidden = true; return; }
+  const tbody = document.querySelector('#rec-table tbody');
+  tbody.innerHTML = '<tr><td colspan="5" class="muted center">Cargando…</td></tr>';
+  const d = await getJSON(api('records') + '?zone=' + encodeURIComponent(zone));
+  if (d.error) { recData = null; tbody.innerHTML = '<tr><td colspan="5" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
+  recData = d;
+  document.getElementById('rec-edit-file').href = EDIT_URL + encodeURIComponent(d.path);
+  const ro = document.getElementById('rec-ro');
+  ro.hidden = !d.readonly; ro.textContent = d.readonly ? 'Solo lectura: ' + d.readonly : '';
+  document.getElementById('soa-btn').hidden = !!d.readonly || !d.soa;
+  const s = d.soa || {};
+  const kv = [['Archivo', d.path], ['Servidor primario (MNAME)', s.mname], ['Correo del responsable', s.email],
+              ['Serial', s.serial], ['TTL por defecto ($TTL)', d.ttl || '—'], ['Refresh / Retry', (s.refresh || '—') + ' / ' + (s.retry || '—')],
+              ['Expire', s.expire], ['Minimum (TTL negativo)', s.minimum]];
+  document.getElementById('soa-kv').innerHTML = kv.map(([k, v]) =>
+    `<div><dt>${escapeHtml(k)}</dt><dd class="mono">${escapeHtml(v ?? '—')}</dd></div>`).join('');
+  const types = [...new Set(d.records.map(r => r.type))].sort();
+  const tf = document.getElementById('rec-type-filter');
+  const prev = tf.value;
+  tf.innerHTML = '<option value="">Todos los tipos</option>' + types.map(t => `<option>${escapeHtml(t)}</option>`).join('');
+  tf.value = types.includes(prev) ? prev : '';
+  renderRecords();
+}
+
+function renderRecords() {
+  const tbody = document.querySelector('#rec-table tbody');
+  if (!recData) return;
+  const q = document.getElementById('rec-filter').value.toLowerCase();
+  const t = document.getElementById('rec-type-filter').value;
+  const list = recData.records.map((r, i) => ({ ...r, pos: i }))
+    .filter(r => (!t || r.type === t) && (!q || r.fqdn.includes(q) || r.value.toLowerCase().includes(q)));
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin registros</td></tr>'; return; }
+  tbody.innerHTML = list.map(r => {
+    const val = r.type === 'TXT' ? '"' + r.value + '"' : r.value;
+    return `<tr>
+      <td class="mono" title="${escapeHtml(r.fqdn)}">${escapeHtml(r.name)}</td>
+      <td class="mono small">${escapeHtml(r.ttl || '')}</td>
+      <td><span class="pill mute" title="${escapeHtml(TYPE_HELP[r.type] || '')}">${escapeHtml(r.type)}</span></td>
+      <td class="mono small" style="word-break:break-all; max-width:520px;">${escapeHtml(val)}${r.comment ? `<div class="muted">; ${escapeHtml(r.comment)}</div>` : ''}</td>
+      <td style="white-space:nowrap;">
+        ${r.editable ? `<button class="btn btn-sm" onclick="editRecord(${r.pos})">Editar</button>` : ''}
+        ${r.deletable ? `<button class="btn btn-sm btn-danger" onclick="deleteRecord(${r.pos})">Eliminar</button>` : ''}
+        ${!r.editable && !r.deletable ? '<span class="small muted">en cabecera</span>' : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function recordForm(type, rec) {
+  const fields = [
+    { name: 'name', label: 'Nombre', value: rec ? rec.name : '', placeholder: type === 'SRV' ? '_sip._tcp' : type === 'PTR' ? '10' : 'www', help: nameHelp(type) },
+    ...typeFields(type, rec && rec.fields),
+    { name: 'ttl', label: 'TTL en segundos (opcional)', type: 'number', value: rec ? rec.ttl : '', placeholder: recData.ttl ? 'por defecto ' + recData.ttl : '3600',
+      help: 'Vacío = TTL por defecto de la zona. Baja a 300 antes de un cambio de IP.' },
+  ];
+  return ui.form({
+    title: (rec ? 'Editar' : 'Agregar') + ' registro ' + type + ' en ' + recData.zone,
+    text: TYPE_HELP[type] || '',
+    fields, confirmText: rec ? 'Guardar' : 'Agregar',
+  });
+}
+
+async function addRecord() {
+  if (!recData) return;
+  const type = document.getElementById('add-type').value;
+  const v = await recordForm(type, null);
+  if (!v) return;
+  const d = await postJSON(api('records/save'), { zone: recData.zone, record: { ...v, type } });
+  if (report(d, 'Registro agregado (serial ' + (d.serial || '') + ')')) loadRecords();
+}
+
+async function editRecord(pos) {
+  const r = recData.records[pos];
+  const v = await recordForm(r.type, r);
+  if (!v) return;
+  const d = await postJSON(api('records/save'), { zone: recData.zone, idx: r.idx, key: r.key, record: { ...v, type: r.type } });
+  if (report(d, 'Registro actualizado (serial ' + (d.serial || '') + ')')) loadRecords();
+}
+
+async function deleteRecord(pos) {
+  const r = recData.records[pos];
+  if (!await ui.confirm(`${r.name}  ${r.type}  ${r.value.length > 120 ? r.value.slice(0, 120) + '…' : r.value}`,
+      { title: 'Eliminar registro', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(api('records/delete'), { zone: recData.zone, idx: r.idx, key: r.key });
+  if (report(d, 'Registro eliminado (serial ' + (d.serial || '') + ')')) loadRecords();
+}
+
+async function editSoa() {
+  if (!recData || !recData.soa) return;
+  const s = recData.soa;
+  const v = await ui.form({
+    title: 'SOA de ' + recData.zone,
+    text: 'El serial se actualiza solo al guardar. Los tiempos están en segundos.',
+    fields: [
+      { name: 'mname', label: 'Servidor primario (MNAME)', value: s.mname, required: true },
+      { name: 'email', label: 'Correo del responsable', value: s.email, required: true },
+      { name: 'refresh', label: 'Refresh — cada cuánto revisan los secundarios', type: 'number', value: s.refresh, required: true },
+      { name: 'retry', label: 'Retry — reintento si el primario no responde', type: 'number', value: s.retry, required: true },
+      { name: 'expire', label: 'Expire — los secundarios dejan de responder tras', type: 'number', value: s.expire, required: true },
+      { name: 'minimum', label: 'Minimum — caché de respuestas «no existe»', type: 'number', value: s.minimum, required: true },
+    ],
+    confirmText: 'Guardar SOA',
+  });
+  if (!v) return;
+  const d = await postJSON(api('soa'), { zone: recData.zone, ...v });
+  if (report(d, 'SOA actualizado (serial ' + (d.serial || '') + ')')) loadRecords();
+}
+
+// ── Opciones ──
+const OPT_KEYS = [
+  ['recursion', 'Recursión', 'yes (por defecto)'],
+  ['allow-recursion', 'Quién puede usarlo como resolvedor', 'localnets; localhost (por defecto)'],
+  ['allow-query', 'Quién puede consultar', 'any (por defecto)'],
+  ['forwarders', 'Reenviadores', 'ninguno'],
+  ['forward', 'Modo de reenvío', 'first (por defecto)'],
+  ['dnssec-validation', 'Validación DNSSEC', 'auto (por defecto)'],
+  ['listen-on', 'Escucha IPv4', 'todas las interfaces'],
+  ['listen-on-v6', 'Escucha IPv6', 'todas las interfaces'],
+  ['allow-transfer', 'Transferencias (global)', 'por defecto de BIND'],
+  ['directory', 'Directorio de trabajo', '/var/cache/bind'],
+];
+
+async function loadOptions() {
+  const kv = document.getElementById('opt-kv');
+  kv.innerHTML = '<div><dt>Cargando…</dt><dd></dd></div>';
+  const d = await getJSON(api('options'));
+  if (d.error) {
+    kv.innerHTML = `<div><dt>Error</dt><dd>${escapeHtml(d.error)}</dd></div>`;
+    document.getElementById('opt-raw').textContent = d.output || '';
+    return;
+  }
+  kv.innerHTML = OPT_KEYS.map(([k, label, def]) => {
+    const o = d.values[k];
+    let v = def, cls = 'muted';
+    if (o) { v = o.list ? (o.value ? o.value + ' ' : '') + o.list.join('; ') : o.value; cls = 'mono'; }
+    return `<div><dt>${escapeHtml(label)}</dt><dd class="${cls}">${escapeHtml(v || '—')}</dd></div>`;
+  }).join('');
+  document.getElementById('opt-raw').textContent = d.raw || '(sin bloque options)';
+  document.getElementById('fw-ips').value = (d.forwarders || []).join('\n');
+  document.getElementById('fw-mode').value = d.forward || '';
+  const fe = document.getElementById('fw-error');
+  fe.hidden = !d.forwarders_error; fe.textContent = d.forwarders_error || '';
+}
+
+async function saveForwarders() {
+  const ips = document.getElementById('fw-ips').value;
+  const mode = document.getElementById('fw-mode').value;
+  if (!await ui.confirm('Se modificará named.conf.options (con copia .matipanel.bak), se validará con named-checkconf y se recargará BIND.',
+      { title: 'Aplicar reenviadores', confirmText: 'Aplicar' })) return;
+  const d = await postJSON(api('options/forwarders'), { forwarders: ips, forward: mode });
+  if (report(d, 'Reenviadores aplicados')) loadOptions();
+}
+
+// ── Probar ──
+async function runDig() {
+  const name = document.getElementById('dig-name').value.trim();
+  if (!name) return ui.toast('Escribe un nombre', 'warning');
+  const btn = document.getElementById('dig-btn');
+  btn.disabled = true;
+  const d = await postJSON(api('dig'), {
+    name, type: document.getElementById('dig-type').value,
+    server: document.getElementById('dig-server').value.trim(),
+    short: !!document.getElementById('dig-short').value,
+  });
+  btn.disabled = false;
+  const out = document.getElementById('dig-out');
+  out.hidden = false;
+  document.getElementById('dig-cmd').textContent = d.cmd ? '$ ' + d.cmd : '';
+  out.textContent = d.ok ? d.output : 'Error: ' + (d.error || 'desconocido');
+}
+document.getElementById('dig-name').addEventListener('keydown', e => { if (e.key === 'Enter') runDig(); });
+
+async function loadAll() {
+  if (!await loadStatus()) return;
+  await loadZones();
+  if (curTab === 'records') loadRecords();
+  if (curTab === 'options') loadOptions();
+}
+
+(async () => {
+  await loadAll();
+  const h = location.hash.slice(1);
+  if (st.installed && ['zones', 'records', 'options', 'test'].includes(h)) showTab(h);
+})();
+</script>
+{% endblock %}

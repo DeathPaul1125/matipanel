@@ -233,7 +233,7 @@ def smb_parse(text):
             continue
         while s.endswith("\\") and i + 1 < len(lines):   # continuación de línea
             i += 1
-            s = s[:-1] + " " + lines[i].strip()
+            s = s[:-1].rstrip() + " " + lines[i].strip()
         m = SECTION_RE.match(s)
         if m:
             cur = {"name": m.group(1).strip(), "start": start, "last": i, "params": []}
@@ -617,7 +617,7 @@ def exports_parse(text):
         start, s = i, lines[i].split("#", 1)[0].strip()
         while s.endswith("\\") and i + 1 < len(lines):
             i += 1
-            s = s[:-1] + " " + lines[i].split("#", 1)[0].strip()
+            s = s[:-1].rstrip() + " " + lines[i].split("#", 1)[0].strip()
         if s:
             entries.append({**_export_entry(s), "first": start, "last": i,
                             "raw": "\n".join(lines[start:i + 1])})

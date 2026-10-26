@@ -25,7 +25,7 @@ Debajo hay dos tablas:
 | Tarea de cron que ejecuta los trabajos | `/etc/cron.d/matipanel-backups` |
 | Registro (log) de los trabajos programados | `/var/log/matipanel-backups.log` |
 
-Cada respaldo se llama `nombre-AAAAMMDD-HHMMSS.tar.gz`. Por ejemplo, `web-20261026-023000.tar.gz` es el respaldo `web` del 26 de octubre de 2026 a las 02:30:00. Los archivos solo los puede leer `root`.
+Cada respaldo manual se llama `nombre-AAAAMMDD-HHMMSS.tar.gz`. Por ejemplo, `web-20261026-023000.tar.gz` es el respaldo `web` del 26 de octubre de 2026 a las 02:30:00. Las copias que crea un trabajo programado al ejecutarse solo (por cron) llevan `-auto`: `web-auto-20261026-023000.tar.gz`. Los archivos solo los puede leer `root`.
 
 > **Importante:** Los respaldos se guardan en el mismo servidor. Si el disco falla o el servidor se pierde, los respaldos se pierden con él. Descarga copias periódicamente y guárdalas en otro lugar.
 
@@ -44,7 +44,7 @@ Cada respaldo se llama `nombre-AAAAMMDD-HHMMSS.tar.gz`. Por ejemplo, `web-202610
 
 | Campo | Regla |
 |---|---|
-| Nombre | Letras, números, `_` y `-`. Máximo 40 caracteres. Sin espacios ni tildes |
+| Nombre | Letras, números, `_` y `-`. Máximo 40 caracteres. Sin espacios ni tildes. No puede terminar en `-auto` (se reserva para las copias programadas) |
 | Rutas | Entre 1 y 50. Deben empezar con `/`, existir y no contener `..` |
 | Rutas | No se permite respaldar `/` completo; elige carpetas concretas |
 | Exclusiones | Hasta 50 patrones, de hasta 200 caracteres. Solo letras, números y `_ . * ? / [ ] -`. Sin espacios |
@@ -115,7 +115,7 @@ Devuelve cada archivo a su ubicación original y **sobrescribe** la versión act
 El módulo no tiene botón para subir respaldos. Para usar un respaldo de otro servidor:
 
 1. Sube el archivo a `/var/backups/matipanel/` con [Archivos](26-archivos.md). El límite de subida es 1 GB.
-2. El nombre debe seguir el formato `nombre-AAAAMMDD-HHMMSS.tar.gz` (por ejemplo, `web-20261020-023000.tar.gz`). Si no, el panel no lo mostrará.
+2. El nombre debe seguir el formato `nombre-AAAAMMDD-HHMMSS.tar.gz` (por ejemplo, `web-20261020-023000.tar.gz`). Si no, el panel no lo mostrará. Evita el formato `nombre-auto-…`: un archivo así se trata como copia programada y la retención del trabajo `nombre` podría borrarlo.
 3. Haz clic en **Refrescar** y restáuralo como cualquier otro.
 
 ## Eliminar un respaldo
@@ -140,15 +140,15 @@ El trabajo aparece en **Trabajos programados**, con su frecuencia, por ejemplo "
 
 > **Importante:** La hora es la del servidor. Verifica la zona horaria en [Sistema](11-sistema.md).
 
-> **Importante:** Si guardas un trabajo nuevo con el nombre de uno que ya existe, el anterior se reemplaza sin aviso. Revisa la tabla antes de guardar.
+Si guardas un trabajo nuevo con el nombre de uno que ya existe, aparece **Trabajo existente**: pulsa **Reemplazar** para sustituir su configuración, o **Cancelar** para elegir otro nombre.
 
 > **Consejo:** Programa los respaldos en horas de poco uso (madrugada) y escalónalos si tienes varios, para no saturar el disco.
 
 ### Cómo funciona la retención (copias a conservar)
 
-Después de cada ejecución **exitosa**, el panel borra los respaldos más antiguos con ese mismo nombre y deja solo los últimos *N*. Con 7 copias en un trabajo diario tienes una semana de historial.
+Después de cada ejecución programada **exitosa**, el panel borra las copias programadas más antiguas de ese trabajo (`nombre-auto-…`) y deja solo las últimas *N*. Con 7 copias en un trabajo diario tienes una semana de historial.
 
-> **Importante:** La limpieza incluye los respaldos manuales que tengan el mismo nombre que el trabajo. Si quieres guardar una copia manual para siempre, usa un nombre distinto (por ejemplo, `web-manual`).
+Los respaldos manuales nunca se borran solos, aunque tengan el mismo nombre que el trabajo: solo se borran con **Eliminar**.
 
 > **Nota:** Si un respaldo falla, no se borra ninguna copia anterior.
 
@@ -156,9 +156,9 @@ Después de cada ejecución **exitosa**, el panel borra los respaldos más antig
 
 1. En **Trabajos programados**, haz clic en **Ejecutar ahora**.
 2. Confirma con **Ejecutar**.
-3. Espera. Al terminar verás **Trabajo completado** con la ruta del respaldo creado y, si corresponde, los respaldos eliminados por la retención. Si falla, verás **El trabajo falló** con el motivo.
+3. Espera. Al terminar verás **Trabajo completado** con la ruta del respaldo creado. Si falla, verás **El trabajo falló** con el motivo.
 
-Úsalo para probar un trabajo recién creado. La ejecución manual también aplica la retención.
+Úsalo para probar un trabajo recién creado. La copia que crea **Ejecutar ahora** es un respaldo manual (`nombre-AAAAMMDD-HHMMSS.tar.gz`, sin `-auto`): no cuenta para **Copias a conservar**, no se borra sola y no dispara la retención. Bórrala con **Eliminar** cuando ya no la necesites.
 
 ## Editar o eliminar un trabajo programado
 
@@ -170,7 +170,7 @@ Después de cada ejecución **exitosa**, el panel borra los respaldos más antig
 Cada ejecución automática escribe una línea en `/var/log/matipanel-backups.log`:
 
 ```
-2026-10-26 02:30:04 [web] OK: /var/backups/matipanel/web-20261026-023001.tar.gz (eliminados: web-20261019-023001.tar.gz)
+2026-10-26 02:30:04 [web] OK: /var/backups/matipanel/web-auto-20261026-023001.tar.gz (eliminados: web-auto-20261019-023001.tar.gz)
 2026-10-27 02:30:01 [web] ERROR: No existe: /var/www/sitio-viejo
 ```
 
@@ -193,7 +193,7 @@ El destino `/var/backups/matipanel` es fijo. Si quieres que los respaldos queden
 
 ### ¿Qué pasa con los respaldos si desinstalo MatiPanel?
 
-El script de desinstalación no borra la carpeta `/var/backups/matipanel`; tus respaldos quedan en el servidor. Sí se borra la configuración de los trabajos programados (`/var/lib/matipanel`), pero el archivo `/etc/cron.d/matipanel-backups` queda y seguirá intentando ejecutarse sin éxito. Elimina todos los trabajos programados desde el panel antes de desinstalar, o borra ese archivo a mano después.
+El script de desinstalación no borra la carpeta `/var/backups/matipanel`; tus respaldos quedan en el servidor. Sí borra la configuración de los trabajos programados (`/var/lib/matipanel`) y su tarea de cron (`/etc/cron.d/matipanel-backups`), así que no quedan ejecuciones pendientes.
 
 ### ¿Los respaldos están cifrados?
 

@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+{% block title %}Almacenamiento{% endblock %}
+{% block heading %}Almacenamiento avanzado{% endblock %}
+
+{% block content %}
+<section class="health" id="st-head" data-level="ok" style="margin-bottom:12px;">
+  <span class="led lg" id="st-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="st-title">Consultando el almacenamiento…</h1>
+    <div class="health-sub" id="st-sub"></div>
+  </div>
+  <div class="health-chips"><button class="btn" onclick="reloadAll()">Refrescar</button></div>
+</section>
+
+<div class="card" id="degraded-card" hidden style="border-color: var(--err-led);">
+  <div class="card-head"><h3>Hay arrays RAID degradados</h3></div>
+  <p style="margin-top:0;">Un array degradado sigue funcionando, pero <b>ya no tolera otro fallo</b>: si falla un disco más
+    puedes perder los datos. Haz un respaldo cuanto antes y reemplaza el disco dañado desde la pestaña <b>RAID</b>.</p>
+  <ul id="degraded-list" style="margin:0;"></ul>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="lvm" onclick="showTab('lvm')">Discos y LVM</button>
+  <button class="tab" data-tab="raid" onclick="showTab('raid')">RAID</button>
+  <button class="tab" data-tab="quota" onclick="showTab('quota')">Cuotas</button>
+</div>
+
+<!-- ── Discos y LVM ── -->
+<div id="tab-lvm">
+  <div class="card" id="lvm-install" hidden>
+    <div class="card-head"><h3>LVM no está instalado</h3></div>
+    <p class="muted" style="margin-top:0;">LVM permite juntar varios discos en un grupo y crear volúmenes que puedes ampliar
+      sin reiniciar. Instala el paquete <b>lvm2</b> para gestionarlo desde aquí.</p>
+    <button class="btn btn-primary" data-pkg="lvm2" onclick="install('lvm2', this)">Instalar</button>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Dispositivos de bloque</h3>
+      <span class="muted small"><b>Libre</b> = sin particiones, sin sistema de archivos y sin montar</span></div>
+    <div class="table-wrap">
+      <table class="lx" id="dev-table">
+        <thead><tr><th>Dispositivo</th><th>Tipo</th><th>Tamaño</th><th>Contenido</th><th>Montaje</th><th>Modelo / serie</th><th>Estado</th><th></th></tr></thead>
+        <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="lvm-section" hidden>
+    <div class="card" id="lvm-error" hidden><p class="muted" style="margin:0;" id="lvm-error-text"></p></div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Grupos de volúmenes (VG)</h3>
+          <button class="btn btn-sm btn-primary" onclick="vgCreate()">Crear VG</button></div>
+        <div id="vg-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Volúmenes físicos (PV)</h3></div>
+        <div class="table-wrap">
+          <table class="lx" id="pv-table">
+            <thead><tr><th>PV</th><th>Grupo</th><th>Tamaño</th><th>Uso</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Volúmenes lógicos (LV)</h3>
+        <span><span id="xfs-note"></span> <button class="btn btn-sm btn-primary" onclick="lvCreate()">Crear LV</button></span></div>
+      <div class="table-wrap">
+        <table class="lx" id="lv-table">
+          <thead><tr><th>Volumen</th><th>Tamaño</th><th>Tipo</th><th>Sistema de archivos</th><th>Montaje</th><th>Uso</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small" style="margin-bottom:0;">Antes de cualquier cambio en el almacenamiento, haz un respaldo.
+        Los volúmenes solo se amplían (nunca se reducen) y su sistema de archivos se ajusta automáticamente.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── RAID ── -->
+<div id="tab-raid" hidden>
+  <div class="card" id="raid-install" hidden>
+    <div class="card-head"><h3>mdadm no está instalado</h3></div>
+    <p class="muted" style="margin-top:0;">mdadm gestiona el RAID por software de Linux: une varios discos para tener
+      redundancia (si uno falla, los datos siguen disponibles) o más velocidad.</p>
+    <button class="btn btn-primary" data-pkg="mdadm" onclick="install('mdadm', this)">Instalar</button>
+  </div>
+
+  <div id="raid-section" hidden>
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="raidCreate()">Crear array</button>
+      <button class="btn" onclick="raidSaveConf()">Guardar en mdadm.conf</button>
+      <button class="btn" onclick="raidInitramfs()">Actualizar initramfs</button>
+      <span class="muted small" id="raid-conf-note"></span>
+    </div>
+    <div id="raid-list"></div>
+  </div>
+</div>
+
+<!-- ── Cuotas ── -->
+<div id="tab-quota" hidden>
+  <div class="card" id="quota-install" hidden>
+    <div class="card-head"><h3>Las herramientas de cuotas no están instaladas</h3></div>
+    <p class="muted" style="margin-top:0;">Las cuotas limitan cuánto espacio y cuántos archivos puede usar cada usuario o
+      grupo. Instala el paquete <b>quota</b> para activarlas y fijar límites.</p>
+    <button class="btn btn-primary" data-pkg="quota" onclick="install('quota', this)">Instalar</button>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Sistemas de archivos</h3></div>
+    <div class="table-wrap">
+      <table class="lx" id="qfs-table">
+        <thead><tr><th>Punto de montaje</th><th>Dispositivo</th><th>Tipo</th><th>Cuotas en opciones</th><th>Usuarios</th><th>Grupos</th><th></th></tr></thead>
+        <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <details class="card">
+    <summary style="cursor:pointer; font-weight:600; font-size:13px;">Cómo se activan las cuotas</summary>
+    <div class="small" style="margin-top:12px;">
+      <p><b>ext4</b> — el botón <b>Activar cuotas</b> hace estos pasos y, si alguno falla, deja <code>/etc/fstab</code> como estaba:</p>
+      <ol>
+        <li>Respalda <code>/etc/fstab</code> y agrega <code>usrquota,grpquota</code> a las opciones del sistema de archivos.</li>
+        <li>Lo vuelve a montar con esas opciones (<code>mount -o remount</code>), sin desmontarlo.</li>
+        <li>Cuenta el uso actual de cada usuario y grupo (<code>quotacheck -cugm</code>); en discos grandes tarda unos minutos.</li>
+        <li>Enciende las cuotas (<code>quotaon</code>).</li>
+      </ol>
+      <p><b>XFS</b> — las cuotas se deciden al montar y no se pueden activar con un remontaje: agrega <code>uquota,gquota</code>
+        a sus opciones en <code>/etc/fstab</code> y reinicia. Si es la raíz (<code>/</code>), además hay que agregar
+        <code>rootflags=uquota,gquota</code> a la línea del kernel en GRUB.</p>
+      <p class="muted" style="margin-bottom:0;"><b>Límite blando</b>: se puede superar durante el periodo de gracia (7 días por defecto).
+        <b>Límite duro</b>: nunca se puede superar. Al vencer la gracia, el blando pasa a comportarse como duro.</p>
+    </div>
+  </details>
+
+  <div class="card">
+    <div class="card-head"><h3>Uso por usuario y grupo</h3>
+      <button class="btn btn-sm btn-primary" id="quota-set-btn" onclick="quotaSet()">Fijar límites</button></div>
+    <div id="quota-report"><div class="muted center">Cargando…</div></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = {
+  lvm: "{{ url_for('storage.lvm_status') }}",
+  raid: "{{ url_for('storage.raid_status') }}",
+  quota: "{{ url_for('storage.quota_status') }}",
+  install: "{{ url_for('storage.install') }}",
+  pvCreate: "{{ url_for('storage.pv_create') }}",
+  vgCreate: "{{ url_for('storage.vg_create') }}",
+  vgExtend: "{{ url_for('storage.vg_extend') }}",
+  lvCreate: "{{ url_for('storage.lv_create') }}",
+  lvExtend: "{{ url_for('storage.lv_extend') }}",
+  lvRemove: "{{ url_for('storage.lv_remove') }}",
+  snapCreate: "{{ url_for('storage.snap_create') }}",
+  raidCreate: "{{ url_for('storage.raid_create') }}",
+  raidFail: "{{ url_for('storage.raid_fail_remove') }}",
+  raidAdd: "{{ url_for('storage.raid_add') }}",
+  raidConf: "{{ url_for('storage.raid_save_conf') }}",
+  raidInitramfs: "{{ url_for('storage.raid_initramfs') }}",
+  quotaEnable: "{{ url_for('storage.quota_enable') }}",
+  quotaSet: "{{ url_for('storage.quota_set') }}",
+};
+const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}$/;
+const RAID_MIN = { '0': 2, '1': 2, '5': 3, '6': 4, '10': 4 };
+const SYNC = { resync: 'Sincronizando', recovery: 'Reconstruyendo', reshape: 'Reorganizando', check: 'Verificando', repair: 'Reparando' };
+const STATUS = {
+  'libre': ['ok', 'libre'], 'sistema': ['warn', 'sistema'], 'swap': ['mute', 'swap'], 'montado': ['mute', 'montado'],
+  'PV de LVM': ['mute', 'PV de LVM'], 'miembro RAID': ['mute', 'miembro RAID'], 'en uso': ['mute', 'en uso'],
+  'con datos': ['warn', 'con datos'], 'tabla de particiones vacía': ['warn', 'tabla vacía'], 'no disponible': ['mute', '—'],
+};
+let LVM = null, RAID = null, QUOTA = null;
+
+// ── utilidades ──
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(1) : n) + ' ' + u[i];
+}
+function pct(used, total) { return total > 0 ? Math.min(100, Math.round(used * 1000 / total) / 10) : 0; }
+function barCls(p) { return p >= 90 ? 'err' : p >= 75 ? 'warn' : ''; }
+function bar(p, cls) { return `<div class="bar ${cls ?? barCls(p)}"><span style="width:${Number(p) || 0}%"></span></div>`; }
+function kToStr(k) {
+  k = Number(k) || 0;
+  if (!k) return '0';
+  if (k % 1048576 === 0) return (k / 1048576) + 'G';
+  if (k % 1024 === 0) return (k / 1024) + 'M';
+  return k + 'K';
+}
+function head(level, title, sub) {
+  document.getElementById('st-head').dataset.level = level;
+  document.getElementById('st-led').className = 'led lg ' + (level === 'ok' ? '' : level);
+  document.getElementById('st-title').textContent = title;
+  document.getElementById('st-sub').textContent = sub || '';
+}
+async function getJSON(url) {
+  try { return await (await fetch(url)).json(); }
+  catch (e) { return { error: String(e) }; }
+}
+// POST con aviso de espera; retorna la respuesta si fue bien, si no muestra el error y retorna null
+async function act(url, data, wait) {
+  if (wait) ui.toast(wait, 'info', 6000);
+  const d = await postJSON(url, data);
+  if (!d.ok) { await ui.alert(d.error || 'Error desconocido', { title: 'No se pudo completar', icon: 'error' }); return null; }
+  ui.toast(d.message || 'Listo');
+  return d;
+}
+
+function showTab(t) {
+  if (!['lvm', 'raid', 'quota'].includes(t)) t = 'lvm';
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  for (const k of ['lvm', 'raid', 'quota']) document.getElementById('tab-' + k).hidden = k !== t;
+  history.replaceState(null, '', '#' + t);
+  if (t === 'quota' && !QUOTA) loadQuota();
+}
+
+async function install(pkg, btn) {
+  if (!await ui.confirm(`Se instalará el paquete ${pkg} con apt-get. Puede tardar un par de minutos.`,
+      { title: 'Instalar ' + pkg, confirmText: 'Instalar' })) return;
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Instalando…'; }
+  const d = await postJSON(API.install, { pkg });
+  if (btn) { btn.disabled = false; btn.textContent = label; }
+  if (!d.ok) return ui.alert(d.error || 'apt-get falló', { title: 'No se pudo instalar ' + pkg, icon: 'error' });
+  ui.toast(pkg + ' instalado');
+  reloadAll();
+}
+
+async function reloadAll() {
+  await Promise.all([loadLvm(), loadRaid()]);
+  if (QUOTA) loadQuota();
+}
+
+function updateHead() {
+  if (!LVM || !RAID) return;
+  const arrays = RAID.arrays || [];
+  const degraded = arrays.filter(a => a.degraded);
+  const syncing = arrays.filter(a => a.sync && !a.degraded);
+  const devs = LVM.devices || [];
+  const lvm = LVM.lvm || {};
+  const disks = devs.filter(d => d.type === 'disk' && !/^(zram|sr|fd|loop|ram|nbd)/.test(d.name)).length;
+  const sub = [`${disks} disco(s)`, `${devs.filter(d => d.free).length} libre(s)`,
+    lvm.installed ? `${(lvm.vgs || []).length} VG · ${(lvm.lvs || []).length} LV` : 'LVM sin instalar',
+    `${arrays.length} array(s) RAID`].join(' · ');
+
+  document.getElementById('degraded-card').hidden = !degraded.length;
+  document.getElementById('degraded-list').innerHTML = degraded.map(a =>
+    `<li><b class="mono">/dev/${escapeHtml(a.name)}</b> (${escapeHtml(a.level || 'inactivo')}): ` +
+    (a.active ? `${Number(a.working)} de ${Number(a.total)} discos funcionando` : 'el array está inactivo') +
+    (a.sync ? ` · ${escapeHtml(SYNC[a.sync.action] || a.sync.action)} ${Number(a.sync.percent)}%` : '') + '</li>').join('');
+
+  if (LVM.error) head('err', 'No se pudieron leer los discos', LVM.error);
+  else if (degraded.length) head('err', degraded.length === 1 ? `RAID degradado: /dev/${degraded[0].name}` : `${degraded.length} arrays RAID degradados`, sub);
+  else if (syncing.length) head('warn', `${SYNC[syncing[0].sync.action] || 'Sincronizando'} /dev/${syncing[0].name}: ${syncing[0].sync.percent}%`, sub);
+  else head('ok', 'Almacenamiento en orden', sub);
+}
+
+// ── Discos y LVM ──
+async function loadLvm() {
+  LVM = await getJSON(API.lvm);
+  if (!LVM.devices) LVM.devices = [];
+  if (!LVM.lvm) LVM.lvm = { installed: false, pvs: [], vgs: [], lvs: [] };
+  renderDevices();
+  renderLvm();
+  updateHead();
+}
+
+function renderDevices() {
+  const tb = document.querySelector('#dev-table tbody');
+  const devs = LVM.devices.filter(d => !/^(zram|sr|fd|loop|ram|nbd)/.test(d.name));
+  if (!devs.length) {
+    tb.innerHTML = `<tr><td colspan="8" class="muted center">${escapeHtml(LVM.error || 'Sin dispositivos')}</td></tr>`;
+    return;
+  }
+  tb.innerHTML = devs.map(d => {
+    const pad = d.depth ? `<span class="muted">${'&nbsp;&nbsp;'.repeat(Math.min(d.depth, 6))}└ </span>` : '';
+    const st = STATUS[d.status] || ['mute', d.status];
+    const action = d.free && LVM.lvm.installed
+      ? `<button class="btn btn-sm" onclick="pvCreate(${jsArg(d.path)})">Crear PV</button>` : '';
+    return `<tr>
+      <td class="mono">${pad}${escapeHtml(d.path)}</td>
+      <td>${escapeHtml(d.type)}${d.type === 'disk' ? ` <span class="muted small">${d.rota ? 'HDD' : 'SSD'}</span>` : ''}</td>
+      <td>${fmtBytes(d.size)}</td>
+      <td class="mono">${escapeHtml(d.fstype || '—')}</td>
+      <td class="mono">${escapeHtml((d.mounts || []).join(', ') || '—')}</td>
+      <td>${escapeHtml(d.model || '')}${d.serial ? ` <span class="muted small mono">${escapeHtml(d.serial)}</span>` : ''}</td>
+      <td><span class="pill ${st[0]}">${escapeHtml(st[1])}</span></td>
+      <td>${action}</td></tr>`;
+  }).join('');
+}
+
+function renderLvm() {
+  const lvm = LVM.lvm;
+  document.getElementById('lvm-install').hidden = lvm.installed;
+  document.querySelector('#lvm-install button').hidden = !LVM.can_install;
+  document.getElementById('lvm-section').hidden = !lvm.installed;
+  if (!lvm.installed) return;
+  document.getElementById('lvm-error').hidden = !lvm.error;
+  document.getElementById('lvm-error-text').textContent = lvm.error || '';
+  document.getElementById('xfs-note').innerHTML = !LVM.xfs && LVM.can_install
+    ? `<button class="btn btn-sm" onclick="install('xfsprogs', this)" title="Necesario para formatear en XFS">Instalar xfsprogs</button>` : '';
+
+  document.getElementById('vg-list').innerHTML = lvm.vgs.length ? lvm.vgs.map(v => {
+    const p = pct(v.size - v.free, v.size);
+    return `<div class="meter-row">
+      <div class="meter-name"><b class="mono">${escapeHtml(v.name)}</b> <span class="muted small">${Number(v.pv_count)} PV · ${Number(v.lv_count)} LV</span></div>
+      <div class="meter-val">${fmtBytes(v.size - v.free)} de ${fmtBytes(v.size)} · libre ${fmtBytes(v.free)}</div>
+      ${bar(p)}
+      <div style="grid-column:1/-1; margin-top:6px; display:flex; gap:6px;">
+        <button class="btn btn-sm" onclick="lvCreate(${jsArg(v.name)})">Crear LV</button>
+        <button class="btn btn-sm" onclick="vgExtend(${jsArg(v.name)})">Agregar PV</button>
+      </div></div>`;
+  }).join('') : '<div class="muted small">No hay grupos de volúmenes. Crea un PV en un disco libre y luego un VG con él.</div>';
+
+  document.querySelector('#pv-table tbody').innerHTML = lvm.pvs.length ? lvm.pvs.map(p => {
+    const u = pct(p.size - p.free, p.size);
+    return `<tr>
+      <td class="mono">${escapeHtml(p.path)}${p.missing ? ' <span class="pill err">falta</span>' : ''}</td>
+      <td>${p.vg ? `<span class="mono">${escapeHtml(p.vg)}</span>` : '<span class="pill ok">sin asignar</span>'}</td>
+      <td>${fmtBytes(p.size)}</td>
+      <td style="min-width:120px;">${bar(u)}<span class="muted small">${u}% · libre ${fmtBytes(p.free)}</span></td></tr>`;
+  }).join('') : '<tr><td colspan="4" class="muted center">Sin volúmenes físicos</td></tr>';
+
+  document.querySelector('#lv-table tbody').innerHTML = lvm.lvs.length ? lvm.lvs.map(l => {
+    const full = l.vg + '/' + l.name;
+    let type = '<span class="pill mute">LV</span>';
+    if (l.invalid) type = '<span class="pill err">snapshot inválido</span>';
+    else if (l.snapshot) type = `<span class="pill warn">snapshot de ${escapeHtml(l.origin)}</span>` +
+      (l.data_percent !== '' ? ` <span class="muted small">${escapeHtml(l.data_percent)}% usado</span>` : '');
+    else if (l.thin_pool) type = `<span class="pill mute">thin pool</span> <span class="muted small">${escapeHtml(l.data_percent)}%</span>`;
+    else if (l.has_snapshots) type = '<span class="pill mute">LV con snapshots</span>';
+    const usage = l.usage
+      ? `${bar(l.usage.percent)}<span class="muted small">${l.usage.percent}% · ${fmtBytes(l.usage.used)} de ${fmtBytes(l.usage.total)}</span>` : '<span class="muted">—</span>';
+    const acts = [];
+    if (!l.thin_pool) acts.push(`<button class="btn btn-sm" onclick="lvExtend(${jsArg(l.vg)}, ${jsArg(l.name)})">Ampliar</button>`);
+    if (!l.snapshot && !l.thin_pool) acts.push(`<button class="btn btn-sm" onclick="snapCreate(${jsArg(l.vg)}, ${jsArg(l.name)})">Snapshot</button>`);
+    acts.push(`<button class="btn btn-sm btn-danger" onclick="lvRemove(${jsArg(l.vg)}, ${jsArg(l.name)})">Eliminar</button>`);
+    return `<tr>
+      <td class="mono">${escapeHtml(full)}</td>
+      <td>${fmtBytes(l.size)}</td>
+      <td>${type}</td>
+      <td class="mono">${escapeHtml(l.fstype || '—')}</td>
+      <td class="mono">${escapeHtml((l.mounts || []).join(', ') || '—')}</td>
+      <td style="min-width:140px;">${usage}</td>
+      <td style="white-space:nowrap;">${acts.join(' ')}</td></tr>`;
+  }).join('') : '<tr><td colspan="7" class="muted center">Sin volúmenes lógicos</td></tr>';
+}
+
+async function pvCreate(path) {
+  if (!await ui.confirm(`${path} se inicializará como volumen físico (PV) de LVM. Si contiene datos que no se detectaron, se perderán.`,
+      { title: 'Crear PV', danger: true, typed: path, confirmText: 'Crear PV' })) return;
+  if (await act(API.pvCreate, { device: path })) loadLvm();
+}
+
+async function vgCreate() {
+  const free = LVM.lvm.pvs.filter(p => !p.vg);
+  if (!free.length) return ui.alert('No hay volúmenes físicos sin asignar. Primero pulsa «Crear PV» en un disco o partición libre.', { title: 'Crear VG' });
+  const f = await ui.form({
+    title: 'Crear grupo de volúmenes', text: 'Un grupo (VG) junta uno o más PV en un solo espacio del que se crean los volúmenes lógicos.',
+    fields: [{ name: 'name', label: 'Nombre del grupo', placeholder: 'vg_datos', required: true },
+      ...free.map((p, i) => ({ name: 'pv' + i, label: `${p.path} · ${fmtBytes(p.size)}`, type: 'checkbox', value: free.length === 1 }))],
+    confirmText: 'Crear VG',
+    validate: v => !NAME_RE.test(v.name) ? 'Nombre inválido: letras, números y _ . + - (sin empezar por punto ni guion).'
+      : !free.some((p, i) => v['pv' + i]) ? 'Elige al menos un PV.' : null,
+  });
+  if (!f) return;
+  if (await act(API.vgCreate, { name: f.name, pvs: free.filter((p, i) => f['pv' + i]).map(p => p.path) })) loadLvm();
+}
+
+async function vgExtend(vg) {
+  const free = LVM.lvm.pvs.filter(p => !p.vg);
+  if (!free.length) return ui.alert('No hay volúmenes físicos sin asignar. Primero pulsa «Crear PV» en un disco o partición libre.', { title: 'Agregar PV a ' + vg });
+  const f = await ui.form({
+    title: 'Agregar PV a ' + vg, text: 'El espacio del PV se suma al espacio libre del grupo.',
+    fields: [{ name: 'pv', label: 'Volumen físico', type: 'select', options: free.map(p => [p.path, `${p.path} · ${fmtBytes(p.size)}`]) }],
+    confirmText: 'Agregar',
+  });
+  if (f && await act(API.vgExtend, { vg, pv: f.pv })) loadLvm();
+}
+
+async function lvCreate(vg) {
+  const vgs = LVM.lvm.vgs.filter(v => v.free > 0);
+  if (!vgs.length) return ui.alert('No hay ningún grupo de volúmenes con espacio libre.', { title: 'Crear volumen lógico' });
+  const f = await ui.form({
+    title: 'Crear volumen lógico',
+    fields: [
+      { name: 'vg', label: 'Grupo', type: 'select', value: vg || vgs[0].name, options: vgs.map(v => [v.name, `${v.name} · libre ${fmtBytes(v.free)}`]) },
+      { name: 'name', label: 'Nombre', placeholder: 'datos', required: true },
+      { name: 'size', label: 'Tamaño', placeholder: '10G', required: true, help: 'Ej. 10G, 500M, o 100% para usar todo el espacio libre del grupo.' },
+      { name: 'fs', label: 'Formatear', type: 'select', value: 'ext4',
+        options: [['', 'No formatear'], ['ext4', 'ext4 (recomendado)'], ['xfs', LVM.xfs ? 'XFS' : 'XFS (instala antes xfsprogs)']] },
+      { name: 'mountpoint', label: 'Punto de montaje (opcional)', placeholder: '/srv/datos',
+        help: 'Vacío = no montar. Debe ser una carpeta vacía o inexistente. Se agrega a /etc/fstab por UUID (con respaldo).' },
+    ],
+    confirmText: 'Crear',
+    validate: v => !NAME_RE.test(v.name) ? 'Nombre inválido: letras, números y _ . + -'
+      : !/^\+?\s*\d+(\.\d+)?\s*[MGTmgt]$|^\d{1,3}\s*%$/.test(v.size.trim()) ? 'Tamaño inválido. Ej. 10G, 500M o 100%.'
+      : v.mountpoint.trim() && !v.fs ? 'Para montarlo hay que formatearlo.' : null,
+  });
+  if (!f) return;
+  if (await act(API.lvCreate, { vg: f.vg, name: f.name, size: f.size.trim(), fs: f.fs, mountpoint: f.mountpoint.trim() },
+      f.fs ? 'Creando y formateando el volumen…' : 'Creando el volumen…')) loadLvm();
+}
+
+async function lvExtend(vg, lv) {
+  const v = LVM.lvm.vgs.find(x => x.name === vg);
+  const size = await ui.prompt(`¿Cuánto espacio agregar a ${vg}/${lv}? Libre en el grupo: ${fmtBytes(v ? v.free : 0)}.\n` +
+    'Si tiene sistema de archivos ext4 o XFS, también se amplía. Los volúmenes nunca se reducen.',
+    { title: 'Ampliar volumen', placeholder: '5G, 500M o 100%', confirmText: 'Ampliar',
+      validate: s => /^\+?\s*\d+(\.\d+)?\s*[MGTmgt]$|^\d{1,3}\s*%$/.test(s.trim()) ? null : 'Tamaño inválido. Ej. 5G, 500M o 100%.' });
+  if (!size) return;
+  if (await act(API.lvExtend, { vg, lv, size: size.trim() }, 'Ampliando el volumen…')) loadLvm();
+}
+
+async function lvRemove(vg, lv) {
+  const l = LVM.lvm.lvs.find(x => x.vg === vg && x.name === lv);
+  if (l && l.mounts && l.mounts.length) return ui.alert(`${vg}/${lv} está montado en ${l.mounts.join(', ')}. Desmóntalo (y quítalo de /etc/fstab) antes de eliminarlo.`, { title: 'No se puede eliminar', icon: 'warning' });
+  const what = l && l.snapshot ? 'el snapshot' : 'el volumen';
+  if (!await ui.confirm(`Se eliminará ${what} ${vg}/${lv} y TODOS sus datos. Esta acción no se puede deshacer.`,
+      { title: 'Eliminar ' + vg + '/' + lv, danger: true, typed: vg + '/' + lv, confirmText: 'Eliminar' })) return;
+  if (await act(API.lvRemove, { vg, lv })) loadLvm();
+}
+
+async function snapCreate(vg, lv) {
+  const d = new Date(), stamp = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  const l = LVM.lvm.lvs.find(x => x.vg === vg && x.name === lv);
+  const thin = l && l.segtype === 'thin';
+  const fields = [{ name: 'name', label: 'Nombre del snapshot', value: `${lv}-snap-${stamp}`.slice(0, 64), required: true }];
+  if (!thin) fields.push({ name: 'size', label: 'Espacio para cambios', value: '1G', required: true,
+    help: 'Guarda los bloques que cambian en el original. Si se llena, el snapshot queda inválido. 10–20 % del volumen suele bastar.' });
+  const f = await ui.form({
+    title: 'Snapshot de ' + vg + '/' + lv, text: 'Un snapshot congela el estado actual del volumen: útil antes de una actualización o para respaldar con los datos quietos.',
+    fields, confirmText: 'Crear snapshot',
+    validate: v => !NAME_RE.test(v.name) ? 'Nombre inválido.' : (!thin && !/^\d+(\.\d+)?\s*[MGTmgt]$/.test(v.size.trim())) ? 'Tamaño inválido. Ej. 1G o 500M.' : null,
+  });
+  if (!f) return;
+  if (await act(API.snapCreate, { vg, lv, name: f.name, size: (f.size || '').trim() })) loadLvm();
+}
+
+// ── RAID ──
+async function loadRaid() {
+  RAID = await getJSON(API.raid);
+  if (!RAID.arrays) RAID.arrays = [];
+  renderRaid();
+  updateHead();
+}
+
+function renderRaid() {
+  document.getElementById('raid-install').hidden = !!RAID.installed;
+  document.querySelector('#raid-install button').hidden = !RAID.can_install;
+  document.getElementById('raid-section').hidden = !RAID.installed;
+  const missing = RAID.arrays.filter(a => a.uuid && !a.in_conf).length;
+  document.getElementById('raid-conf-note').textContent = missing
+    ? `${missing} array(s) no figuran en ${RAID.conf_path}: guárdalos para que se ensamblen al arrancar.` : '';
+  const list = document.getElementById('raid-list');
+  if (RAID.error) { list.innerHTML = `<div class="card muted">${escapeHtml(RAID.error)}</div>`; return; }
+  if (!RAID.arrays.length) {
+    list.innerHTML = '<div class="card"><p class="muted" style="margin:0;">No hay arrays RAID por software. Usa <b>Crear array</b> con al menos dos discos libres.</p></div>';
+    return;
+  }
+  list.innerHTML = RAID.arrays.map(a => {
+    const lvl = a.level ? a.level.replace('raid', 'RAID ') : '—';
+    const st = !a.active ? ['err', 'inactivo'] : a.degraded ? ['err', 'degradado'] : a.sync ? ['warn', (SYNC[a.sync.action] || a.sync.action).toLowerCase()] : ['ok', 'correcto'];
+    const redundant = !['raid0', 'linear', ''].includes(a.level);
+    const sync = a.sync ? `<div class="meter-row">
+        <div class="meter-name">${escapeHtml(SYNC[a.sync.action] || a.sync.action)}</div>
+        <div class="meter-val">${Number(a.sync.percent)}%${a.sync.finish ? ' · ' + (/^(pending|delayed)$/.test(a.sync.finish) ? 'en espera' : 'faltan ' + escapeHtml(a.sync.finish)) : ''}${a.sync.speed ? ' · ' + escapeHtml(a.sync.speed) : ''}</div>
+        ${bar(a.sync.percent, 'warn')}</div>` : '';
+    const rows = (a.members_detail || []).map(m => {
+      const role = m.state === 'faulty' ? ['err', 'fallido'] : m.state === 'spare' ? ['mute', 'repuesto'] : ['ok', /^\d+$/.test(m.role) ? 'activo · posición ' + m.role : 'activo'];
+      const btn = redundant && a.active
+        ? `<button class="btn btn-sm btn-danger" onclick="raidFailRemove(${jsArg(a.name)}, ${jsArg(m.dev)}, ${jsArg(m.state)})">${m.state === 'active' ? 'Marcar fallido y quitar' : 'Quitar'}</button>` : '';
+      return `<tr><td class="mono">${escapeHtml(m.dev)}</td><td><span class="pill ${role[0]}">${escapeHtml(role[1])}</span></td><td>${btn}</td></tr>`;
+    }).join('');
+    return `<div class="card">
+      <div class="card-head"><h3><span class="mono">/dev/${escapeHtml(a.name)}</span> · ${escapeHtml(lvl)} <span class="pill ${st[0]}">${escapeHtml(st[1])}</span></h3>
+        ${redundant && a.active ? `<button class="btn btn-sm" onclick="raidAdd(${jsArg(a.name)})">Agregar disco</button>` : ''}</div>
+      <dl class="kv">
+        <div><dt>Tamaño</dt><dd>${a.size ? fmtBytes(a.size) : '—'}</dd></div>
+        <div><dt>Discos</dt><dd>${a.total ? `${Number(a.working)} de ${Number(a.total)} funcionando <span class="mono muted">[${escapeHtml(a.map)}]</span>` : Number((a.members || []).length)}</dd></div>
+        <div><dt>Estado del kernel</dt><dd class="mono">${escapeHtml(a.array_state || a.state)}${a.readonly ? ' · ' + escapeHtml(a.readonly) : ''}</dd></div>
+        <div><dt>En mdadm.conf</dt><dd>${a.in_conf ? '<span class="pill ok">sí</span>' : '<span class="pill warn">no</span>'}</dd></div>
+        <div><dt>UUID</dt><dd class="mono small">${escapeHtml(a.uuid || '—')}</dd></div>
+        <div><dt>Metadatos</dt><dd class="mono">${escapeHtml(a.metadata || '—')}${a.md_name ? ' · ' + escapeHtml(a.md_name) : ''}</dd></div>
+      </dl>
+      ${sync}
+      <div class="table-wrap" style="margin-top:12px;">
+        <table class="lx"><thead><tr><th>Miembro</th><th>Rol</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="muted center">Sin miembros</td></tr>'}</tbody></table>
+      </div></div>`;
+  }).join('');
+}
+
+function freeRaidDevices() {
+  return (LVM ? LVM.devices : []).filter(d => d.free && (d.type === 'disk' || d.type === 'part'));
+}
+
+async function raidCreate() {
+  const free = freeRaidDevices();
+  if (free.length < 2) return ui.alert('Necesitas al menos 2 discos o particiones libres (sin particiones, sin datos y sin montar).', { title: 'Crear array RAID' });
+  const used = new Set(RAID.arrays.map(a => a.name));
+  let n = 0; while (used.has('md' + n)) n++;
+  const f = await ui.form({
+    title: 'Crear array RAID', text: 'Elige el nivel y los discos. Lo ideal es que todos tengan el mismo tamaño: el array usa el del más pequeño.',
+    fields: [
+      { name: 'name', label: 'Nombre', value: 'md' + n, required: true, help: 'md0 a md127' },
+      { name: 'level', label: 'Nivel', type: 'select', value: '1', options: [
+        ['1', 'RAID 1 · espejo (mín. 2 discos)'], ['5', 'RAID 5 · paridad simple (mín. 3)'],
+        ['6', 'RAID 6 · paridad doble (mín. 4)'], ['10', 'RAID 10 · espejo + franjas (mín. 4)'],
+        ['0', 'RAID 0 · sin redundancia (mín. 2)']] },
+      ...free.map((d, i) => ({ name: 'd' + i, label: `${d.path} · ${fmtBytes(d.size)}${d.model ? ' · ' + d.model : ''}`, type: 'checkbox' })),
+    ],
+    confirmText: 'Continuar',
+    validate: v => {
+      const m = /^md(\d{1,3})$/.exec(v.name);
+      if (!m || Number(m[1]) > 127) return 'Nombre inválido: usa md0 a md127.';
+      if (used.has(v.name)) return 'Ese nombre ya existe.';
+      const c = free.filter((d, i) => v['d' + i]).length;
+      return c < RAID_MIN[v.level] ? `RAID ${v.level} necesita al menos ${RAID_MIN[v.level]} discos.` : null;
+    },
+  });
+  if (!f) return;
+  const devices = free.filter((d, i) => f['d' + i]).map(d => d.path);
+  if (!await ui.confirm(`Se creará /dev/${f.name} (RAID ${f.level}) con ${devices.join(', ')}.\nTODO el contenido de esos discos se perderá.`,
+      { title: 'Crear array RAID', danger: true, typed: f.name, confirmText: 'Crear array' })) return;
+  if (await act(API.raidCreate, { name: f.name, level: f.level, devices }, 'Creando el array…')) { await loadRaid(); loadLvm(); }
+}
+
+async function raidFailRemove(array, dev, state) {
+  const text = state === 'active'
+    ? `${dev} se marcará como fallido y se quitará de /dev/${array}. El array quedará degradado (sin redundancia) hasta que agregues un disco de reemplazo.`
+    : `${dev} se quitará de /dev/${array}.`;
+  if (!await ui.confirm(text, { title: 'Quitar disco del array', danger: true, typed: dev, confirmText: 'Quitar disco' })) return;
+  if (await act(API.raidFail, { array, device: dev })) { await loadRaid(); loadLvm(); }
+}
+
+async function raidAdd(array) {
+  const free = freeRaidDevices();
+  if (!free.length) return ui.alert('No hay discos ni particiones libres. Conecta un disco nuevo (igual o más grande que los actuales) y pulsa Refrescar.', { title: 'Agregar disco' });
+  const a = RAID.arrays.find(x => x.name === array);
+  const f = await ui.form({
+    title: 'Agregar disco a /dev/' + array,
+    text: a && a.degraded ? 'El array está degradado: el disco nuevo se usará para reconstruirlo.' : 'El disco quedará como repuesto (spare): entra solo si otro falla.',
+    fields: [{ name: 'device', label: 'Disco o partición libre', type: 'select', options: free.map(d => [d.path, `${d.path} · ${fmtBytes(d.size)}${d.model ? ' · ' + d.model : ''}`]) }],
+    confirmText: 'Continuar',
+  });
+  if (!f) return;
+  if (!await ui.confirm(`Se agregará ${f.device} a /dev/${array}. Su contenido se perderá.`,
+      { title: 'Agregar disco', danger: true, typed: f.device, confirmText: 'Agregar' })) return;
+  if (await act(API.raidAdd, { array, device: f.device })) { await loadRaid(); loadLvm(); }
+}
+
+async function raidSaveConf() {
+  if (!await ui.confirm(`Se agregarán a ${RAID.conf_path} (con respaldo) los arrays que aún no figuren, usando «mdadm --detail --scan». Así se ensamblan con el mismo nombre al arrancar.`,
+      { title: 'Guardar en mdadm.conf', confirmText: 'Guardar' })) return;
+  const d = await act(API.raidConf, {});
+  if (d && d.added) {
+    if (await ui.confirm('Para que el arranque use la nueva configuración hay que regenerar el initramfs (update-initramfs -u). ¿Hacerlo ahora?',
+        { title: 'Actualizar initramfs', confirmText: 'Actualizar ahora', cancelText: 'Más tarde' })) await act(API.raidInitramfs, {}, 'Actualizando initramfs, puede tardar un minuto…');
+  }
+  loadRaid();
+}
+
+async function raidInitramfs() {
+  if (!await ui.confirm('Se ejecutará update-initramfs -u para que el arranque incluya la configuración actual de mdadm. Tarda alrededor de un minuto.',
+      { title: 'Actualizar initramfs', confirmText: 'Actualizar' })) return;
+  await act(API.raidInitramfs, {}, 'Actualizando initramfs…');
+}
+
+// ── Cuotas ──
+async function loadQuota() {
+  QUOTA = await getJSON(API.quota);
+  if (!QUOTA.filesystems) QUOTA.filesystems = [];
+  if (!QUOTA.reports) QUOTA.reports = [];
+  renderQuota();
+}
+
+function onOff(v) {
+  return v === true ? '<span class="pill ok">activas</span>' : v === false ? '<span class="pill warn">apagadas</span>' : '<span class="muted">—</span>';
+}
+
+function renderQuota() {
+  document.getElementById('quota-install').hidden = !!QUOTA.installed;
+  document.querySelector('#quota-install button').hidden = !QUOTA.can_install;
+  document.getElementById('quota-set-btn').hidden = !QUOTA.installed || !QUOTA.filesystems.some(f => f.quota);
+  const tb = document.querySelector('#qfs-table tbody');
+  tb.innerHTML = QUOTA.filesystems.length ? QUOTA.filesystems.map(f => {
+    let btn = '';
+    if (!f.quota && f.fstype === 'xfs') btn = `<button class="btn btn-sm" onclick="xfsHelp(${jsArg(f.target)})">Cómo activarlas</button>`;
+    else if (!f.quota && QUOTA.installed) btn = `<button class="btn btn-sm btn-primary" onclick="quotaEnable(${jsArg(f.target)})">Activar cuotas</button>`;
+    else if (f.quota && (f.user_on === false || f.group_on === false)) btn = '<span class="muted small">Enciéndelas con quotaon en la terminal</span>';
+    return `<tr>
+      <td class="mono">${escapeHtml(f.target)}</td><td class="mono">${escapeHtml(f.source)}</td><td>${escapeHtml(f.fstype)}</td>
+      <td>${f.quota ? '<span class="pill ok">sí</span>' : '<span class="pill mute">no</span>'}</td>
+      <td>${f.quota ? onOff(f.user_on) : '<span class="muted">—</span>'}</td>
+      <td>${f.quota ? onOff(f.group_on) : '<span class="muted">—</span>'}</td>
+      <td>${btn}</td></tr>`;
+  }).join('') : '<tr><td colspan="7" class="muted center">No hay sistemas de archivos ext4 o XFS montados</td></tr>';
+
+  const box = document.getElementById('quota-report');
+  if (QUOTA.error) { box.innerHTML = `<div class="muted">${escapeHtml(QUOTA.error)}</div>`; return; }
+  const reports = QUOTA.reports.filter(r => r.kind === 'user' || r.kind === 'group');
+  if (!reports.length) {
+    box.innerHTML = '<div class="muted small">No hay cuotas activas. Actívalas en un sistema de archivos de la tabla de arriba.</div>';
+    return;
+  }
+  box.innerHTML = reports.map(r => {
+    const target = r.target || r.device;
+    const rows = r.entries.map(e => {
+      const lim = e.hard || e.soft;
+      const p = lim ? pct(e.used, lim) : 0;
+      const cls = e.hard && e.used >= e.hard ? 'err' : e.soft && e.used >= e.soft ? 'warn' : '';
+      const ilim = e.ihard || e.isoft;
+      const icls = e.ihard && e.files >= e.ihard ? 'err' : e.isoft && e.files >= e.isoft ? 'warn' : 'mute';
+      const pref = { kind: r.kind, name: e.name, target: r.target, bsoft: kToStr(e.soft), bhard: kToStr(e.hard), isoft: e.isoft, ihard: e.ihard };
+      return `<tr>
+        <td class="mono">${escapeHtml(e.name)}</td>
+        <td style="min-width:160px;">${lim ? bar(p, cls) : ''}<span class="small ${lim ? 'muted' : ''}">${fmtBytes(e.used * 1024)}${lim ? ' · ' + p + '%' : ''}</span></td>
+        <td>${e.soft ? fmtBytes(e.soft * 1024) : '<span class="muted">sin límite</span>'}</td>
+        <td>${e.hard ? fmtBytes(e.hard * 1024) : '<span class="muted">sin límite</span>'}</td>
+        <td>${e.grace ? `<span class="pill ${e.grace === 'vencido' ? 'err' : 'warn'}">${escapeHtml(e.grace)}</span>` : '<span class="muted">—</span>'}</td>
+        <td><span class="pill ${icls}">${Number(e.files)}</span>${ilim ? ` <span class="muted small">/ ${Number(e.isoft) || '∞'} · ${Number(e.ihard) || '∞'}</span>` : ''}${e.igrace ? ` <span class="pill warn">${escapeHtml(e.igrace)}</span>` : ''}</td>
+        <td>${r.target && !e.name.startsWith('#') ? `<button class="btn btn-sm" onclick="quotaSet(${jsArg(pref)})">Editar</button>` : ''}</td></tr>`;
+    }).join('');
+    return `<h4 style="margin:16px 0 6px;">${r.kind === 'user' ? 'Usuarios' : 'Grupos'} en <span class="mono">${escapeHtml(target)}</span>
+        <span class="muted small" style="font-weight:400;">· gracia: espacio ${escapeHtml(r.block_grace || '—')}, archivos ${escapeHtml(r.inode_grace || '—')}</span></h4>
+      <div class="table-wrap"><table class="lx">
+        <thead><tr><th>${r.kind === 'user' ? 'Usuario' : 'Grupo'}</th><th>Espacio usado</th><th>Límite blando</th><th>Límite duro</th><th>Gracia</th><th>Archivos (blando · duro)</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="muted center">Sin datos</td></tr>'}</tbody></table></div>`;
+  }).join('');
+}
+
+function xfsHelp(target) {
+  ui.alert(`XFS no permite activar cuotas con un remontaje; se activan al montar:\n\n` +
+    `1. Haz un respaldo y abre /etc/fstab.\n` +
+    `2. En la línea de ${target}, agrega uquota,gquota a las opciones (4.ª columna), por ejemplo:\n   defaults,uquota,gquota\n` +
+    (target === '/' ? `3. Como es la raíz, agrega también rootflags=uquota,gquota a GRUB_CMDLINE_LINUX en /etc/default/grub y ejecuta update-grub.\n4. Reinicia el servidor.\n`
+                    : `3. Reinicia el servidor (o desmonta y vuelve a montar ${target} si nadie lo usa).\n`) +
+    `\nDespués, las cuotas aparecerán activas en esta tabla. XFS no necesita quotacheck.`,
+    { title: 'Cuotas en XFS', icon: 'info' });
+}
+
+async function quotaEnable(target) {
+  if (!await ui.confirm(`Se activarán las cuotas de usuario y grupo en ${target}:\n\n` +
+      `• Respaldo de /etc/fstab y alta de usrquota,grpquota en sus opciones.\n• Remontaje de ${target} (sin desmontarlo).\n` +
+      `• Recuento del uso actual (quotacheck); en discos grandes puede tardar varios minutos.\n• Encendido de las cuotas (quotaon).\n\n` +
+      `Si algo falla, /etc/fstab se restaura automáticamente.`,
+      { title: 'Activar cuotas en ' + target, confirmText: 'Activar cuotas' })) return;
+  if (await act(API.quotaEnable, { target }, 'Activando cuotas y contando el uso actual…')) loadQuota();
+}
+
+async function quotaSet(pref) {
+  pref = pref || {};
+  const fss = QUOTA.filesystems.filter(f => f.quota);
+  if (!fss.length) return ui.alert('Primero activa las cuotas en un sistema de archivos.', { title: 'Fijar límites' });
+  const f = await ui.form({
+    title: pref.name ? `Límites de ${pref.name}` : 'Fijar límites de cuota',
+    text: 'Tamaños con K, M, G o T (ej. 500M, 2G). 0 o vacío = sin límite. El blando puede superarse durante el periodo de gracia; el duro, nunca.',
+    fields: [
+      { name: 'kind', label: 'Tipo', type: 'select', value: pref.kind || 'user', options: [['user', 'Usuario'], ['group', 'Grupo']] },
+      { name: 'name', label: 'Nombre', value: pref.name || '', placeholder: 'juan', required: true },
+      { name: 'target', label: 'Sistema de archivos', type: 'select', value: pref.target || fss[0].target, options: fss.map(x => [x.target, `${x.target} (${x.source})`]) },
+      { name: 'bsoft', label: 'Espacio · límite blando', value: pref.bsoft ?? '0', placeholder: '2G' },
+      { name: 'bhard', label: 'Espacio · límite duro', value: pref.bhard ?? '0', placeholder: '3G' },
+      { name: 'isoft', label: 'Archivos · límite blando', value: pref.isoft ?? 0, type: 'number' },
+      { name: 'ihard', label: 'Archivos · límite duro', value: pref.ihard ?? 0, type: 'number' },
+    ],
+    confirmText: 'Guardar límites',
+    validate: v => {
+      const sz = /^(\d+(\.\d+)?\s*[KMGTkmgt]?)?$/;
+      if (!/^[A-Za-z0-9_][A-Za-z0-9_.@-]{0,63}\$?$/.test(v.name.trim())) return 'Nombre de usuario o grupo inválido.';
+      if (!sz.test(v.bsoft.trim()) || !sz.test(v.bhard.trim())) return 'Tamaño inválido. Ej. 500M, 2G.';
+      if (!/^\d*$/.test(String(v.isoft).trim()) || !/^\d*$/.test(String(v.ihard).trim())) return 'Los límites de archivos son números enteros.';
+      return null;
+    },
+  });
+  if (!f) return;
+  if (await act(API.quotaSet, { kind: f.kind, name: f.name.trim(), target: f.target, bsoft: f.bsoft.trim(), bhard: f.bhard.trim(),
+      isoft: String(f.isoft).trim(), ihard: String(f.ihard).trim() })) loadQuota();
+}
+
+showTab((location.hash || '#lvm').slice(1));
+reloadAll();
+</script>
+{% endblock %}

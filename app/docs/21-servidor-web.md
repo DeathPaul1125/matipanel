@@ -66,7 +66,7 @@ La tarjeta **Sitios** lista los archivos de `sites-available` y `sites-enabled`.
 5. Escribe el archivo `sites-available/<dominio>.conf`.
 6. Habilita el sitio, prueba la configuración y recarga el servicio.
 
-Si la prueba falla, el panel deshace el sitio y muestra **La prueba de configuración falló; se revirtió el sitio** con la salida del error. La carpeta del document root que se creó no se borra.
+Si la prueba falla, el panel deshace el sitio y muestra **La prueba de configuración falló; se revirtió el sitio** con la salida del error. También borra el `index.html` de ejemplo y las carpetas del document root que creó en ese mismo intento (si siguen vacías). Lo que ya existía antes no se toca.
 
 ### Qué contiene la configuración generada
 
@@ -144,7 +144,7 @@ Al deshabilitar, el sitio deja de responder tras la recarga. Si la prueba de con
 
 > **Importante:** Guardar el archivo no aplica los cambios. Siempre debes **Probar config** y luego **Recargar**.
 
-> **Nota:** En Nginx, la copia `<sitio>.matipanel.bak` aparece en la tabla de sitios como un sitio deshabilitado. Es solo un respaldo: no la habilites.
+> **Nota:** La tabla de sitios no muestra respaldos ni temporales de editores: archivos que terminan en `.bak` (incluido `.matipanel.bak`), `~`, `.dpkg-old`, `.dpkg-dist` o `.swp`, ni los que empiezan con `.`. Siguen en el disco; verlos o borrarlos se hace desde [Archivos](26-archivos.md).
 
 ## Eliminar un sitio
 

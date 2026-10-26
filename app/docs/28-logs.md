@@ -11,7 +11,7 @@ MatiPanel tiene dos páginas para revisar los registros del sistema. **Logs** co
 
 | Filtro | Qué hace |
 |---|---|
-| **Unidad** | Muestra solo los mensajes de un servicio, por ejemplo `ssh.service`, `nginx` o `mariadb`. Vacío: todo el sistema. |
+| **Unidad** | Muestra solo los mensajes de un servicio, por ejemplo `ssh.service`, `nginx` o `mariadb`. Vacío: todo el sistema. Si el nombre no es válido (espacios u otros caracteres raros) verás **Nombre de unidad inválido** en lugar del journal completo. |
 | **Prioridad** | **Todas las prioridades**, `err`, `warning` o `info`. Cada nivel incluye también los más graves. Por ejemplo, `err` muestra errores y mensajes críticos. |
 | **Líneas** | 100, 200, 500 o 1000. La opción **5000 (archivos)** solo vale para archivos; con journalctl el máximo es 1000. |
 
@@ -28,10 +28,10 @@ Las líneas se muestran con fecha y hora en formato ISO. La vista baja sola hast
 3. Para cambiar la cantidad, elige un valor en **Líneas** (hasta **5000 (archivos)**) y pulsa **Cargar**.
 
 - Se muestran las últimas líneas del archivo (como `tail`).
-- La lista incluye todos los archivos dentro de `/var/log` y sus subcarpetas. No incluye los rotados comprimidos (`.gz`, `.xz`, `.bz2`, `.zst`) ni `wtmp`, `btmp` y `lastlog`.
+- La lista incluye los archivos de texto dentro de `/var/log` y sus subcarpetas. No incluye los rotados comprimidos (`.gz`, `.xz`, `.bz2`, `.zst`), `wtmp`, `btmp` y `lastlog`, la carpeta `/var/log/journal/` ni otros archivos binarios.
 - La lista se arma al abrir la página. Si se crea un log nuevo, recarga la página.
 
-> **Nota:** Algunos archivos de la lista son binarios, por ejemplo los de `/var/log/journal/`. Si los abres verás caracteres sin sentido. Para el journal usa la opción **journalctl**.
+> **Nota:** El journal de systemd (`/var/log/journal/`) es binario y no aparece en la lista. Para consultarlo usa la opción **journalctl**.
 
 > **Consejo:** Para leer un log rotado y comprimido (por ejemplo `syslog.2.gz`), descárgalo desde [Archivos](26-archivos.md) o usa `zcat` en la [Terminal](29-terminal.md).
 
@@ -51,7 +51,7 @@ Las líneas se muestran con fecha y hora en formato ISO. La vista baja sola hast
 ### Límites de la vista en vivo
 
 - La pantalla guarda como máximo unas 5000 líneas. Al superarlas, conserva las últimas 3000.
-- Cada conexión envía como máximo 10 000 líneas. Después deja de recibir líneas nuevas, aunque el indicador siga en `conectado`. Pulsa **Detener** y **Conectar** para seguir.
+- Cada conexión envía como máximo 10 000 líneas. Al llegar al límite verás **[ERROR] límite de 10000 líneas alcanzado; reconecta para seguir** y el indicador pasa a `desconectado`. Pulsa **Conectar** para seguir.
 
 > **Consejo:** Usa la vista en vivo mientras reproduces un problema. Por ejemplo: conecta con `nginx.service`, recarga el sitio en otra pestaña y mira qué aparece.
 

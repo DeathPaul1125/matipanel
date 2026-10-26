@@ -48,7 +48,7 @@ En el celular, la barra lateral se abre con el botón **☰**.
 
 ## Cerrar sesión
 
-Pulsa **Cerrar sesión** al pie de la barra lateral. La sesión también expira al cerrar el navegador.
+Pulsa **Cerrar sesión** al pie de la barra lateral. La sesión también caduca tras 1 hora sin actividad.
 
 ## Preguntas frecuentes
 
