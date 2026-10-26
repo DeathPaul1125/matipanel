@@ -140,7 +140,7 @@ El servicio corre como **root** (igual que Webmin) porque administra el sistema 
 - **2FA TOTP opcional:** si su configuración se daña, el acceso se bloquea en lugar de saltarse el segundo factor.
 - **Sesión y cookies:** HTTPS, cookie `__Host-` con `Secure`, `HttpOnly` y `SameSite=Lax`; la sesión se renueva al iniciar sesión y caduca tras 1 hora sin actividad. El código 2FA no se puede reutilizar y tiene su propio límite de intentos por usuario.
 - **CSRF y WebSocket:** toda acción que modifica algo exige `Origin`/`Referer` del propio panel; los WebSocket (terminal, logs) verifican el origen.
-- **Cabeceras de seguridad:** Content-Security-Policy (sin scripts externos ni envío de datos a otros sitios), `frame-ancestors 'none'` contra clickjacking, `nosniff`, `no-referrer` y `no-store` en las respuestas de datos.
+- **Cabeceras de seguridad:** Content-Security-Policy (sin scripts externos ni envío de datos a otros sitios), `frame-ancestors 'none'` contra clickjacking, `nosniff`, `Referrer-Policy: same-origin` y `no-store` en las respuestas de datos.
 - **Archivos y enlaces simbólicos:** las escrituras, subidas, extracciones y respaldos no siguen enlaces simbólicos plantados por otros usuarios; los comprimidos se revisan antes de extraer (rutas fuera del destino, setuid, dispositivos).
 - **Terminal:** baja a los privilegios de tu usuario; nunca abre un shell root.
 - **Comandos:** todos se ejecutan sin shell y con validación estricta de parámetros.

@@ -1243,7 +1243,7 @@ def _fetch_rows(engine, meta, where, order, limit, offset, count):
         raw = [json.loads(ln) for ln in lines if ln.startswith("[")]
     rows = []
     for r in raw:
-        lv = [(lens[j][0], r[n + j]) for j in range(len(lens))]
+        lv = [(lens[j][0], r[n + j] if n + j < len(r) else None) for j in range(len(lens))]
         rows.append(_cells(meta, r[:n], lv))
     return rows, total, bool(trunc)
 
@@ -1304,8 +1304,8 @@ def count(engine):
     if engine == "mysql":
         r = _q("mysql", None, [f"SELECT COUNT(*) FROM {meta['tq']}{where}"])[0]
     else:
-        r = _q("pg", db, [_pgagg("count(*)", f"FROM {meta['tq']}{where}")])[0]
-        r = [[r[0][0]]] if r else []
+        # count(*) no puede ir dentro de jsonb_agg (agregados anidados): una sola fila → [[n]]
+        r = _q("pg", db, [f"SELECT jsonb_build_array(jsonb_build_array(count(*))) FROM {meta['tq']}{where}"])[0]
     return jsonify({"ok": True, "count": _int(r[0][0]) if r else 0})
 
 

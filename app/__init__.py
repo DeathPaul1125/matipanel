@@ -87,7 +87,7 @@ def create_app():
             "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"]))
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault("Referrer-Policy", "same-origin")  # no-referrer haría que los formularios manden Origin: null
         resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
         resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         if resp.mimetype == "application/json":  # datos del servidor: que no queden en caché

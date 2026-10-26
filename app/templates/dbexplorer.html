@@ -354,15 +354,17 @@ async function viewOverview(v, tok) {
   else if (!list.length) body = '<div class="empty">Esta base no tiene tablas todavía.</div>';
   else {
     const total = list.reduce((a, t) => a + (t.size || 0), 0);
+    const cmt = t => t.type === 'view' && t.comment === 'VIEW' ? '' : t.comment;
+    const hasCmt = list.some(cmt);
     body = `<div class="table-wrap"><table class="lx"><thead><tr><th>Tabla</th><th>Tipo</th><th class="right">Filas (aprox.)</th><th class="right">Tamaño</th>
-      ${my ? '<th>Motor</th><th>Cotejamiento</th>' : ''}<th>Comentario</th><th></th></tr></thead><tbody>` +
+      ${my ? '<th>Motor</th><th>Cotejamiento</th>' : ''}${hasCmt ? '<th>Comentario</th>' : ''}<th></th></tr></thead><tbody>` +
       list.map(t => `<tr>
         <td class="mono"><a href="#" data-act="open-table" data-table="${esc(t.name)}" data-tab="data">${esc(t.name)}</a></td>
         <td>${t.type === 'table' ? 'tabla' : t.type === 'view' ? '<span class="pill mute">vista</span>' : esc(t.type)}</td>
         <td class="right">${t.type === 'view' ? '—' : esc(fmtN(t.rows))}</td>
         <td class="right">${esc(t.size_h || '—')}</td>
         ${my ? `<td class="small">${esc(t.engine || '—')}</td><td class="small mono">${esc(t.collation || '—')}</td>` : ''}
-        <td class="small muted dbx-ellipsis" title="${esc(t.comment)}">${esc(t.comment)}</td>
+        ${hasCmt ? `<td class="small muted dbx-ellipsis" title="${esc(cmt(t))}">${esc(cmt(t))}</td>` : ''}
         <td class="right dbx-nowrap">
           <button type="button" class="btn btn-sm" data-act="open-table" data-table="${esc(t.name)}" data-tab="data">Datos</button>
           <button type="button" class="btn btn-sm" data-act="open-table" data-table="${esc(t.name)}" data-tab="structure">Estructura</button>
@@ -528,9 +530,9 @@ function renderPager() {
   const g = S.grid, total = g.count;
   const from = g.rows.length ? (g.page - 1) * g.per + 1 : 0, to = (g.page - 1) * g.per + g.rows.length;
   const pages = total != null ? Math.max(1, Math.ceil(total / g.per)) : null;
-  let info = g.rows.length ? `Filas ${fmtN(from)}–${fmtN(to)}` : 'Sin filas';
-  if (total != null) info += ` de ${fmtN(total)}`;
-  else if (!g.filtered && g.est != null) info += ` de ≈ ${fmtN(g.est)} (estimado)`;
+  let info = g.rows.length ? `Filas ${fmtN(from)}–${fmtN(to)}` : 'Sin filas en esta página';
+  if (total != null) info = g.rows.length ? info + ` de ${fmtN(total)}` : `${fmtN(total)} filas`;
+  else if (!g.filtered && g.est != null) info += ` · total ≈ ${fmtN(g.est)} (estimado)`;
   $('g-pager').innerHTML = `<span class="small muted">${esc(info)}</span>
     ${total == null ? '<button type="button" class="btn btn-sm" data-act="count">Contar exacto</button>' : ''}
     ${g.truncated ? '<span class="pill warn">resultado recortado (máx. 2 MB)</span>' : ''}
