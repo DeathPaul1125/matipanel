@@ -638,6 +638,20 @@ def service_env(cfg, sec, current=""):
     return upd
 
 
+def fill_db_placeholders(cfg, sec, text):
+    """Proyecto PHP con base del panel: rellena las claves *DB_* vacías o que apuntan a localhost
+    (dentro del contenedor localhost nunca es la base). Respeta los valores puestos a mano."""
+    if not is_php(cfg) or cfg.get("database") not in ("mariadb", "postgres"):
+        return text
+    current = dict(parse_env(text)[0])
+    hosts = {k for k, v in current.items() if DB_ALIAS_RE.fullmatch(k) and k.endswith("HOST")
+             and v in ("localhost", "127.0.0.1")}
+    prefixes = {k[:-4] for k in hosts}  # LDB_HOST=localhost → todas las LDB_* van al contenedor
+    upd = {k: v for k, v in service_env(cfg, sec, text).items()
+           if k in current and (current[k] == "" or any(k.startswith(px) for px in prefixes))}
+    return env_set(text, upd) if upd else text
+
+
 def default_env(cfg, sec):
     if is_php(cfg):  # se completa en el primer despliegue con el .env.example del repositorio, si trae
         return env_set("# .env de la aplicación (se monta en el contenedor como archivo)\n", service_env(cfg, sec))
@@ -1314,6 +1328,7 @@ def _seed_env(name, cfg, log):
     example = app_dir(name) / "src" / (env_path + ".example")
     text = read_text(example, ENV_MAX) if valid_rel_path(env_path) and lstat_kind(example) == "file" else None
     if text is None:
+        log.write(f"El repositorio no trae {env_path}.example: revisa el .env en la pestaña Entorno\n")
         return
     pairs, errors = parse_env(text)
     if errors or not pairs:
@@ -1850,4 +1865,9 @@ if __name__ == "__main__":
                    "LDB_HOST": "db", "LDB_PASS": "P" * 32}, upd
     assert set(service_env(pc, sec)) == {"DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"}
     assert dict(parse_env(db_env(pc, sec))[0])["MARIADB_DATABASE"] == "app"
+    filled = dict(parse_env(fill_db_placeholders(pc, sec, "LDB_HOST='localhost'\nLDB_NAME='db_quetzal'\nLDB_USER='root'\n"
+                                                 "LDB_PASS=''\nDB_HOST=ext.local\nDB_NAME=prod\nDB_PASS=\n"))[0])
+    assert filled == {"LDB_HOST": "db", "LDB_NAME": "app", "LDB_USER": "app", "LDB_PASS": "P" * 32,
+                      "DB_HOST": "ext.local", "DB_NAME": "prod", "DB_PASS": "P" * 32}, filled
+    assert fill_db_placeholders({**pc, "kind": "laravel"}, sec, "DB_HOST=localhost\n") == "DB_HOST=localhost\n"
     print("ok")

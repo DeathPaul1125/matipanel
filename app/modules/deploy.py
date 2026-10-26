@@ -508,6 +508,7 @@ def env(name):
         return _err("Corrige el .env: " + "; ".join(errors[:5]), errors=errors)
     if len(text.encode()) > D.ENV_MAX:
         return _err("El .env es demasiado grande (máximo 256 KB)")
+    text = D.fill_db_placeholders(cfg, D.load_secrets(name), text)
     D.write_env(name, text)
     dep = None
     if d.get("apply") and cfg.get("active_slot") and (cfg.get("current") or {}).get("image"):
