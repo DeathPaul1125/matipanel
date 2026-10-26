@@ -2,6 +2,8 @@
 # install.sh — Instala MatiPanel en Debian/Ubuntu o RHEL/Rocky/Fedora
 # Uso: sudo bash scripts/install.sh [usuario-con-acceso-al-panel]
 set -euo pipefail
+# "su" sin guion no carga /usr/sbin (groupadd, usermod…); lo agregamos.
+export PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 
 if [[ $EUID -ne 0 ]]; then
    echo "Este script debe ejecutarse como root (sudo bash scripts/install.sh)" >&2

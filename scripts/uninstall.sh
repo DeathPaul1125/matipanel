@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # uninstall.sh — Quita MatiPanel completamente (incluye secretos 2FA)
 set -euo pipefail
+# "su" sin guion no carga /usr/sbin (groupadd, usermod…); lo agregamos.
+export PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 
 if [[ $EUID -ne 0 ]]; then
    echo "Ejecuta como root (sudo bash scripts/uninstall.sh)" >&2
