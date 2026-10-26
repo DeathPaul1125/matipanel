@@ -148,7 +148,11 @@ def _str(engine, s):
 
 
 def _ident(engine, name):
-    return f"`{name}`" if engine == "mysql" else f'"{name}"'
+    """Identificador citado. Duplica el delimitador, así sirve también para nombres que no pasaron
+    por NAME_RE (p. ej. tablas leídas del catálogo en el explorador)."""
+    if engine == "mysql":
+        return "`" + name.replace("`", "``") + "`"
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _account(engine, user, host):
@@ -462,6 +466,20 @@ def _dump_stream(cmd):
         errf.close()
 
 
+def _dump_cmd(engine, db, table=None, schema="public"):
+    """mysqldump / pg_dump de una BD entera o de una sola tabla (el explorador también lo usa).
+    db y table ya deben estar validados (existen); el nombre de tabla va tras "--" o citado."""
+    if engine == "mysql":
+        if table:
+            return ["mysqldump", *_my_opts(), "--single-transaction", "--triggers", "--", db, table]
+        return ["mysqldump", *_my_opts(), "--single-transaction", "--routines", "--triggers", "--", db]
+    cmd = ["runuser", "-u", "postgres", "--", "pg_dump"]
+    if table:
+        # Patrón de pg_dump: entre comillas dobles todo es literal (*, ?, . no son comodines)
+        cmd.append("--table=" + _ident("pg", schema) + "." + _ident("pg", table))
+    return cmd + ["--", db]
+
+
 @databases_bp.route("/api/<any(mysql, pg):engine>/backup/<db>")
 @login_required
 @needs_engine
@@ -471,10 +489,7 @@ def backup(engine, db):
     code, _, err = _exec(engine, "SELECT 1;", db=db, timeout=10)
     if code != 0:
         return jsonify({"error": err or "No se pudo conectar a la base de datos"}), 404
-    if engine == "mysql":
-        cmd = ["mysqldump", *_my_opts(), "--single-transaction", "--routines", "--triggers", "--", db]
-    else:
-        cmd = ["runuser", "-u", "postgres", "--", "pg_dump", "--", db]
+    cmd = _dump_cmd(engine, db)
     fname = f"{db}-{datetime.now():%Y%m%d-%H%M}.sql.gz"
     return Response(_dump_stream(cmd), mimetype="application/gzip",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})

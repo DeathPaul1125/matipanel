@@ -40,6 +40,7 @@ También puedes agregar una carpeta desde su menú (clic derecho → **Agregar a
 - **Ordenar:** haz clic en el título de una columna (**Nombre**, **Tamaño**, **Modificado**, **Permisos**, **Propietario**). Un segundo clic invierte el orden. Las carpetas siempre van primero. El panel recuerda tu orden.
 - **Filtrar:** escribe en **Filtrar…** y la lista muestra solo lo que contiene ese texto. `Esc` borra el filtro.
 - **Ocultos:** los archivos que empiezan con `.` (por ejemplo `.htaccess` o `.env`) están ocultos. Marca **Ocultos** para verlos. El pie de la lista dice cuántos elementos están ocultos o filtrados.
+- **Carpetas enormes:** si una carpeta tiene más de 20 000 entradas, la lista muestra solo las primeras 20 000 (por orden alfabético) y el pie lo indica (**solo se muestran 20000 de N entradas**). Usa **Buscar en subcarpetas** o la [Terminal](29-terminal.md) para encontrar el resto.
 
 ## Buscar en subcarpetas
 
@@ -138,6 +139,7 @@ Si un archivo no se puede abrir en el editor (muy grande o binario), el panel te
 - Antes de escribir, el panel copia el archivo original a `<archivo>.matipanel.bak` en la misma carpeta.
 - El archivo se reemplaza de forma segura y conserva sus permisos y su propietario.
 - Si el archivo es un enlace simbólico, se modifica el archivo al que apunta.
+- Si el archivo cambió en el disco mientras lo tenías abierto (otro usuario o programa lo modificó, o lo reemplazó por otro archivo o enlace), **no se guarda**: verás **El archivo cambió en el disco desde que lo abriste**. Copia tus cambios, cierra el editor y vuelve a abrir el archivo.
 
 Si pulsas **Cerrar** con cambios sin guardar, aparece **Cambios sin guardar**: pulsa **Descartar cambios** para cerrar perdiéndolos, o **Seguir editando** para volver al editor.
 
@@ -203,6 +205,7 @@ Si un cambio rompió algo, vuelve a la versión anterior:
 - Para una copia rápida en la misma carpeta usa clic derecho → **Duplicar**.
 - Las carpetas se copian completas. Los enlaces simbólicos se copian como enlaces.
 - Nunca se sobrescribe: si el destino existe, verás **El destino ya existe**.
+- No se puede pegar una carpeta dentro de sí misma (ni en una de sus subcarpetas): verás **No se puede copiar una carpeta dentro de sí misma**.
 
 ## Borrar
 
@@ -217,7 +220,7 @@ Si un cambio rompió algo, vuelve a la versión anterior:
 
 Estas carpetas no se pueden borrar ni renombrar/mover, y no aceptan cambios recursivos de permisos o propietario:
 
-`/`, `/bin`, `/boot`, `/dev`, `/etc`, `/home`, `/lib`, `/lib64`, `/opt`, `/proc`, `/root`, `/run`, `/sbin`, `/srv`, `/sys`, `/tmp`, `/usr`, `/var`
+`/`, `/bin`, `/boot`, `/dev`, `/etc`, `/home`, `/lib`, `/lib32`, `/lib64`, `/libx32`, `/media`, `/mnt`, `/opt`, `/proc`, `/root`, `/run`, `/sbin`, `/srv`, `/sys`, `/tmp`, `/usr`, `/usr/bin`, `/usr/lib`, `/usr/local`, `/usr/sbin`, `/var`, `/var/lib`, `/var/log`
 
 Si lo intentas, verás **Ruta inválida o protegida** u **Origen inválido o protegido**, o **No se permite chmod recursivo en una ruta del sistema**.
 
@@ -238,6 +241,8 @@ Si lo intentas, verás **Ruta inválida o protegida** u **Origen inválido o pro
 | **Grupo** | Un grupo existente, por ejemplo `www-data`. |
 
 Si el usuario o el grupo no existen, verás **Usuario o grupo inexistente**.
+
+Los **enlaces simbólicos** no tienen permisos propios: al aplicar permisos a una selección, el modo se salta los enlaces (el propietario sí se cambia, sobre el enlace mismo). Si eliges un enlace solo, verás **Es un enlace simbólico**. Para cambiar el modo del archivo al que apunta, ábrelo en su carpeta real. Así, un enlace que otro usuario haya dejado entre sus archivos (por ejemplo hacia `/etc/shadow`) no recibe por accidente un `chmod 644`.
 
 Valores habituales:
 
@@ -280,7 +285,9 @@ Si no marcaste **Sobrescribir si ya existe** y hay archivos repetidos, **no se s
 
 Al extraer sin sobrescribir, los archivos que ya existen en el destino se conservan.
 
-> **Importante:** Los archivos subidos pertenecen a `root`. Si los usa un sitio web u otro servicio, cambia el propietario con **Permisos** (por ejemplo `www-data:www-data`).
+> **Importante:** Los archivos subidos pertenecen a `root`. Si los usa un sitio web u otro servicio, cambia el propietario con **Permisos** (por ejemplo `www-data:www-data`). Al sobrescribir un archivo existente se conservan su modo y su propietario.
+
+Por seguridad, la subida nunca escribe **a través de enlaces simbólicos**: si una subcarpeta de la subida ya existe en el destino como enlace (por ejemplo `web -> /etc`), no se sube nada y verás **… es un enlace simbólico; no se sube a través de enlaces**. Si el archivo de destino es un enlace, se reemplaza el enlace (no el archivo al que apunta).
 
 ## Descargar archivos y carpetas
 
@@ -300,7 +307,7 @@ No se puede descargar la raíz `/` completa: verás **No se puede descargar la r
 2. Escribe el **Nombre del archivo** y elige el **Formato**:
     - **.tar.gz (Linux)**: el habitual en servidores; conserva permisos y propietarios.
     - **.zip (Windows)**: para enviar a alguien que usa Windows.
-3. Pulsa **Comprimir**. El comprimido se crea en la misma carpeta.
+3. Pulsa **Comprimir**. El comprimido se crea en la misma carpeta, con permisos `600` (solo `root` lo puede leer), porque puede contener archivos privados. Si otro usuario lo necesita, cambia sus permisos o propietario con **Permisos**.
 
 Si ya existe un archivo con ese nombre, verás **Ya existe**. La página espera hasta que termine (máximo 1 hora).
 
@@ -313,6 +320,15 @@ Si ya existe un archivo con ese nombre, verás **Ya existe**. La página espera 
 Formatos: `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz` y `.txz`.
 
 > **Importante:** **Extraer aquí** **sobrescribe** los archivos existentes con el mismo nombre. Si no quieres eso, extrae en una carpeta vacía: crea una carpeta, mueve el comprimido dentro y extrae allí.
+
+Antes de extraer (con **Extraer aquí** o al subir), el panel revisa el contenido y **rechaza el comprimido completo** (verás **comprimido rechazado: …**) si:
+
+- trae rutas absolutas (`/etc/…`) o con `..`;
+- trae enlaces simbólicos o duros que apuntan fuera de la carpeta;
+- alguna ruta pasaría por un enlace simbólico que ya existe en la carpeta y apunta fuera de ella;
+- trae dispositivos, FIFOs o archivos con bit setuid/setgid.
+
+Además, lo extraído pertenece a `root` (no se adoptan los dueños guardados en el `.tar`) y los permisos de las carpetas que ya existían no cambian. Si el comprimido está dañado verás **comprimido dañado o ilegible**.
 
 ## Ver cuánto ocupa una carpeta
 

@@ -141,6 +141,8 @@ La lista marcada **reemplaza** todos los grupos adicionales del usuario.
 
 > **Importante:** Con la casilla marcada, la carpeta `/home/usuario` se borra y no se puede recuperar. Haz un [respaldo](16-respaldos.md) antes si tiene información útil.
 
+> **Nota:** Si el home del usuario es una carpeta del sistema (por ejemplo `www-data` con `/var/www`, o cuentas con `/`, `/bin` o `/var/lib`), el panel no borra el usuario si marcaste la casilla del home: verás "… una carpeta del sistema: elimina el usuario sin borrar su home".
+
 > **Nota:** El botón **Eliminar** no aparece para `root` ni para tu propio usuario. Si el usuario tiene procesos en ejecución, la eliminación falla con un error; termínalos primero en [Procesos](12-procesos.md).
 
 ## Protecciones contra quedarte fuera del panel

@@ -1,5 +1,6 @@
 """Usuarios y grupos del sistema: listado y gestión (useradd, usermod, gpasswd…)."""
 import os
+import posixpath
 import pwd
 import grp
 import re
@@ -11,9 +12,14 @@ from ..util import run
 users_bp = Blueprint("users", __name__)
 
 # Nombres nuevos: estrictos. Existentes: algo más laxos (p. ej. Debian-exim, cuentas samba$).
-NEW_NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
-NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}\$?$")
+NEW_NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}\Z")  # \Z: "$" aceptaría un salto de línea final
+NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}\$?\Z")
 EXTRA_SHELLS = ("/usr/sbin/nologin", "/sbin/nologin", "/bin/false")
+# "userdel -r" nunca sobre estas carpetas (cuentas de sistema con home en /, /var/www, /bin…)
+SYSTEM_HOMES = {"/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/opt", "/proc",
+                "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var", "/var/www",
+                "/var/lib", "/var/spool", "/var/mail", "/var/backups", "/var/cache", "/var/log",
+                "/usr/sbin", "/usr/bin"}
 
 
 def _err(msg, code=400):
@@ -174,7 +180,7 @@ def create_user():
         return _err("Nombre de usuario inválido (minúsculas, dígitos, _ y -; máx. 32)")
     if _user(name):
         return _err("El usuario ya existe")
-    gecos = re.sub(r"[:\r\n]", "", str(data.get("gecos", "")))[:200]
+    gecos = re.sub(r"[:\x00-\x1f\x7f]", "", str(data.get("gecos", "")))[:200]
     shell = data.get("shell", "")
     if shell not in _shells():
         return _err("Shell no válida")
@@ -212,7 +218,13 @@ def delete_user():
         return _err("Usuario no encontrado", 404)
     if u.pw_uid == 0 or u.pw_name == current_user.username:
         return _err("No se puede eliminar root ni el usuario con sesión activa", 403)
-    cmd = ["userdel"] + (["-r"] if data.get("remove_home") else [])
+    remove_home = bool(data.get("remove_home"))
+    if remove_home:
+        home = os.path.realpath(u.pw_dir or "/")
+        if home in SYSTEM_HOMES or posixpath.normpath(u.pw_dir or "/") in SYSTEM_HOMES:
+            return _err(f"El home de {u.pw_name} es {u.pw_dir}, una carpeta del sistema: "
+                        "elimina el usuario sin borrar su home.", 403)
+    cmd = ["userdel"] + (["-r"] if remove_home else [])
     return _cmd(cmd + ["--", u.pw_name])
 
 

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import threading
 import time
 from functools import wraps
@@ -30,14 +31,15 @@ ENV = {**os.environ, "LC_ALL": "C", "LVM_SUPPRESS_FD_WARNINGS": "1"}
 LSBLK_COLS = "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,ROTA,PTTYPE,UUID"
 INSTALLABLE = {"lvm2", "mdadm", "quota", "xfsprogs"}
 
-LVM_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}$")
+# \Z en vez de $: "$" acepta un salto de línea final ("vg\n"), que acabaría en /etc/fstab
+LVM_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}\Z")
 SIZE_RE = re.compile(r"^\+?\s*(\d{1,7}(?:\.\d{1,3})?)\s*([MGT])(?:i?B)?$", re.I)
 PCT_RE = re.compile(r"^\+?\s*(\d{1,3})\s*%(?:\s*(?:FREE|libre))?$", re.I)
 QSIZE_RE = re.compile(r"^(\d{1,13}(?:\.\d{1,3})?)\s*([KMGT]?)(?:i?B)?$", re.I)
 INODES_RE = re.compile(r"^\d{1,12}$")
-MP_RE = re.compile(r"^(/[A-Za-z0-9_.@+-]+)+$")
-MD_NEW_RE = re.compile(r"^md(\d{1,3})$")
-UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
+MP_RE = re.compile(r"^(/[A-Za-z0-9_.@+-]+)+\Z")
+MD_NEW_RE = re.compile(r"^md(\d{1,3})\Z")
+UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}\Z")
 
 FREE_TYPES = {"disk", "part", "raid0", "raid1", "raid4", "raid5", "raid6", "raid10", "linear"}
 RAID_MEMBER_TYPES = {"disk", "part"}
@@ -568,7 +570,36 @@ def _check_mountpoint(mp, fstab_text, mounted):
             return f"{mp} existe y no es una carpeta."
         if os.listdir(mp):
             return f"La carpeta {mp} no está vacía: su contenido quedaría oculto bajo el volumen."
-    return None
+    return _mountpoint_owner_problem(mp)
+
+
+def _mountpoint_owner_problem(mp):
+    """El punto de montaje y sus carpetas superiores que ya existan deben ser de root, sin symlinks
+    y no escribibles por otros usuarios.
+
+    mount (y el arranque, vía fstab) siguen symlinks: si un usuario controla /home/ana/vol o su
+    carpeta superior, puede cambiarla por un symlink a /etc justo antes del montaje (o después,
+    para el próximo arranque) y el volumen nuevo taparía /etc.
+    """
+    cur = mp
+    while True:
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            st = None
+        except OSError as e:
+            return f"No se pudo revisar {cur}: {e}"
+        if st is not None:
+            if stat.S_ISLNK(st.st_mode):
+                return f"{cur} es un enlace simbólico: usa la ruta real."
+            if st.st_uid != 0:
+                return f"{cur} pertenece a otro usuario: usa una carpeta de root, por ejemplo /srv/datos."
+            if st.st_mode & 0o002 or (st.st_mode & 0o020 and st.st_gid != 0):
+                return f"Otros usuarios pueden escribir en {cur}: usa una carpeta de root, por ejemplo /srv/datos."
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
 
 
 # ── Páginas y lectura ────────────────────────────────────────────────

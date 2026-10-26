@@ -132,6 +132,8 @@ Si algo falla, restaura `/etc/fstab` automáticamente y te muestra el error.
 
 > **Nota:** Por seguridad no puedes montar sobre carpetas del sistema (`/`, `/etc`, `/usr`, `/var`, `/home`, `/srv`…) ni sobre una carpeta que tenga archivos, porque quedarían ocultos. Usa una subcarpeta nueva como `/srv/web` o `/mnt/respaldos`.
 
+> **Nota:** El punto de montaje y todas las carpetas que lo contienen deben pertenecer a `root`, no ser enlaces simbólicos y no ser escribibles por otros usuarios. Por eso no se acepta, por ejemplo, `/home/ana/datos` ni `/tmp/vol`: verás "… pertenece a otro usuario" o "Otros usuarios pueden escribir en …". Motivo: `mount` (y el arranque, a través de `/etc/fstab`) sigue enlaces simbólicos, y ese usuario podría cambiar la carpeta por un enlace a `/etc` para que el volumen la tape. Si un usuario necesita el volumen, móntalo en `/srv/…` y dale permisos sobre la carpeta montada.
+
 ## Ampliar un volumen
 
 1. En **Volúmenes lógicos (LV)**, pulsa **Ampliar** en el volumen.

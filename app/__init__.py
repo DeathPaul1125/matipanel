@@ -12,6 +12,7 @@ from .modules import register_modules
 from .util import same_origin
 from . import prefs as user_prefs
 import os
+from urllib.parse import urlparse
 import secrets
 
 
@@ -61,9 +62,13 @@ def create_app():
 
     @app.before_request
     def _csrf_origin_check():
-        # Los navegadores mandan Origin en todo POST; si no coincide con el host, es CSRF.
-        if request.method in ("POST", "PUT", "DELETE") and request.headers.get("Origin")                 and not same_origin():
-            abort(403)
+        # Toda petición que modifica algo debe venir del propio panel: los navegadores
+        # mandan Origin (o al menos Referer) en POST/PUT/PATCH/DELETE. Sin ninguno de los dos,
+        # o con otro host, se rechaza. GET/HEAD nunca modifican nada en el panel.
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
+            if not origin or origin == "null" or urlparse(origin).netloc != request.host:
+                abort(403)
 
     @app.context_processor
     def _inject_prefs():

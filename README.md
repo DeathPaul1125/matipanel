@@ -17,7 +17,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/dashboard-oscuro.png" alt="Dashboard en tema oscuro"><br><sub><b>Dashboard (tema oscuro):</b> veredicto de salud, tacómetros e historial de hasta 7 días.</sub></td>
+    <td width="50%"><img src="docs/screenshots/dashboard-oscuro.png" alt="Dashboard en tema oscuro"><br><sub><b>Dashboard (tema oscuro):</b> tacómetros e historial de hasta 7 días; el estado del servidor se ve arriba en todas las pantallas.</sub></td>
     <td width="50%"><img src="docs/screenshots/archivos.png" alt="Administrador de archivos"><br><sub><b>Archivos:</b> favoritos, selección múltiple, copiar/cortar/pegar, búsqueda y menú contextual.</sub></td>
   </tr>
   <tr>
@@ -40,7 +40,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 
 | Módulo | Qué puedes hacer |
 |---|---|
-| **Dashboard** | Veredicto de salud, tacómetros de CPU/memoria/swap/disco, historial persistente de 7 días (CPU, memoria, red, E/S de disco, carga, procesos), procesos top, almacenamiento y servicios con fallo |
+| **Dashboard** | Estado del servidor siempre visible en la barra superior, tacómetros de CPU/memoria/swap/disco, historial persistente de 7 días (CPU, memoria, red, E/S de disco, carga, procesos), procesos top, almacenamiento y servicios con fallo |
 | **Sistema** | Hostname, zona horaria/NTP, sesiones, hardware, reiniciar/apagar, edición de configuraciones clave (hosts, resolv, sshd) |
 | **Procesos** | Lista estilo `htop`, filtro, terminar o forzar |
 | **Servicios** | systemd: iniciar, detener, reiniciar, habilitar al arranque, ver estado |
@@ -138,8 +138,10 @@ El servicio corre como **root** (igual que Webmin) porque administra el sistema 
 - **Login con PAM:** usa tus usuarios Linux. Solo entran los miembros de los grupos `matipanel`, `sudo`, `wheel` o `admin`; root no puede entrar directamente.
 - **Bloqueo de intentos:** 5 intentos fallidos (login o 2FA) bloquean la IP durante 5 minutos.
 - **2FA TOTP opcional:** si su configuración se daña, el acceso se bloquea en lugar de saltarse el segundo factor.
-- **Sesión y cookies:** HTTPS, cookies `Secure`, `HttpOnly` y `SameSite=Lax`, y la sesión caduca tras 1 hora sin actividad.
-- **CSRF y WebSocket:** se verifica el `Origin` de cada petición contra CSRF y secuestro de WebSocket.
+- **Sesión y cookies:** HTTPS, cookie `__Host-` con `Secure`, `HttpOnly` y `SameSite=Lax`; la sesión se renueva al iniciar sesión y caduca tras 1 hora sin actividad. El código 2FA no se puede reutilizar y tiene su propio límite de intentos por usuario.
+- **CSRF y WebSocket:** toda acción que modifica algo exige `Origin`/`Referer` del propio panel; los WebSocket (terminal, logs) verifican el origen.
+- **Cabeceras de seguridad:** Content-Security-Policy (sin scripts externos ni envío de datos a otros sitios), `frame-ancestors 'none'` contra clickjacking, `nosniff`, `no-referrer` y `no-store` en las respuestas de datos.
+- **Archivos y enlaces simbólicos:** las escrituras, subidas, extracciones y respaldos no siguen enlaces simbólicos plantados por otros usuarios; los comprimidos se revisan antes de extraer (rutas fuera del destino, setuid, dispositivos).
 - **Terminal:** baja a los privilegios de tu usuario; nunca abre un shell root.
 - **Comandos:** todos se ejecutan sin shell y con validación estricta de parámetros.
 - **Acciones destructivas:** piden confirmación, y las más delicadas exigen escribir el nombre de lo que se va a borrar.

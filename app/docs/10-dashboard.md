@@ -2,14 +2,14 @@
 
 El Dashboard es la pantalla de inicio del panel. Te dice de un vistazo si el servidor está sano y muestra sus métricas en vivo: CPU, memoria, disco, red y procesos. Lo encuentras en **Menú → Sistema → Dashboard**.
 
-## Leer el veredicto de salud
+## Leer el estado del servidor (barra superior)
 
-En la parte superior verás un saludo ("Buenos días", "Buenas tardes" o "Buenas noches", según la hora de tu navegador) y una frase grande con el estado del servidor:
+El estado del servidor está en la **barra superior**, a la derecha, y se ve en **todas las pantallas** del panel, no solo en el Dashboard:
 
-- **Todo en orden**: no se detectó ningún problema. El indicador luminoso se ve verde.
-- **Atención: …**: hay uno o más problemas. Se listan separados por `·`, primero los graves (rojo) y luego los avisos (amarillo).
+- **Todo en orden** con un indicador verde: no se detectó ningún problema.
+- **Atención: …** en ámbar (aviso) o rojo (grave): hay uno o más problemas, separados por `·`, primero los graves. Si el texto es largo se corta; pasa el mouse para verlo completo.
 
-Debajo aparece `usuario@servidor`, el sistema operativo y el tiempo que lleva encendido.
+Haz clic en el estado para volver al Dashboard. Se actualiza cada 30 segundos y se pausa mientras la pestaña no está visible.
 
 ### Qué revisa el veredicto
 
@@ -25,9 +25,9 @@ Debajo aparece `usuario@servidor`, el sistema operativo y el tiempo que lleva en
 
 > **Nota:** El veredicto no revisa la swap. Un uso alto de swap solo se refleja en su tacómetro.
 
-### Los tres indicadores de la derecha
+### Los tres contadores junto al estado
 
-- **servicios con fallo**: cantidad de servicios en estado `failed`. Al hacer clic vas a [Servicios](13-servicios.md).
+- **con fallo**: cantidad de servicios en estado `failed` (se pone en rojo si hay alguno; pasa el mouse para ver cuáles). Al hacer clic vas a [Servicios](13-servicios.md).
 - **actualizaciones**: paquetes pendientes de actualizar. Al hacer clic vas a [Paquetes](27-paquetes.md).
 - **sesiones**: usuarios con sesión abierta en el servidor (SSH, consola). Al hacer clic vas a [Sistema](11-sistema.md).
 
@@ -100,13 +100,14 @@ Puedes ocultar las secciones que no uses. La configuración es por usuario.
 2. En la tarjeta **Dashboard**, marca o desmarca las **Secciones visibles**: **Tacómetros**, **Historial**, **Información del sistema**, **Procesos y almacenamiento**, **Accesos rápidos**.
 3. Los cambios se guardan solos.
 
-> **Nota:** El veredicto de salud y los tres indicadores superiores siempre se muestran. Si ocultas **Accesos rápidos**, el enlace **Personalizar →** también desaparece; vuelve por el menú **Apariencia**.
+> **Nota:** El estado del servidor y sus contadores están en la barra superior y siempre se muestran. Si ocultas **Accesos rápidos**, el enlace **Personalizar →** también desaparece; vuelve por el menú **Apariencia**.
 
 ## Frecuencia de actualización
 
 | Dato | Cada cuánto se actualiza |
 |---|---|
-| Tacómetros, información del sistema, veredicto | 3 segundos |
+| Tacómetros e información del sistema | 3 segundos |
+| Estado del servidor en la barra superior | 30 segundos |
 | Gráficas del historial | 5 segundos |
 | Servicios con fallo, particiones, procesos top, sesiones | 15 segundos |
 | Conteo de actualizaciones | 30 minutos |

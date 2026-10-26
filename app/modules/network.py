@@ -54,7 +54,7 @@ def connections():
             if c.pid:
                 try:
                     proc_name = psutil.Process(c.pid).name()
-                except psutil.NoSuchProcess:
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
             conns.append({
                 "proto": "tcp" if c.type == socket.SOCK_STREAM else "udp",

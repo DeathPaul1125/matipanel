@@ -22,7 +22,7 @@ def list_services():
     try:
         out = subprocess.check_output(
             ["systemctl", "list-units", "--type=service", "--all", "--no-pager", "--no-legend", "--plain"],
-            text=True, timeout=10,
+            text=True, errors="replace", timeout=10,
         )
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
         return jsonify({"error": f"No se pudo listar: {e}"}), 500
@@ -32,7 +32,7 @@ def list_services():
     try:
         files = subprocess.check_output(
             ["systemctl", "list-unit-files", "--type=service", "--no-pager", "--no-legend", "--plain"],
-            text=True, timeout=10,
+            text=True, errors="replace", timeout=10,
         )
         for line in files.splitlines():
             parts = line.split()
@@ -64,8 +64,11 @@ def status():
     unit = request.args.get("unit", "")
     if not valid_name(unit):
         return jsonify({"error": "Nombre de unidad inválido"}), 400
-    r = subprocess.run(["systemctl", "status", "--no-pager", "-n", "40", "--", unit],
-                       capture_output=True, text=True, timeout=10)
+    try:
+        r = subprocess.run(["systemctl", "status", "--no-pager", "-n", "40", "--", unit],
+                           capture_output=True, text=True, errors="replace", timeout=10)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return jsonify({"error": f"No se pudo consultar el estado: {e}"}), 500
     return jsonify({"output": r.stdout or r.stderr})
 
 
@@ -85,7 +88,7 @@ def action():
     try:
         result = subprocess.run(
             ["systemctl", act, "--", unit],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, errors="replace", timeout=15,
         )
         if result.returncode == 0:
             return jsonify({"ok": True, "output": result.stdout})

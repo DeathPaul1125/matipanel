@@ -53,7 +53,8 @@ def list_processes():
 def kill(pid):
     """Manda SIGTERM al proceso. SIGKILL si force=1."""
     force = request.args.get("force") == "1"
-    if pid in (1, os.getpid()):
+    # PID 0 = "todo el grupo de procesos" para kill(); getppid() = el maestro de gunicorn
+    if pid <= 1 or pid in (os.getpid(), os.getppid()):
         return jsonify({"ok": False, "error": "No se puede matar init ni el propio panel"}), 400
     try:
         p = psutil.Process(pid)
@@ -66,6 +67,8 @@ def kill(pid):
         return jsonify({"ok": False, "error": "Proceso no existe"}), 404
     except psutil.AccessDenied:
         return jsonify({"ok": False, "error": "Sin permisos"}), 403
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 def _fmt_duration(seconds):

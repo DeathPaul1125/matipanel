@@ -411,6 +411,8 @@ def chown():
     recursive = bool(data.get("recursive"))
     if not path or not os.path.lexists(path):
         return _bad("Ruta inválida")
+    if not isinstance(owner, str) or not isinstance(group, str):
+        return _bad("Usuario o grupo inexistente")
     try:
         pwd.getpwnam(owner)
         grp.getgrnam(group)
@@ -626,20 +628,46 @@ def compress():
     # leer (claves, /etc/shadow…) y se crea en una carpeta que quizá sí pueden leer.
     if fmt == "zip":
         # "./": un nombre como "-TT=cmd" nunca se interpreta como opción; -nw: sin comodines propios de zip
+        # (zip escribe un temporal y lo renombra: rename no sigue un symlink puesto en dest)
         code, _, err = run(["zip", "-r", "-q", "-y", "-nw", dest, "--", *["./" + n for n in names]],
                            timeout=3600, cwd=parent)
         if code == 0:
-            os.chmod(dest, 0o600)
+            try:
+                _chmod_nofollow(dest, 0o600)
+            except OSError:
+                pass
     else:
-        try:  # se crea antes con O_EXCL|O_NOFOLLOW: tar no puede terminar escribiendo a través de un symlink
-            os.close(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_BINARY, 0o600))
+        # tar escribe a stdout, hacia un archivo que creamos con O_EXCL|O_NOFOLLOW: nadie puede
+        # colar un symlink en dest para que root escriba (y trunque) otro archivo.
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_BINARY, 0o600)
         except OSError as e:
             return _bad(str(e), 500)
-        # --force-local: sin esto GNU tar toma "host:archivo" como un servidor remoto
-        code, _, err = run(["tar", "--force-local", "-czf", dest, "-C", parent, "--", *names], timeout=3600)
-        if code != 0 and os.path.isfile(dest) and not os.path.islink(dest):
-            os.unlink(dest)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                r = subprocess.run(["tar", "-czf", "-", "-C", parent, "--", *names],
+                                   stdout=out, stderr=subprocess.PIPE, timeout=3600)
+            code, err = r.returncode, r.stderr.decode("utf-8", "replace")
+        except subprocess.TimeoutExpired:
+            code, err = 124, "Tiempo de espera agotado"
+        except OSError as e:
+            code, err = 127, str(e)
+        if code != 0:
+            try:
+                os.unlink(dest)
+            except OSError:
+                pass
     return jsonify({"ok": code == 0, "error": err.strip(), "path": dest}), (200 if code == 0 else 500)
+
+
+def _chmod_nofollow(path, mode):
+    if not hasattr(os, "fchmod"):  # Windows (pruebas)
+        return os.chmod(path, mode)
+    fd = os.open(path, os.O_RDONLY | O_NOFOLLOW)
+    try:
+        os.fchmod(fd, mode)
+    finally:
+        os.close(fd)
 
 
 @files_bp.route("/api/search")

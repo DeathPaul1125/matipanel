@@ -108,6 +108,10 @@ Devuelve cada archivo a su ubicación original y **sobrescribe** la versión act
 
 > **Nota:** El destino debe ser una carpeta que ya exista y empezar con `/`. Si no, verás "Destino inválido: debe ser un directorio absoluto existente". Al restaurar se conservan los dueños y permisos originales de los archivos.
 
+> **Importante:** Si restauras en otra carpeta (no en `/`), esa carpeta y las que la contienen deben pertenecer a `root` y no ser escribibles por otros usuarios (se admiten carpetas como `/tmp` *por encima* del destino, pero no como destino). Si no, verás "Destino inseguro: …". Motivo: la restauración corre como `root`, y un usuario que pueda crear o renombrar cosas en el destino podría colar un enlace simbólico (por ejemplo `etc -> /etc`) para que se escriba fuera. Usa una carpeta como `/root/restaurar`. Tampoco se acepta un destino que pase por enlaces simbólicos.
+
+> **Nota:** Al restaurar sobre `/`, las carpetas que pertenecen a usuarios (por ejemplo `/home/ana`) siguen bajo su control mientras se extrae. Si no confías en esos usuarios, restaura en `/root/restaurar` y copia desde ahí solo lo que necesites.
+
 > **Consejo:** Después de restaurar archivos de configuración, reinicia los servicios afectados en [Servicios](13-servicios.md).
 
 ## Restaurar un respaldo traído de otro servidor
