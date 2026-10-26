@@ -95,7 +95,7 @@ systemctl restart matipanel</pre>
 let st = {};
 
 function show(id, on) { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; }
-function done(d) { if (!d.ok) alert('Error: ' + d.error); load(); }
+function done(d) { if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' }); load(); }
 
 async function load() {
   const r = await fetch("{{ url_for('firewall.status') }}");
@@ -142,8 +142,10 @@ async function load() {
 
 /* UFW */
 async function ufwToggle(enable) {
-  if (!confirm(enable ? '¿Activar UFW? Se permitirán SSH y el puerto del panel antes de activarlo.'
-                      : '¿Desactivar UFW? El servidor quedará sin filtrado.')) return;
+  if (!await ui.confirm(enable ? '¿Activar UFW? Se permitirán SSH y el puerto del panel antes de activarlo.'
+                                : '¿Desactivar UFW? El servidor quedará sin filtrado.',
+      enable ? { title: 'Activar firewall', confirmText: 'Activar' }
+             : { title: 'Desactivar firewall', danger: true, confirmText: 'Desactivar' })) return;
   done(await postJSON("{{ url_for('firewall.ufw_toggle') }}", { enable }));
 }
 
@@ -156,12 +158,13 @@ async function ufwAdd() {
 }
 
 async function ufwDelete(num, raw) {
-  if (!confirm('¿Eliminar la regla?\n\n' + raw)) return;
+  if (!await ui.confirm('¿Eliminar la regla?\n\n' + raw, { title: 'Eliminar regla', danger: true, confirmText: 'Eliminar' })) return;
   done(await postJSON("{{ url_for('firewall.ufw_delete_rule') }}", { num }));
 }
 
 async function ufwDefault(direction, policy) {
-  if (!confirm(`¿Cambiar la política ${direction === 'incoming' ? 'entrante' : 'saliente'} a "${policy}"?`)) { load(); return; }
+  if (!await ui.confirm(`¿Cambiar la política ${direction === 'incoming' ? 'entrante' : 'saliente'} a "${policy}"?`,
+      { title: 'Política por defecto', danger: policy !== 'allow', confirmText: 'Cambiar' })) { load(); return; }
   done(await postJSON("{{ url_for('firewall.ufw_default') }}", { direction, policy }));
 }
 
@@ -172,19 +175,19 @@ async function fwdPort(op, spec) {
   else { port = document.getElementById('fp-port').value.trim(); proto = document.getElementById('fp-proto').value; }
   done(await postJSON("{{ url_for('firewall.firewalld_port') }}", { op, port, proto }));
 }
-function fwdRemovePort(spec) { if (confirm('¿Quitar el puerto ' + spec + '?')) fwdPort('remove', spec); }
+async function fwdRemovePort(spec) { if (await ui.confirm('¿Quitar el puerto ' + spec + '?', { title: 'Quitar puerto', danger: true, confirmText: 'Quitar' })) fwdPort('remove', spec); }
 
 async function fwdService(op, service) {
   service = service || document.getElementById('fs-service').value.trim();
   done(await postJSON("{{ url_for('firewall.firewalld_service') }}", { op, service }));
 }
-function fwdRemoveService(s) { if (confirm('¿Quitar el servicio ' + s + '?')) fwdService('remove', s); }
+async function fwdRemoveService(s) { if (await ui.confirm('¿Quitar el servicio ' + s + '?', { title: 'Quitar servicio', danger: true, confirmText: 'Quitar' })) fwdService('remove', s); }
 
 /* nftables */
 async function nftApply() {
-  if (!confirm('¿Validar y aplicar {{ nft_conf }}? Se reiniciará el servicio nftables.')) return;
+  if (!await ui.confirm('¿Validar y aplicar {{ nft_conf }}? Se reiniciará el servicio nftables.', { title: 'Aplicar reglas', confirmText: 'Aplicar' })) return;
   const d = await postJSON("{{ url_for('firewall.nft_apply') }}", {});
-  if (d.ok) alert('Reglas aplicadas.');
+  if (d.ok) ui.toast('Reglas aplicadas.');
   done(d);
 }
 

@@ -10,8 +10,7 @@
   {% if write_enabled %}
     <button class="btn" onclick="newItem('file')">+ Archivo</button>
     <button class="btn" onclick="newItem('dir')">+ Carpeta</button>
-    <button class="btn btn-primary" onclick="document.getElementById('upload-input').click()">Subir…</button>
-    <input type="file" id="upload-input" multiple style="display:none" onchange="uploadFiles(this.files)">
+    <button class="btn btn-primary" onclick="openUpload()">Subir…</button>
   {% else %}
     <span class="pill mute">solo lectura</span>
   {% endif %}
@@ -41,6 +40,47 @@
     <textarea id="editor" spellcheck="false" style="flex:1; width:100%; font-family:var(--mono); font-size:13px; padding:14px; border:none; resize:none; background:var(--surface); color:var(--text); outline:none; tab-size:4;"></textarea>
   </div>
 </div>
+
+{% if write_enabled %}
+<!-- Subida estilo Webmin: arrastrar y soltar, carpetas, sobrescribir, extraer -->
+<div id="upload-modal" class="modal">
+  <div class="modal-box" style="max-width:720px;">
+    <h3>Subir a <span class="mono" id="up-dest"></span></h3>
+    <label class="dropzone" id="dropzone">
+      <input type="file" id="up-files" multiple hidden>
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg>
+      <span><b>Arrastra archivos o carpetas aquí</b> o haz clic para seleccionar</span>
+    </label>
+    <input type="file" id="up-dir" webkitdirectory multiple hidden>
+    <div class="small muted" style="margin:8px 0 4px;">¿Una carpeta completa? <a href="#" onclick="document.getElementById('up-dir').click(); return false;">Seleccionar carpeta</a></div>
+
+    <div id="up-list" class="up-list"></div>
+
+    <div class="up-options">
+      <label class="small"><input type="checkbox" id="up-overwrite"> Sobrescribir si ya existe</label>
+      <label class="small">Comprimidos (.zip, .tar.gz…):
+        <select id="up-extract" class="input" style="height:28px; margin-left:6px;">
+          <option value="none">No extraer</option>
+          <option value="keep">Extraer al finalizar</option>
+          <option value="delete">Extraer y borrar el comprimido</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="up-progress" style="display:none; margin-top:14px;">
+      <div class="bar" style="height:8px;"><span id="up-bar" style="width:0"></span></div>
+      <div class="small muted" id="up-status" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn" onclick="clearUpload()" style="margin-right:auto;">Limpiar</button>
+      <button class="btn" id="up-cancel" onclick="cancelUpload()">Cancelar</button>
+      <button class="btn btn-primary" id="up-go" onclick="startUpload()" disabled>Subir</button>
+    </div>
+  </div>
+</div>
+<div id="drop-overlay" class="drop-overlay"><div>Suelta para subir a <span class="mono" id="drop-dest"></span></div></div>
+{% endif %}
 
 <!-- Permisos / propietario -->
 <div id="perm-modal" class="modal">
@@ -113,7 +153,7 @@ async function load(path) {
 async function editFile(path) {
   const r = await fetch(API + "read?path=" + encodeURIComponent(path));
   const d = await r.json();
-  if (d.error) { alert(d.error); return; }
+  if (d.error) { ui.alert(d.error, { title: 'No se pudo abrir el archivo', icon: 'error' }); return; }
   editingPath = d.path;
   document.getElementById('ed-filename').textContent = d.path;
   document.getElementById('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '') + (WRITE ? '' : ' · solo lectura');
@@ -125,10 +165,10 @@ async function editFile(path) {
 }
 
 async function saveFile() {
-  if (!confirm('¿Guardar ' + editingPath + '? Se crea un backup .matipanel.bak')) return;
+  if (!await ui.confirm('¿Guardar ' + editingPath + '? Se crea un backup .matipanel.bak', { title: 'Guardar archivo', confirmText: 'Guardar' })) return;
   const d = await postJSON(API + "write", { path: editingPath, content: document.getElementById('editor').value });
-  if (!d.ok) { alert('Error: ' + d.error); return; }
-  alert('Guardado ✓\nBackup: ' + d.backup);
+  if (!d.ok) { ui.alert(d.error, { title: 'No se pudo guardar', icon: 'error' }); return; }
+  ui.toast('Guardado ✓ · Backup: ' + d.backup);
   closeModal('editor-modal');
   load(currentPath);
 }
@@ -145,41 +185,43 @@ document.getElementById('editor').addEventListener('keydown', e => {
 });
 
 async function newItem(type) {
-  const name = prompt(type === 'dir' ? 'Nombre de la carpeta:' : 'Nombre del archivo:');
+  const name = await ui.prompt(type === 'dir' ? 'Nombre de la carpeta:' : 'Nombre del archivo:',
+    { title: type === 'dir' ? 'Nueva carpeta' : 'Nuevo archivo', confirmText: 'Crear' });
   if (!name) return;
   const d = await postJSON(API + "create", { dir: currentPath, name, type });
-  if (!d.ok) { alert('Error: ' + d.error); return; }
+  if (!d.ok) { ui.alert(d.error, { title: 'No se pudo crear', icon: 'error' }); return; }
   load(currentPath);
   if (type === 'file') editFile(d.path);
 }
 
 async function renameItem(path) {
-  const dest = prompt('Nuevo nombre, o ruta absoluta para mover:', path.split('/').pop());
+  const dest = await ui.prompt('Nuevo nombre, o ruta absoluta para mover:', { title: 'Renombrar / mover', value: path.split('/').pop(), confirmText: 'Renombrar' });
   if (!dest) return;
   const d = await postJSON(API + "rename", { path, dest });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo renombrar', icon: 'error' });
   load(currentPath);
 }
 
 async function copyItem(path) {
-  const dest = prompt('Copiar a (ruta absoluta de archivo o directorio):', path + '.copia');
+  const dest = await ui.prompt('Copiar a (ruta absoluta de archivo o directorio):', { title: 'Copiar', value: path + '.copia', confirmText: 'Copiar' });
   if (!dest) return;
   const d = await postJSON(API + "copy", { path, dest });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo copiar', icon: 'error' });
   load(currentPath);
 }
 
 async function deleteItem(path, isDir) {
-  if (!confirm((isDir ? '¿Borrar la carpeta y TODO su contenido?\n' : '¿Borrar el archivo?\n') + path)) return;
+  if (!await ui.confirm((isDir ? '¿Borrar la carpeta y TODO su contenido?\n' : '¿Borrar el archivo?\n') + path,
+    { title: isDir ? 'Borrar carpeta' : 'Borrar archivo', danger: true, confirmText: 'Borrar' })) return;
   const d = await postJSON(API + "delete", { path });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo borrar', icon: 'error' });
   load(currentPath);
 }
 
 async function simple(action, path, msg) {
-  if (!confirm(msg + '\n' + path)) return;
+  if (!await ui.confirm(msg + '\n' + path, { title: action === 'extract' ? 'Extraer' : 'Comprimir', confirmText: action === 'extract' ? 'Extraer' : 'Comprimir' })) return;
   const d = await postJSON(API + action, { path });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
   load(currentPath);
 }
 
@@ -200,30 +242,152 @@ async function savePerms() {
   const group = document.getElementById('perm-group').value.trim();
   if (mode !== it.mode_oct || rec) {
     const d = await postJSON(API + "chmod", { path: it.path, mode, recursive: rec });
-    if (!d.ok) { alert('chmod: ' + d.error); return; }
+    if (!d.ok) { ui.alert(d.error, { title: 'chmod falló', icon: 'error' }); return; }
   }
   if (owner !== it.owner || group !== it.group || rec) {
     const d = await postJSON(API + "chown", { path: it.path, owner, group, recursive: rec });
-    if (!d.ok) { alert('chown: ' + d.error); return; }
+    if (!d.ok) { ui.alert(d.error, { title: 'chown falló', icon: 'error' }); return; }
   }
   closeModal('perm-modal');
   load(currentPath);
 }
 
-async function uploadFiles(files) {
-  if (!files.length) return;
+// ── Subida ──
+let upQueue = [];   // [{file, rel}]
+let upXhr = null;
+
+function openUpload() {
+  document.getElementById('up-dest').textContent = currentPath;
+  document.getElementById('upload-modal').classList.add('open');
+  renderQueue();
+}
+function addToQueue(items) {
+  for (const it of items) {
+    if (!upQueue.some(q => q.rel === it.rel)) upQueue.push(it);
+  }
+  renderQueue();
+}
+function clearUpload() { if (!upXhr) { upQueue = []; renderQueue(); } }
+function cancelUpload() {
+  if (upXhr) { upXhr.abort(); return; }
+  closeModal('upload-modal');
+}
+function renderQueue() {
+  const total = upQueue.reduce((a, q) => a + q.file.size, 0);
+  document.getElementById('up-list').innerHTML = upQueue.length
+    ? upQueue.map((q, i) => `<div class="up-item"><span class="mono truncate">${escapeHtml(q.rel)}</span>
+        <span class="muted small">${humanSize(q.file.size)}</span>
+        <button class="btn btn-sm" onclick="upQueue.splice(${i},1); renderQueue();" title="Quitar">✕</button></div>`).join('')
+      + `<div class="up-total small muted">${upQueue.length} archivo(s) · ${humanSize(total)}</div>`
+    : '';
+  document.getElementById('up-go').disabled = !upQueue.length || !!upXhr;
+}
+
+// Recorre carpetas soltadas (API de entradas del navegador)
+async function readEntry(entry, prefix) {
+  if (entry.isFile) {
+    const file = await new Promise((ok, ko) => entry.file(ok, ko));
+    return [{ file, rel: prefix + file.name }];
+  }
+  const reader = entry.createReader(), out = [];
+  let batch;
+  do {
+    batch = await new Promise((ok, ko) => reader.readEntries(ok, ko));
+    for (const e of batch) out.push(...await readEntry(e, prefix + entry.name + '/'));
+  } while (batch.length);
+  return out;
+}
+async function itemsFromDrop(dt) {
+  const entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!entries.length) return [...dt.files].map(f => ({ file: f, rel: f.name }));
+  const all = [];
+  for (const e of entries) all.push(...await readEntry(e, ''));
+  return all;
+}
+
+function startUpload(overwriteForced) {
+  if (!upQueue.length || upXhr) return;
   const fd = new FormData();
   fd.append('dir', currentPath);
-  for (const f of files) fd.append('files', f);
-  let r = await fetch(API + "upload", { method: 'POST', body: fd });
-  let d = await r.json();
-  if (!d.ok && /ya existe/.test(d.error || '') && confirm(d.error + '\n¿Sobrescribir?')) {
-    fd.append('overwrite', '1');
-    d = await (await fetch(API + "upload", { method: 'POST', body: fd })).json();
-  }
-  if (!d.ok) alert('Error: ' + d.error);
-  document.getElementById('upload-input').value = '';
-  load(currentPath);
+  fd.append('overwrite', (overwriteForced === true || document.getElementById('up-overwrite').checked) ? '1' : '0');
+  fd.append('extract', document.getElementById('up-extract').value);
+  for (const q of upQueue) fd.append('files', q.file, q.rel);
+
+  const bar = document.getElementById('up-bar'), status = document.getElementById('up-status');
+  document.getElementById('up-progress').style.display = '';
+  bar.parentElement.className = 'bar';
+  bar.style.width = '0';
+  upXhr = new XMLHttpRequest();
+  renderQueue();
+  upXhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const pct = e.loaded / e.total * 100;
+    bar.style.width = pct + '%';
+    status.textContent = pct >= 100 ? 'Procesando en el servidor…'
+      : `${humanSize(e.loaded)} de ${humanSize(e.total)} (${Math.round(pct)}%)`;
+  };
+  upXhr.onloadend = async () => {
+    const xhr = upXhr; upXhr = null;
+    let d = {};
+    try { d = JSON.parse(xhr.responseText); } catch (e) {}
+    if (xhr.status === 0) { status.textContent = 'Subida cancelada.'; renderQueue(); return; }
+    if (xhr.status === 413) d.error = 'El total supera el límite de 1 GB por subida.';
+    if (xhr.status === 409 && d.conflicts) {
+      const list = d.conflicts.slice(0, 15).join('\n') + (d.conflicts.length > 15 ? `\n… y ${d.conflicts.length - 15} más` : '');
+      if (await ui.confirm(`Estos archivos ya existen:\n\n${list}\n\n¿Sobrescribirlos?`, { title: 'Archivos existentes', danger: true, confirmText: 'Sobrescribir' })) return startUpload(true);
+      status.textContent = 'No se subió nada.'; renderQueue(); return;
+    }
+    if (d.ok) {
+      bar.style.width = '100%';
+      status.textContent = `✓ ${d.saved.length} archivo(s) subido(s)` + (d.extracted.length ? ` · ${d.extracted.length} extraído(s)` : '');
+      upQueue = [];
+      renderQueue();
+      load(currentPath);
+      setTimeout(() => closeModal('upload-modal'), 900);
+    } else {
+      bar.parentElement.className = 'bar err';
+      status.textContent = 'Error: ' + (d.error || ('HTTP ' + xhr.status));
+      renderQueue();
+      load(currentPath);
+    }
+  };
+  upXhr.open('POST', API + 'upload');
+  upXhr.send(fd);
+}
+
+if (WRITE) {
+  document.getElementById('up-files').addEventListener('change', e => {
+    addToQueue([...e.target.files].map(f => ({ file: f, rel: f.name }))); e.target.value = '';
+  });
+  document.getElementById('up-dir').addEventListener('change', e => {
+    addToQueue([...e.target.files].map(f => ({ file: f, rel: f.webkitRelativePath || f.name }))); e.target.value = '';
+  });
+  const dz = document.getElementById('dropzone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', async e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove('over');
+    addToQueue(await itemsFromDrop(e.dataTransfer));
+  });
+
+  // Soltar archivos en cualquier parte del explorador abre la subida
+  const overlay = document.getElementById('drop-overlay');
+  const modalOpen = () => document.getElementById('upload-modal').classList.contains('open');
+  const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+  let depth = 0;
+  window.addEventListener('dragenter', e => {
+    if (!hasFiles(e) || modalOpen()) return;
+    depth++; document.getElementById('drop-dest').textContent = currentPath; overlay.classList.add('on');
+  });
+  window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; overlay.classList.remove('on'); } });
+  window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('drop', async e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); depth = 0; overlay.classList.remove('on');
+    if (modalOpen()) return;
+    const items = await itemsFromDrop(e.dataTransfer);
+    openUpload(); addToQueue(items);
+  });
 }
 
 function humanSize(n) {

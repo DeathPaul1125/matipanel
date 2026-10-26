@@ -104,9 +104,19 @@ function showOutput(title, text) {
   out.scrollTop = out.scrollHeight;
 }
 
+const CONFIRM_OPTS = {
+  'upgrade': { title: 'Actualizar todo', confirmText: 'Actualizar' },
+  'upgrade-pkgs': { title: 'Actualizar paquetes', confirmText: 'Actualizar' },
+  'full-upgrade': { title: 'Full-upgrade', confirmText: 'Ejecutar' },
+  'autoremove': { title: 'Autoremove', danger: true, confirmText: 'Eliminar' },
+  'install': { title: 'Instalar paquete', confirmText: 'Instalar' },
+  'remove': { title: 'Eliminar paquete', danger: true, confirmText: 'Eliminar' },
+  'purge': { title: 'Purgar paquete', danger: true, confirmText: 'Purgar' },
+};
+
 async function pkgRun(action, packages = [], question = null) {
-  if (busy) { alert('Ya hay una operación de paquetes en curso'); return false; }
-  if (question && !confirm(question)) return false;
+  if (busy) { ui.alert('Ya hay una operación de paquetes en curso', { icon: 'warning' }); return false; }
+  if (question && !await ui.confirm(question, CONFIRM_OPTS[action] || {})) return false;
   busy = true;
   document.querySelectorAll('[data-pm]').forEach(b => b.disabled = true);
   showOutput('Ejecutando ' + action + (packages.length ? ' ' + packages.join(' ') : '') + '…',
@@ -157,7 +167,7 @@ function selectAll(on) {
 
 function upgradeSelected() {
   const pkgs = [...document.querySelectorAll('.upg:checked')].map(c => c.value);
-  if (!pkgs.length) { alert('Selecciona al menos un paquete'); return; }
+  if (!pkgs.length) { ui.alert('Selecciona al menos un paquete', { icon: 'warning' }); return; }
   pkgRun('upgrade-pkgs', pkgs, `¿Actualizar ${pkgs.length} paquete(s)?\n${pkgs.join(' ')}`);
 }
 
@@ -242,9 +252,10 @@ async function loadUA() {
 }
 
 async function toggleUA(enabled) {
-  if (!confirm(enabled ? '¿Activar actualizaciones automáticas?' : '¿Desactivar actualizaciones automáticas?')) return;
+  if (!await ui.confirm(enabled ? '¿Activar actualizaciones automáticas?' : '¿Desactivar actualizaciones automáticas?',
+      { title: 'Actualizaciones automáticas', confirmText: enabled ? 'Activar' : 'Desactivar' })) return;
   const d = await postJSON(URL_UA, { enabled });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
   loadUA();
 }
 

@@ -132,42 +132,44 @@ async function submitForm() {
   btn.disabled = true; btn.textContent = 'Procesando…';
   const d = await postJSON(url, data);
   btn.disabled = false; btn.textContent = scheduled ? 'Guardar' : 'Crear';
-  if (!d.ok) { alert('Error: ' + d.error); return; }
-  if (d.file) alert('Respaldo creado: ' + d.file);
+  if (!d.ok) { ui.alert(d.error, { title: scheduled ? 'No se pudo guardar el trabajo' : 'No se pudo crear el respaldo', icon: 'error' }); return; }
+  if (d.file) ui.toast('Respaldo creado: ' + d.file);
   closeForm(); load();
 }
 
 async function runJob(name) {
-  if (!confirm(`¿Ejecutar ahora el trabajo ${name}? Puede tardar varios minutos.`)) return;
+  if (!await ui.confirm(`¿Ejecutar ahora el trabajo ${name}? Puede tardar varios minutos.`, { title: 'Ejecutar trabajo', confirmText: 'Ejecutar' })) return;
   const d = await postJSON("{{ url_for('backups.job_run') }}", { name });
-  alert(d.ok ? 'Listo: ' + d.output : 'Error: ' + d.error);
+  if (d.ok) ui.alert(d.output, { title: 'Trabajo completado', icon: 'success' });
+  else ui.alert(d.error, { title: 'El trabajo falló', icon: 'error' });
   load();
 }
 
 async function deleteJob(name) {
-  if (!confirm(`¿Eliminar el trabajo programado ${name}? Los respaldos ya creados se conservan.`)) return;
+  if (!await ui.confirm(`¿Eliminar el trabajo programado ${name}? Los respaldos ya creados se conservan.`, { title: 'Eliminar trabajo', danger: true, confirmText: 'Eliminar' })) return;
   const d = await postJSON("{{ url_for('backups.job_delete') }}", { name });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo eliminar', icon: 'error' });
   load();
 }
 
 async function del(file) {
-  if (!confirm(`¿Eliminar definitivamente ${file}?`)) return;
+  if (!await ui.confirm(`¿Eliminar definitivamente ${file}?`, { title: 'Eliminar respaldo', danger: true, confirmText: 'Eliminar' })) return;
   const d = await postJSON("{{ url_for('backups.delete') }}", { file });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo eliminar', icon: 'error' });
   load();
 }
 
 async function restore(file) {
-  const target = prompt(`Directorio destino para extraer ${file}.\n"/" sobrescribe los archivos originales en su ubicación.`, '/');
+  const target = await ui.prompt(`Directorio destino para extraer ${file}.\n"/" sobrescribe los archivos originales en su ubicación.`, { title: 'Restaurar respaldo', value: '/', confirmText: 'Continuar' });
   if (target === null) return;
   let confirmText = '';
   if (target.trim() === '/') {
-    confirmText = prompt('ATENCIÓN: se sobrescribirán archivos del sistema con el contenido del respaldo.\nEscribe RESTAURAR para continuar:');
-    if (confirmText !== 'RESTAURAR') { alert('Restauración cancelada.'); return; }
-  } else if (!confirm(`¿Extraer ${file} en ${target}?`)) return;
+    if (!await ui.confirm('ATENCIÓN: se sobrescribirán archivos del sistema con el contenido del respaldo.', { title: 'Restaurar sobre /', danger: true, confirmText: 'Restaurar', typed: 'RESTAURAR' })) return;
+    confirmText = 'RESTAURAR';
+  } else if (!await ui.confirm(`¿Extraer ${file} en ${target}?`, { title: 'Restaurar respaldo', confirmText: 'Extraer' })) return;
   const d = await postJSON("{{ url_for('backups.restore') }}", { file, target: target.trim(), confirm: confirmText });
-  alert(d.ok ? 'Restauración completada.' : 'Error: ' + d.error);
+  if (d.ok) ui.toast('Restauración completada.');
+  else ui.alert(d.error, { title: 'No se pudo restaurar', icon: 'error' });
 }
 
 load();

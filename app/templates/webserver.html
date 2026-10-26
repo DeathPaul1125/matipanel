@@ -115,7 +115,7 @@ function showOutput(title, text) {
 function report(d, title) {
   if (d.ok) { if (d.output) showOutput(title, d.output); }
   else if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
-  else alert('Error: ' + (d.error || 'desconocido'));
+  else ui.alert(d.error || 'desconocido', {title: 'Error', icon: 'error'});
 }
 
 function selectServer(key) {
@@ -134,7 +134,8 @@ async function loadStatus() {
 }
 
 async function serviceAction(act) {
-  if (act === 'restart' && !confirm('¿Reiniciar ' + cur + '? Se cortarán las conexiones activas.')) return;
+  if (act === 'restart' && !await ui.confirm('¿Reiniciar ' + cur + '? Se cortarán las conexiones activas.',
+      {title: 'Reiniciar servidor web', danger: true, confirmText: 'Reiniciar'})) return;
   const d = await postJSON(api('service'), {action: act});
   if (d.ok) showOutput('Prueba de configuración: OK' + (act !== 'test' ? ' — ' + act + ' aplicado' : ''), d.output);
   else report(d);
@@ -176,10 +177,12 @@ async function loadSites() {
 
 async function siteAction(name, act, isDefault) {
   const labels = {enable: 'Habilitar', disable: 'Deshabilitar', delete: 'Eliminar'};
-  if (!confirm(`¿${labels[act]} el sitio ${name}?` + (act === 'delete' ? ' El archivo se borrará de sites-available.' : ''))) return;
+  if (!await ui.confirm(`¿${labels[act]} el sitio ${name}?` + (act === 'delete' ? ' El archivo se borrará de sites-available.' : ''),
+      {title: labels[act] + ' sitio', danger: act !== 'enable', confirmText: labels[act]})) return;
   let force = false;
   if (act === 'delete' && isDefault) {
-    if (!confirm(name + ' es un sitio por defecto del paquete. ¿Seguro que quieres eliminarlo?')) return;
+    if (!await ui.confirm(name + ' es un sitio por defecto del paquete. ¿Seguro que quieres eliminarlo?',
+        {title: 'Sitio por defecto', danger: true, confirmText: 'Eliminar'})) return;
     force = true;
   }
   const d = await postJSON(api('site'), {name, action: act, force});
@@ -209,7 +212,8 @@ function renderMods() {
 }
 
 async function modAction(name, act) {
-  if (!confirm(`¿${act === 'enable' ? 'Habilitar' : 'Deshabilitar'} el módulo ${name}?`)) return;
+  if (!await ui.confirm(`¿${act === 'enable' ? 'Habilitar' : 'Deshabilitar'} el módulo ${name}?`,
+      {title: 'Módulo de Apache', confirmText: act === 'enable' ? 'Habilitar' : 'Deshabilitar'})) return;
   const d = await postJSON(BASE + 'api/apache/mod', {name, action: act});
   if (d.ok) showOutput(d.test_ok ? 'Módulo actualizado — config OK (reinicia para aplicar)'
                                  : 'Módulo actualizado — ¡la prueba de config FALLÓ!', d.output);

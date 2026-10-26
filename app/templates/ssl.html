@@ -83,7 +83,7 @@ function showOutput(title, text) {
 function report(d, title) {
   if (d.ok) showOutput(title, d.output);
   else if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
-  else alert('Error: ' + (d.error || 'desconocido'));
+  else ui.alert(d.error || 'desconocido', {title: 'Error', icon: 'error'});
 }
 
 async function loadTimer() {
@@ -115,7 +115,7 @@ async function loadCerts() {
 }
 
 async function renew(dry) {
-  if (!dry && !confirm('¿Renovar ahora todos los certificados próximos a caducar?')) return;
+  if (!dry && !await ui.confirm('¿Renovar ahora todos los certificados próximos a caducar?', {title: 'Renovar certificados', confirmText: 'Renovar'})) return;
   const btn = document.getElementById(dry ? 'btn-dry' : 'btn-renew');
   btn.disabled = true;
   showOutput(dry ? 'certbot renew --dry-run' : 'certbot renew', 'Ejecutando… (puede tardar varios minutos)');
@@ -126,7 +126,8 @@ async function renew(dry) {
 }
 
 async function delCert(name) {
-  if (!confirm(`¿Eliminar el certificado ${name}? Los vhosts que lo usen dejarán de arrancar si no se editan.`)) return;
+  if (!await ui.confirm(`¿Eliminar el certificado ${name}? Los vhosts que lo usen dejarán de arrancar si no se editan.`,
+      {title: 'Eliminar certificado', danger: true, confirmText: 'Eliminar'})) return;
   const d = await postJSON("{{ url_for('ssl.delete') }}", {name});
   report(d, 'Certificado eliminado: ' + name);
   loadCerts();

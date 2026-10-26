@@ -145,16 +145,16 @@ async function saveJob() {
   };
   FIELDS.forEach(f => data[f] = document.getElementById('j-' + f).value);
   const d = await postJSON(API + 'job/save', data);
-  if (!d.ok) { alert('Error: ' + (d.error || 'desconocido')); return; }
+  if (!d.ok) { ui.alert(d.error || 'desconocido', { title: 'No se pudo guardar la tarea', icon: 'error' }); return; }
   closeModal('m-job');
   loadCrontab();
 }
 
 async function jobAction(act, i) {
   const e = entries.find(x => x.i === i);
-  if (act === 'delete' && !confirm('¿Eliminar la tarea?\n\n' + e.schedule + ' ' + e.command)) return;
+  if (act === 'delete' && !await ui.confirm('¿Eliminar la tarea?\n\n' + e.schedule + ' ' + e.command, {title: 'Eliminar tarea', danger: true, confirmText: 'Eliminar'})) return;
   const d = await postJSON(API + 'job/' + act, {user: curUser(), index: e.i, raw: e.raw});
-  if (!d.ok) alert('Error: ' + (d.error || 'desconocido'));
+  if (!d.ok) ui.alert(d.error || 'desconocido', {title: 'Error', icon: 'error'});
   loadCrontab();
 }
 

@@ -285,23 +285,62 @@ def chown():
 @files_bp.route("/api/upload", methods=["POST"])
 @login_required
 def upload():
+    """Sube archivos (o una carpeta completa con rutas relativas) al directorio `dir`.
+
+    Campos: files (con filename = ruta relativa), overwrite=1, extract=none|keep|delete.
+    Sin overwrite y con conflictos responde 409 con la lista, sin guardar nada.
+    """
     if (g := _write_guard()):
         return g
     parent = _path(request.form.get("dir", ""))
     if not parent or not os.path.isdir(parent):
         return _bad("Directorio inválido")
     overwrite = request.form.get("overwrite") == "1"
-    saved = []
+    extract_mode = request.form.get("extract", "none")
+
+    # Validar todo antes de escribir nada
+    plan = []
     for f in request.files.getlist("files"):
-        name = os.path.basename(f.filename or "")
-        if not _valid_basename(name):
+        rel = _safe_relpath(f.filename or "")
+        if not rel:
+            return _bad(f"Nombre inválido: {f.filename!r}")
+        plan.append((f, rel, os.path.join(parent, rel)))
+    if not plan:
+        return _bad("No se recibieron archivos")
+    conflicts = [rel for _, rel, target in plan if os.path.lexists(target)]
+    if conflicts and not overwrite:
+        return jsonify({"ok": False, "conflicts": conflicts,
+                        "error": f"{len(conflicts)} archivo(s) ya existen"}), 409
+
+    saved, extracted, errors = [], [], []
+    for f, rel, target in plan:
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.path.islink(target):
+                os.unlink(target)  # sobrescribir el link, no lo que apunta
+            f.save(target)
+            saved.append(rel)
+        except OSError as e:
+            errors.append(f"{rel}: {e}")
             continue
-        target = os.path.join(parent, name)
-        if os.path.lexists(target) and not overwrite:
-            return _bad(f"'{name}' ya existe (marca sobrescribir)")
-        f.save(target)
-        saved.append(name)
-    return jsonify({"ok": True, "saved": saved})
+        if extract_mode in ("keep", "delete") and ARCHIVE_RE.search(rel.lower()):
+            code, err = _extract(target, os.path.dirname(target), overwrite)
+            if code == 0:
+                extracted.append(rel)
+                if extract_mode == "delete":
+                    os.unlink(target)
+            else:
+                errors.append(f"{rel}: no se pudo extraer ({err})")
+    return jsonify({"ok": not errors, "saved": saved, "extracted": extracted,
+                    "error": "; ".join(errors)}), (200 if not errors else 500)
+
+
+def _safe_relpath(name):
+    """Ruta relativa segura ('a/b.txt'); None si intenta salir del directorio."""
+    parts = [p for p in name.replace("\\", "/").split("/") if p]
+    if not parts or not all(_valid_basename(p) for p in parts):
+        return None
+    return os.path.join(*parts)
 
 
 @files_bp.route("/api/download")
@@ -355,16 +394,23 @@ def extract():
     path = _path((request.get_json(silent=True) or {}).get("path", ""))
     if not path or not os.path.isfile(path):
         return _bad("Archivo inválido")
-    dest = os.path.dirname(path)
-    low = path.lower()
-    if low.endswith(".zip"):
-        cmd = ["unzip", "-o", "-q", path, "-d", dest]
-    elif re.search(r"\.(tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$", low):
-        cmd = ["tar", "-xf", path, "-C", dest]
-    else:
+    if not ARCHIVE_RE.search(path.lower()):
         return _bad("Formato no soportado")
+    code, err = _extract(path, os.path.dirname(path), overwrite=True)
+    return jsonify({"ok": code == 0, "error": err}), (200 if code == 0 else 500)
+
+
+ARCHIVE_RE = re.compile(r"\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$")
+
+
+def _extract(path, dest, overwrite):
+    """tar/unzip ya rechazan rutas absolutas y '..'. Sin overwrite no pisa lo existente."""
+    if path.lower().endswith(".zip"):
+        cmd = ["unzip", "-o" if overwrite else "-n", "-q", path, "-d", dest]
+    else:
+        cmd = ["tar", "-xf", path, "-C", dest] + ([] if overwrite else ["--skip-old-files"])
     code, _, err = run(cmd, timeout=3600)
-    return jsonify({"ok": code == 0, "error": err.strip()}), (200 if code == 0 else 500)
+    return code, err.strip()
 
 
 def _detect_language(path):

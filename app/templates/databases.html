@@ -115,18 +115,6 @@ apt install postgresql</pre>
     </div>
   </div>
 </div>
-
-<div id="m-drop" class="modal">
-  <div class="modal-box">
-    <h3>Eliminar base de datos</h3>
-    <p>Se borrará <b class="mono" id="x-label"></b> con todos sus datos. Esta acción no se puede deshacer.</p>
-    <label class="form-row"><span>Escribe el nombre para confirmar</span><input type="text" id="x-confirm" class="input" autocomplete="off"></label>
-    <div class="form-actions">
-      <button class="btn" onclick="closeModal('m-drop')">Cancelar</button>
-      <button class="btn btn-danger" onclick="doDrop()">Eliminar</button>
-    </div>
-  </div>
-</div>
 {% endif %}
 {% endblock %}
 
@@ -233,27 +221,18 @@ const accLabel = (user, host) => eng === 'mysql' ? `'${user}'@'${host}'` : user;
 
 async function createDb() {
   const name = $('new-db').value.trim();
-  if (!NAME_RE.test(name)) return alert('Nombre inválido: solo letras, números y _ (máx. 63)');
+  if (!NAME_RE.test(name)) return ui.alert('Solo letras, números y _ (máx. 63)', {title: 'Nombre inválido', icon: 'warning'});
   const d = await postJSON(api('db/create'), {name, charset: $('new-charset').value});
-  if (!d.ok) return alert('Error: ' + d.error);
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudo crear la base de datos', icon: 'error'});
   $('new-db').value = '';
   loadStatus();
 }
 
-function openDrop(name) {
-  cur = {db: name};
-  $('x-label').textContent = name;
-  $('x-confirm').value = '';
-  openModal('m-drop');
-  $('x-confirm').focus();
-}
-
-async function doDrop() {
-  const confirmName = $('x-confirm').value;
-  if (confirmName !== cur.db) return alert('El nombre no coincide');
-  const d = await postJSON(api('db/drop'), {name: cur.db, confirm: confirmName});
-  if (!d.ok) return alert('Error: ' + d.error);
-  closeModal('m-drop');
+async function openDrop(name) {
+  if (!await ui.confirm(`Se borrará ${name} con todos sus datos. Esta acción no se puede deshacer.`,
+      {title: 'Eliminar base de datos', danger: true, confirmText: 'Eliminar', typed: name})) return;
+  const d = await postJSON(api('db/drop'), {name, confirm: name});
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudo eliminar', icon: 'error'});
   refresh();
 }
 
@@ -269,7 +248,7 @@ async function createUser() {
     user: $('u-name').value.trim(), host: $('u-host').value.trim(),
     password: $('u-pass').value, db: $('u-db').value,
   });
-  if (!d.ok) return alert('Error: ' + d.error);
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudo crear el usuario', icon: 'error'});
   closeModal('m-user');
   loadUsers();
 }
@@ -284,9 +263,9 @@ function openPass(user, host) {
 
 async function changePass() {
   const d = await postJSON(api('user/password'), {...cur, password: $('p-pass').value});
-  if (!d.ok) return alert('Error: ' + d.error);
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudo cambiar la contraseña', icon: 'error'});
   closeModal('m-pass');
-  alert('Contraseña actualizada');
+  ui.toast('Contraseña actualizada');
 }
 
 function openGrant(user, host) {
@@ -297,18 +276,19 @@ function openGrant(user, host) {
 
 async function doGrant(revoke) {
   const db = $('g-db').value;
-  if (!db) return alert('Elige una base de datos');
-  if (revoke && !confirm(`¿Revocar todos los privilegios de ${accLabel(cur.user, cur.host)} sobre ${db}?`)) return;
+  if (!db) return ui.alert('Elige una base de datos', {icon: 'warning'});
+  if (revoke && !await ui.confirm(`¿Revocar todos los privilegios de ${accLabel(cur.user, cur.host)} sobre ${db}?`,
+      {title: 'Revocar privilegios', danger: true, confirmText: 'Revocar'})) return;
   const d = await postJSON(api('grant'), {...cur, db, revoke});
-  if (!d.ok) return alert('Error: ' + d.error);
+  if (!d.ok) return ui.alert(d.error, {title: revoke ? 'No se pudieron revocar los privilegios' : 'No se pudieron otorgar los privilegios', icon: 'error'});
   closeModal('m-grant');
   loadUsers();
 }
 
 async function dropUser(user, host) {
-  if (!confirm(`¿Eliminar el usuario ${accLabel(user, host)}?`)) return;
+  if (!await ui.confirm(`¿Eliminar el usuario ${accLabel(user, host)}?`, {title: 'Eliminar usuario', danger: true, confirmText: 'Eliminar'})) return;
   const d = await postJSON(api('user/drop'), {user, host});
-  if (!d.ok) return alert('Error: ' + d.error);
+  if (!d.ok) return ui.alert(d.error, {title: 'No se pudo eliminar', icon: 'error'});
   loadUsers();
 }
 
@@ -323,9 +303,10 @@ function openRestore(name) {
 
 async function doRestore() {
   const file = $('r-file').files[0];
-  if (!file) return alert('Elige un archivo');
-  if (file.size > 512 * 1024 * 1024) return alert('El archivo supera 512 MB');
-  if (!confirm(`¿Ejecutar ${file.name} sobre la base de datos ${cur.db}?`)) return;
+  if (!file) return ui.alert('Elige un archivo', {icon: 'warning'});
+  if (file.size > 512 * 1024 * 1024) return ui.alert('El archivo supera 512 MB', {title: 'Archivo demasiado grande', icon: 'warning'});
+  if (!await ui.confirm(`¿Ejecutar ${file.name} sobre la base de datos ${cur.db}?`,
+      {title: 'Restaurar base de datos', danger: true, confirmText: 'Ejecutar'})) return;
   const fd = new FormData();
   fd.append('file', file);
   $('r-btn').disabled = true;

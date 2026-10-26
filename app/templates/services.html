@@ -74,9 +74,10 @@ function render() {
 }
 
 async function action(unit, act) {
-  if (!confirm(`¿Ejecutar ${act} en ${unit}?`)) return;
+  if (!await ui.confirm(`¿Ejecutar ${act} en ${unit}?`,
+      { title: 'Servicio ' + unit, danger: ['stop', 'restart', 'disable'].includes(act), confirmText: act })) return;
   const d = await postJSON("{{ url_for('services.action') }}", { unit, action: act });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
   setTimeout(loadServices, 600);
 }
 

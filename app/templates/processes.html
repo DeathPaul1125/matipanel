@@ -54,10 +54,10 @@ function render() {
 }
 
 async function killProc(pid) {
-  if (!confirm('¿Enviar SIGTERM al proceso ' + pid + '?')) return;
+  if (!await ui.confirm('¿Enviar SIGTERM al proceso ' + pid + '?', { title: 'Terminar proceso', danger: true, confirmText: 'Terminar' })) return;
   const r = await fetch("/processes/api/kill/" + pid, { method: 'POST' });
   const d = await r.json();
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo terminar el proceso', icon: 'error' });
   setTimeout(loadProcesses, 500);
 }
 

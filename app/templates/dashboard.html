@@ -9,7 +9,7 @@
   <div class="health-main">
     <h1 class="health-verdict" id="health-verdict">Revisando el servidor…</h1>
     <div class="health-sub">
-      <span class="mono">{{ user }}@{{ hostname }}</span> · {{ distro }} · kernel {{ kernel }} ({{ arch }}) · encendido hace <span id="uptime">{{ uptime }}</span>
+      <span class="mono">{{ user }}@{{ hostname }}</span> · {{ distro }} · encendido hace <span id="uptime">{{ uptime }}</span>
     </div>
   </div>
   <div class="health-chips">
@@ -19,32 +19,49 @@
   </div>
 </section>
 
-<div class="grid grid-4">
-  <div class="vital">
-    <div class="vital-head"><span class="vital-lbl">CPU</span><span class="vital-meta">{{ cores }} núcleos</span></div>
-    <div class="vital-val" id="cpu-val">—</div>
-    <svg class="trace" id="cpu-trace" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-    <div class="vital-meta" id="cpu-meta">últimos 3 minutos</div>
+{# Tacómetros #}
+<div class="gauges">
+  <div class="gauge" id="g-cpu"></div>
+  <div class="gauge" id="g-mem"></div>
+  <div class="gauge" id="g-swap"></div>
+  <div class="gauge" id="g-disk"></div>
+</div>
+
+{# Historial #}
+<div class="card">
+  <div class="card-head">
+    <h3>Historial</h3>
+    <div class="seg" id="range">
+      <button data-r="300">5 min</button><button data-r="900" class="active">15 min</button><button data-r="3600">1 hora</button>
+    </div>
   </div>
-  <div class="vital">
-    <div class="vital-head"><span class="vital-lbl">Memoria</span><span class="vital-meta" id="mem-total"></span></div>
-    <div class="vital-val" id="mem-val">—</div>
-    <svg class="trace" id="mem-trace" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-    <div class="vital-meta" id="mem-meta">—</div>
+  <div class="charts">
+    <div><div class="chart-head"><span class="chart-title">CPU</span><span class="chart-now" id="now-cpu"></span></div><div id="ch-cpu"></div></div>
+    <div><div class="chart-head"><span class="chart-title">Memoria y swap</span><span class="chart-now" id="now-mem"></span></div><div id="ch-mem"></div></div>
+    <div><div class="chart-head"><span class="chart-title">Red</span><span class="chart-now" id="now-net"></span></div><div id="ch-net"></div></div>
+    <div><div class="chart-head"><span class="chart-title">E/S de disco</span><span class="chart-now" id="now-io"></span></div><div id="ch-io"></div></div>
+    <div><div class="chart-head"><span class="chart-title">Carga (1 min)</span><span class="chart-now" id="now-load"></span></div><div id="ch-load"></div></div>
+    <div><div class="chart-head"><span class="chart-title">Procesos</span><span class="chart-now" id="now-procs"></span></div><div id="ch-procs"></div></div>
   </div>
-  <div class="vital">
-    <div class="vital-head"><span class="vital-lbl">Disco /</span><span class="vital-meta" id="disk-total"></span></div>
-    <div class="vital-val" id="disk-val">—</div>
-    <div class="bar" style="margin:22px 0 14px;"><span id="disk-bar" style="width:0"></span></div>
-    <div class="vital-meta" id="disk-meta">—</div>
-  </div>
-  <div class="vital">
-    <div class="vital-head"><span class="vital-lbl">Red</span>
-      <span class="vital-meta"><span class="legend"><i></i>bajada</span> &nbsp;<span class="legend"><i class="alt"></i>subida</span></span></div>
-    <div class="vital-val" id="net-val">—</div>
-    <svg class="trace" id="net-trace" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"></svg>
-    <div class="vital-meta" id="net-meta">—</div>
-  </div>
+</div>
+
+{# Información del sistema #}
+<div class="card">
+  <div class="card-head"><h3>Información del sistema</h3><span class="muted small" id="server-time"></span></div>
+  <dl class="kv">
+    <div><dt>Nombre del host</dt><dd class="mono">{{ hostname }}</dd></div>
+    <div><dt>Sistema operativo</dt><dd>{{ distro }}</dd></div>
+    <div><dt>Kernel</dt><dd class="mono">{{ kernel }} ({{ arch }})</dd></div>
+    <div><dt>Procesador</dt><dd>{{ cpu_model }} · {{ cores }} núcleos</dd></div>
+    <div><dt>Encendido</dt><dd id="kv-uptime">{{ uptime }}</dd></div>
+    <div><dt>Carga media</dt><dd id="kv-load">—</dd></div>
+    <div><dt>Procesos</dt><dd id="kv-procs">—</dd></div>
+    <div><dt>Memoria real</dt><dd id="kv-mem">—</dd></div>
+    <div><dt>Swap</dt><dd id="kv-swap">—</dd></div>
+    <div><dt>Disco local (/)</dt><dd id="kv-disk">—</dd></div>
+    <div><dt>Actualizaciones</dt><dd id="kv-updates"><a href="{{ url_for('packages.index') }}">—</a></dd></div>
+    <div><dt>Sesiones abiertas</dt><dd id="kv-sessions">—</dd></div>
+  </dl>
 </div>
 
 <div class="dash-cols">
@@ -57,125 +74,111 @@
       </table>
     </div>
   </div>
-
   <div>
-    <div class="card">
-      <div class="card-head"><h3>Carga del sistema</h3><span class="muted small">relativa a {{ cores }} núcleos</span></div>
-      <div id="load-rows"></div>
-    </div>
     <div class="card">
       <div class="card-head"><h3>Almacenamiento</h3><a href="{{ url_for('disk.index') }}">Detalle →</a></div>
       <div id="parts"><div class="empty">Cargando…</div></div>
     </div>
+    <div class="card">
+      <div class="card-head"><h3>Servicios con fallo</h3><a href="{{ url_for('services.index') }}">Servicios →</a></div>
+      <div id="failed-list"><div class="empty">Cargando…</div></div>
+    </div>
   </div>
 </div>
 
-<div class="dash-cols">
-  <div class="card">
-    <div class="card-head"><h3>Accesos rápidos</h3></div>
-    <div class="quick">
-      <a href="{{ url_for('terminal.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Terminal</a>
-      <a href="{{ url_for('files.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Archivos</a>
-      <a href="{{ url_for('services.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4"/></svg>Servicios</a>
-      <a href="{{ url_for('packages.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.3 7 12 12 20.7 7"/></svg>Paquetes</a>
-      <a href="{{ url_for('logs.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Logs</a>
-      <a href="{{ url_for('backups.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><rect x="1" y="3" width="22" height="5"/></svg>Respaldos</a>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-head"><h3>Servicios con fallo</h3><a href="{{ url_for('services.index') }}">Servicios →</a></div>
-    <div id="failed-list"><div class="empty">Cargando…</div></div>
+<div class="card">
+  <div class="card-head"><h3>Accesos rápidos</h3></div>
+  <div class="quick">
+    <a href="{{ url_for('terminal.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Terminal</a>
+    <a href="{{ url_for('files.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Archivos</a>
+    <a href="{{ url_for('services.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4"/></svg>Servicios</a>
+    <a href="{{ url_for('packages.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.3 7 12 12 20.7 7"/></svg>Paquetes</a>
+    <a href="{{ url_for('webserver.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="1"/><rect x="2" y="14" width="20" height="7" rx="1"/></svg>Servidor web</a>
+    <a href="{{ url_for('databases.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/></svg>Bases de datos</a>
+    <a href="{{ url_for('logs.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Logs</a>
+    <a href="{{ url_for('backups.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><rect x="1" y="3" width="22" height="5"/></svg>Respaldos</a>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
 <script>
-const N = 60;                                   // 60 muestras × 3 s = 3 minutos de historia
-const hist = { cpu: [], mem: [], rx: [], tx: [] };
-let lastNet = null, latest = null, overview = null;
+const CORES = {{ cores }};
 const $ = id => document.getElementById(id);
+const pct = v => Math.round(v) + '%';
+const level = (v, warn, err) => v >= err ? 'err' : v >= warn ? 'warn' : '';
 
-function push(arr, v) { arr.push(v); if (arr.length > N) arr.shift(); }
-function level(pct, warn, err) { return pct >= err ? 'err' : pct >= warn ? 'warn' : ''; }
+const G = {
+  cpu: gauge($('g-cpu'), { label: 'CPU' }),
+  mem: gauge($('g-mem'), { label: 'Memoria', warn: 85, err: 95 }),
+  swap: gauge($('g-swap'), { label: 'Swap', warn: 50, err: 80 }),
+  disk: gauge($('g-disk'), { label: 'Disco /', warn: 80, err: 90 }),
+};
+const C = {
+  cpu: lineChart($('ch-cpu'), { series: [{ key: 'cpu', label: 'CPU' }], max: 100, fmt: pct }),
+  mem: lineChart($('ch-mem'), { series: [{ key: 'mem', label: 'Memoria' }, { key: 'swap', label: 'Swap', alt: true }], max: 100, fmt: pct }),
+  net: lineChart($('ch-net'), { series: [{ key: 'rx', label: 'Bajada' }, { key: 'tx', label: 'Subida', alt: true }], max: 'auto', min: 1024, fmt: fmtRate }),
+  io: lineChart($('ch-io'), { series: [{ key: 'rd', label: 'Lectura' }, { key: 'wr', label: 'Escritura', alt: true }], max: 'auto', min: 1024, fmt: fmtRate }),
+  load: lineChart($('ch-load'), { series: [{ key: 'load', label: 'Carga' }], max: 'auto', min: 1, fmt: v => v.toFixed(2) }),
+  procs: lineChart($('ch-procs'), { series: [{ key: 'procs', label: 'Procesos' }], max: 'auto', min: 10, fmt: v => String(Math.round(v)) }),
+};
 
-function rate(bps) {
-  const u = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-  let i = 0;
-  while (bps >= 1024 && i < u.length - 1) { bps /= 1024; i++; }
-  return (bps < 10 && i ? bps.toFixed(1) : Math.round(bps)) + ' ' + u[i];
+let points = [], range = 900, latest = null, overview = null;
+
+// ── Rango del historial ──
+$('range').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  range = Number(b.dataset.r);
+  $('range').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+  drawCharts();
+});
+
+function drawCharts() {
+  for (const c of Object.values(C)) c.update(points, range);
+  const p = points.at(-1);
+  if (!p) return;
+  const legend = (a, b, alt) => `<span><i class="sw"></i>${a}</span>` + (b !== undefined ? `<span><i class="sw alt"></i>${b}</span>` : '');
+  $('now-cpu').textContent = pct(p.cpu);
+  $('now-mem').innerHTML = legend(pct(p.mem), pct(p.swap));
+  $('now-net').innerHTML = legend('↓ ' + fmtRate(p.rx), '↑ ' + fmtRate(p.tx));
+  $('now-io').innerHTML = legend('L ' + fmtRate(p.rd), 'E ' + fmtRate(p.wr));
+  $('now-load').textContent = p.load.toFixed(2) + ' / ' + CORES + ' núcleos';
+  $('now-procs').textContent = p.procs;
 }
 
-// Traza: área + línea escalada a `max`, alineada a la derecha (lo más reciente)
-function path(values, max) {
-  const step = 100 / (N - 1), off = (N - values.length) * step;
-  return values.map((v, i) => `${(off + i * step).toFixed(2)},${(40 - Math.min(v / max, 1) * 38).toFixed(2)}`);
-}
-function trace(svg, series, max) {
-  let html = '<line class="base" x1="0" y1="39.5" x2="100" y2="39.5"/>';
-  series.forEach((s, idx) => {
-    if (s.length < 2) return;
-    const pts = path(s, max);
-    if (idx === 0 && s.length > 4) html += `<polygon class="area" points="${pts[0].split(',')[0]},40 ${pts.join(' ')} 100,40"/>`;
-    html += `<polyline class="line${idx ? ' alt' : ''}" points="${pts.join(' ')}"/>`;
-  });
-  svg.innerHTML = html;
+async function loadHistory() {
+  const since = points.length ? points.at(-1).t : 0;
+  try {
+    const d = await (await fetch("{{ url_for('dashboard.history') }}?since=" + since)).json();
+    points = points.concat(d.points).filter(p => p.t >= Date.now() / 1000 - 3700);
+    drawCharts();
+  } catch (e) {}
 }
 
+// ── Valores actuales (cada 3 s) ──
 async function tick() {
   let d;
   try { d = await (await fetch("{{ url_for('dashboard.stats') }}")).json(); } catch (e) { return; }
   latest = d;
-  push(hist.cpu, d.cpu.percent);
-  push(hist.mem, d.memory.percent);
-  if (lastNet) {
-    const dt = Math.max(d.ts - lastNet.ts, 0.5);
-    push(hist.rx, Math.max(0, (d.network.rx - lastNet.rx) / dt));
-    push(hist.tx, Math.max(0, (d.network.tx - lastNet.tx) / dt));
-  }
-  lastNet = { ts: d.ts, rx: d.network.rx, tx: d.network.tx };
-
-  $('cpu-val').innerHTML = `${Math.round(d.cpu.percent)}<small>%</small>`;
-  $('cpu-trace').setAttribute('class', 'trace ' + level(d.cpu.percent, 75, 90));
-  trace($('cpu-trace'), [hist.cpu], 100);
-  const avg = hist.cpu.reduce((a, b) => a + b, 0) / hist.cpu.length;
-  $('cpu-meta').textContent = `promedio ${avg.toFixed(0)}% · máx ${Math.max(...hist.cpu).toFixed(0)}% (3 min)`;
-
-  $('mem-val').innerHTML = `${Math.round(d.memory.percent)}<small>%</small>`;
-  $('mem-total').textContent = d.memory.total_h;
-  $('mem-trace').setAttribute('class', 'trace ' + level(d.memory.percent, 85, 95));
-  trace($('mem-trace'), [hist.mem], 100);
-  $('mem-meta').textContent = `${d.memory.used_h} en uso · ${d.memory.available_h} libre`
-    + (d.swap.total_h !== '0.0 B' ? ` · swap ${Math.round(d.swap.percent)}%` : '');
-
-  $('disk-val').innerHTML = `${Math.round(d.disk.percent)}<small>%</small>`;
-  $('disk-total').textContent = d.disk.total_h;
-  $('disk-bar').style.width = d.disk.percent + '%';
-  $('disk-bar').parentElement.className = 'bar ' + level(d.disk.percent, 80, 90);
-  $('disk-meta').textContent = `${d.disk.used_h} usados · ${d.disk.free_h} libres`;
-
-  if (hist.rx.length) {
-    const rx = hist.rx.at(-1), tx = hist.tx.at(-1);
-    $('net-val').innerHTML = rate(rx).replace(/ (\S+)$/, '<small>$1</small>');
-    $('net-meta').textContent = `↓ ${rate(rx)} · ↑ ${rate(tx)}`;
-    trace($('net-trace'), [hist.rx, hist.tx], Math.max(...hist.rx, ...hist.tx, 1024));
-  }
+  G.cpu.set(d.cpu.percent, `carga ${d.cpu.load[0].toFixed(2)} · ${d.cpu.count} núcleos`);
+  G.mem.set(d.memory.percent, `${d.memory.used_h} de ${d.memory.total_h}`);
+  G.swap.set(d.swap.percent, d.swap.total_h === '0.0 B' ? 'sin swap' : `${d.swap.used_h} de ${d.swap.total_h}`);
+  G.disk.set(d.disk.percent, `${d.disk.free_h} libres de ${d.disk.total_h}`);
 
   $('uptime').textContent = d.uptime;
-  renderLoad(d);
+  $('kv-uptime').textContent = d.uptime;
+  $('kv-load').textContent = d.cpu.load.map(l => l.toFixed(2)).join(' · ') + '  (1, 5, 15 min)';
+  $('kv-procs').textContent = d.procs;
+  $('kv-mem').textContent = `${d.memory.used_h} usada · ${d.memory.available_h} disponible · ${d.memory.total_h} total`;
+  $('kv-swap').textContent = d.swap.total_h === '0.0 B' ? 'No configurada' : `${d.swap.used_h} usada de ${d.swap.total_h}`;
+  $('kv-disk').textContent = `${d.disk.used_h} usado · ${d.disk.free_h} libre · ${d.disk.total_h} total`;
+  $('server-time').textContent = 'Hora del servidor: ' + new Date(d.ts * 1000).toLocaleString('es', { dateStyle: 'full', timeStyle: 'short' });
   renderHealth();
 }
 
-function renderLoad(d) {
-  const names = ['1 minuto', '5 minutos', '15 minutos'];
-  $('load-rows').innerHTML = d.cpu.load.map((l, i) => {
-    const pct = Math.min(100, l / d.cpu.count * 100);
-    return `<div class="meter-row"><span class="meter-name">${names[i]}</span>
-      <span class="meter-val">${l.toFixed(2)} · ${Math.round(pct)}%</span>
-      <div class="bar ${level(pct, 70, 100)}"><span style="width:${pct}%"></span></div></div>`;
-  }).join('');
-}
-
+// ── Datos pesados (cada 15 s) ──
 async function loadOverview() {
   try { overview = await (await fetch("{{ url_for('dashboard.overview') }}")).json(); } catch (e) { return; }
   const o = overview;
@@ -183,6 +186,9 @@ async function loadOverview() {
   $('chip-failed-led').className = 'led sm ' + (o.failed.length ? 'err' : '');
   $('chip-updates').textContent = o.updates ?? '—';
   $('chip-sessions').textContent = o.sessions;
+  $('kv-sessions').textContent = o.sessions;
+  $('kv-updates').querySelector('a').textContent = o.updates === null ? 'No disponible'
+    : o.updates === 0 ? 'Todo está actualizado' : `${o.updates} paquetes por actualizar`;
 
   $('failed-list').innerHTML = o.failed.length
     ? o.failed.map(u => `<div class="meter-row"><span class="meter-name mono"><span class="led sm err" style="display:inline-block;margin-right:10px;"></span>${escapeHtml(u)}</span>
@@ -220,8 +226,9 @@ function renderHealth() {
   }
   if (d.memory.percent >= 95) add('err', `Memoria al ${Math.round(d.memory.percent)}%`);
   else if (d.memory.percent >= 85) add('warn', `Memoria al ${Math.round(d.memory.percent)}%`);
-  const recent = hist.cpu.slice(-5), cpuAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
-  if (recent.length >= 5 && cpuAvg >= 90) add('warn', `CPU sostenida al ${Math.round(cpuAvg)}%`);
+  const recent = points.slice(-6).map(p => p.cpu);
+  const cpuAvg = recent.reduce((a, b) => a + b, 0) / (recent.length || 1);
+  if (recent.length >= 6 && cpuAvg >= 90) add('warn', `CPU sostenida al ${Math.round(cpuAvg)}%`);
   if (d.cpu.load[0] / d.cpu.count >= 1.5) add('warn', `Carga alta (${d.cpu.load[0]})`);
 
   const lvl = issues.some(i => i.lvl === 'err') ? 'err' : issues.length ? 'warn' : 'ok';
@@ -232,9 +239,9 @@ function renderHealth() {
     : 'Atención: ' + issues.map(i => i.msg).join(' · ');
 }
 
-tick();
-loadOverview();
+tick(); loadHistory(); loadOverview();
 setInterval(tick, 3000);
+setInterval(loadHistory, {{ sample_every }} * 1000);
 setInterval(loadOverview, 15000);
 </script>
 {% endblock %}

@@ -18,6 +18,7 @@ from flask_login import login_required, current_user
 from ..util import same_origin
 
 terminal_bp = Blueprint("terminal", __name__)
+RCFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "terminal_rc.sh")
 
 
 @terminal_bp.route("/")
@@ -65,8 +66,12 @@ def register_websockets(sock):
             except OSError:
                 os.chdir("/tmp")
             shell = user_info.pw_shell or "/bin/bash"
+            # bash: banner y prompt de MatiPanel (el rc carga también el entorno del usuario)
+            argv = ([shell, "--rcfile", RCFILE, "-i"]
+                    if os.path.basename(shell) == "bash" and os.path.isfile(RCFILE)
+                    else [shell, "-l"])
             try:
-                os.execvp(shell, [shell, "-l"])
+                os.execvp(shell, argv)
             except OSError:
                 try:
                     os.execvp("/bin/sh", ["/bin/sh"])

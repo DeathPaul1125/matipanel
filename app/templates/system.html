@@ -146,41 +146,43 @@ async function loadSessions() {
 }
 
 function report(d, okMsg) {
-  if (!d.ok) { alert('Error: ' + d.error); return false; }
-  if (d.warning) alert(d.warning); else if (okMsg) alert(okMsg);
+  if (!d.ok) { ui.alert(d.error, { title: 'Error', icon: 'error' }); return false; }
+  if (d.warning) ui.alert(d.warning, { title: 'Atención', icon: 'warning' }); else if (okMsg) ui.toast(okMsg);
   return true;
 }
 
 async function saveHostname() {
   const hostname = document.getElementById('hostname').value.trim();
-  if (!confirm(`¿Cambiar el hostname a "${hostname}"?`)) return;
+  if (!await ui.confirm(`¿Cambiar el hostname a "${hostname}"?`, { title: 'Cambiar hostname', confirmText: 'Cambiar' })) return;
   if (report(await postJSON("{{ url_for('system.set_hostname') }}", { hostname }), 'Hostname actualizado')) loadInfo();
 }
 
 async function saveTz() {
   const timezone = document.getElementById('tz').value.trim();
-  if (!confirm(`¿Cambiar la zona horaria a ${timezone}?`)) return;
+  if (!await ui.confirm(`¿Cambiar la zona horaria a ${timezone}?`, { title: 'Zona horaria', confirmText: 'Cambiar' })) return;
   if (report(await postJSON("{{ url_for('system.set_timezone') }}", { timezone }))) loadInfo();
 }
 
 async function toggleNtp() {
   const enabled = !info.time.ntp;
-  if (!confirm(enabled ? '¿Activar sincronización NTP?' : '¿Desactivar sincronización NTP?')) return;
+  if (!await ui.confirm(enabled ? '¿Activar sincronización NTP?' : '¿Desactivar sincronización NTP?',
+      { title: 'Sincronización NTP', confirmText: enabled ? 'Activar' : 'Desactivar' })) return;
   if (report(await postJSON("{{ url_for('system.set_ntp') }}", { enabled }))) loadInfo();
 }
 
 async function power(action) {
   const label = action === 'reboot' ? 'REINICIAR' : 'APAGAR';
-  if (!confirm(`¿Seguro que deseas ${label} el servidor?`)) return;
-  const typed = prompt(`Para confirmar, escribe el hostname del servidor (${info.hostname}):`);
-  if (typed === null) return;
-  if (typed !== info.hostname) { alert('El hostname no coincide. Acción cancelada.'); return; }
-  report(await postJSON("{{ url_for('system.power') }}", { action, confirm: typed }),
+  if (!await ui.confirm(`¿Seguro que deseas ${label} el servidor?`, {
+    title: action === 'reboot' ? 'Reiniciar servidor' : 'Apagar servidor', danger: true,
+    confirmText: action === 'reboot' ? 'Reiniciar' : 'Apagar', typed: info.hostname,
+  })) return;
+  report(await postJSON("{{ url_for('system.power') }}", { action, confirm: info.hostname }),
     action === 'reboot' ? 'El servidor se reiniciará en unos segundos.' : 'El servidor se apagará en unos segundos.');
 }
 
 async function sshRestart() {
-  if (!confirm('Se validará sshd_config con "sshd -t" y, si es correcto, se reiniciará SSH. ¿Continuar?')) return;
+  if (!await ui.confirm('Se validará sshd_config con "sshd -t" y, si es correcto, se reiniciará SSH. ¿Continuar?',
+      { title: 'Reiniciar SSH', danger: true, confirmText: 'Reiniciar' })) return;
   report(await postJSON("{{ url_for('system.ssh_restart') }}", {}), 'Configuración válida. SSH reiniciado.');
 }
 

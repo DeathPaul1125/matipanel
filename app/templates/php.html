@@ -146,29 +146,30 @@ async function saveIni(ev, sapi) {
   for (const k of DIRECTIVES) {
     const val = ev.target.elements[k].value.trim();
     if (!val || val === (ini.values[k] ?? '')) continue;
-    if (!VALUE_RE.test(val)) { alert(`Valor inválido para ${k}`); return; }
+    if (!VALUE_RE.test(val)) { ui.alert(`Valor inválido para ${k}`, { icon: 'warning' }); return; }
     values[k] = val;
   }
-  if (!Object.keys(values).length) { alert('Sin cambios'); return; }
+  if (!Object.keys(values).length) { ui.toast('Sin cambios', 'info'); return; }
   const list = Object.entries(values).map(([k, v]) => `${k} = ${v}`).join('\n');
-  if (!confirm(`¿Guardar en ${ini.path}?\n\n${list}\n\nSe creará un respaldo .matipanel.bak`)) return;
+  if (!await ui.confirm(`¿Guardar en ${ini.path}?\n\n${list}\n\nSe creará un respaldo .matipanel.bak`, { title: 'Guardar php.ini', confirmText: 'Guardar' })) return;
   const d = await postJSON("{{ url_for('php.set_ini') }}", { version: current, sapi, values });
-  alert(d.ok ? 'Guardado ✓' + (d.message ? '\n' + d.message : '') : 'Error: ' + d.error);
+  if (d.ok) ui.toast('Guardado ✓' + (d.message ? ' · ' + d.message : ''), /falló/.test(d.message || '') ? 'warning' : 'success');
+  else ui.alert(d.error, { title: 'No se pudo guardar', icon: 'error' });
   loadOverview();
 }
 
 async function setAlt() {
   const version = document.getElementById('alt').value;
-  if (!version || !confirm(`¿Usar php${version} como CLI por defecto?`)) return;
+  if (!version || !await ui.confirm(`¿Usar php${version} como CLI por defecto?`, { title: 'PHP por defecto', confirmText: 'Cambiar' })) return;
   const d = await postJSON("{{ url_for('php.set_alternative') }}", { version });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
   loadOverview();
 }
 
 async function restartFpm() {
-  if (!confirm(`¿Reiniciar php${current}-fpm?`)) return;
+  if (!await ui.confirm(`¿Reiniciar php${current}-fpm?`, { title: 'Reiniciar PHP-FPM', danger: true, confirmText: 'Reiniciar' })) return;
   const d = await postJSON("{{ url_for('php.restart_fpm') }}", { version: current });
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, { title: 'No se pudo reiniciar', icon: 'error' });
   loadOverview();
 }
 
@@ -195,20 +196,21 @@ async function loadModules() {
 
 async function toggleMod(cb, module, sapi) {
   const enable = cb.checked;
-  if (!confirm(`¿${enable ? 'Habilitar' : 'Deshabilitar'} ${module} en ${sapi} (PHP ${current})?`)) { cb.checked = !enable; return; }
   cb.disabled = true;
+  if (!await ui.confirm(`¿${enable ? 'Habilitar' : 'Deshabilitar'} ${module} en ${sapi} (PHP ${current})?`,
+      { title: 'Módulo PHP', confirmText: enable ? 'Habilitar' : 'Deshabilitar' })) { cb.checked = !enable; cb.disabled = false; return; }
   const d = await postJSON("{{ url_for('php.toggle_module') }}", { version: current, sapi, module, enable });
   cb.disabled = false;
-  if (!d.ok) { cb.checked = !enable; alert('Error: ' + d.error); return; }
+  if (!d.ok) { cb.checked = !enable; ui.alert(d.error, { title: 'Error', icon: 'error' }); return; }
   if (d.message) showOutput('Módulo ' + module, d.message);
   loadModules();
 }
 
 async function installExt() {
   const name = document.getElementById('ext').value.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9+.-]{0,63}$/.test(name)) { alert('Nombre de extensión inválido'); return; }
+  if (!/^[a-z0-9][a-z0-9+.-]{0,63}$/.test(name)) { ui.alert('Nombre de extensión inválido', { icon: 'warning' }); return; }
   const pkg = `php${current}-${name}`;
-  if (!confirm(`¿Instalar ${pkg}?`)) return;
+  if (!await ui.confirm(`¿Instalar ${pkg}?`, { title: 'Instalar extensión', confirmText: 'Instalar' })) return;
   const btn = document.getElementById('ext-btn');
   btn.disabled = true;
   showOutput('Instalando ' + pkg + '…', 'Puede tardar unos minutos.');

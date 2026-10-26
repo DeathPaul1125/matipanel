@@ -216,7 +216,7 @@ function renderGroups() {
 // Ejecuta una acción POST y recarga; true si salió bien
 async function act(path, data) {
   const d = await postJSON(API + path, data);
-  if (!d.ok) { alert('Error: ' + (d.error || 'desconocido')); return false; }
+  if (!d.ok) { ui.alert(d.error || 'desconocido', {title: 'Error', icon: 'error'}); return false; }
   await load();
   return true;
 }
@@ -240,7 +240,7 @@ async function openCreateUser() {
 }
 
 async function createUser() {
-  if (val('c-pass') !== val('c-pass2')) { alert('Las contraseñas no coinciden'); return; }
+  if (val('c-pass') !== val('c-pass2')) { ui.alert('Las contraseñas no coinciden', {icon: 'warning'}); return; }
   const ok = await act('user/create', {
     username: val('c-name').trim(), gecos: val('c-gecos'), shell: val('c-shell'),
     password: val('c-pass'), groups: val('c-groups'),
@@ -258,13 +258,14 @@ function openPassword(name) {
 }
 
 async function savePassword() {
-  if (!val('p-pass')) { alert('Escribe una contraseña'); return; }
-  if (val('p-pass') !== val('p-pass2')) { alert('Las contraseñas no coinciden'); return; }
+  if (!val('p-pass')) { ui.alert('Escribe una contraseña', {icon: 'warning'}); return; }
+  if (val('p-pass') !== val('p-pass2')) { ui.alert('Las contraseñas no coinciden', {icon: 'warning'}); return; }
   if (await act('user/password', {username: cur, password: val('p-pass')})) closeModal('m-pass');
 }
 
 async function lockUser(name, lock) {
-  if (lock && !confirm('¿Bloquear la contraseña de ' + name + '? (las llaves SSH siguen funcionando)')) return;
+  if (lock && !await ui.confirm('¿Bloquear la contraseña de ' + name + '? (las llaves SSH siguen funcionando)',
+      {title: 'Bloquear contraseña', danger: true, confirmText: 'Bloquear'})) return;
   await act('user/lock', {username: name, lock});
 }
 
@@ -305,7 +306,8 @@ function openDelete(name) {
 
 async function deleteUser() {
   const home = document.getElementById('d-home').checked;
-  if (!confirm('¿Eliminar definitivamente el usuario ' + cur + (home ? ' y su home' : '') + '?')) return;
+  if (!await ui.confirm('¿Eliminar definitivamente el usuario ' + cur + (home ? ' y su home' : '') + '?',
+      {title: 'Eliminar usuario', danger: true, confirmText: 'Eliminar'})) return;
   if (await act('user/delete', {username: cur, remove_home: home})) closeModal('m-del');
 }
 
@@ -317,7 +319,7 @@ async function createGroup() {
 }
 
 async function deleteGroup(name) {
-  if (!confirm('¿Eliminar el grupo ' + name + '?')) return;
+  if (!await ui.confirm('¿Eliminar el grupo ' + name + '?', {title: 'Eliminar grupo', danger: true, confirmText: 'Eliminar'})) return;
   await act('group/delete', {name});
 }
 
@@ -335,7 +337,7 @@ async function addMember() {
 }
 
 async function removeMember(group, user) {
-  if (!confirm('¿Quitar a ' + user + ' del grupo ' + group + '?')) return;
+  if (!await ui.confirm('¿Quitar a ' + user + ' del grupo ' + group + '?', {title: 'Quitar del grupo', danger: true, confirmText: 'Quitar'})) return;
   await act('group/member', {group, username: user, action: 'remove'});
 }
 

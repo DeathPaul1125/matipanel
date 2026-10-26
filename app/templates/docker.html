@@ -122,13 +122,13 @@ async function loadVolumes() {
 }
 
 async function dockerAction(id, act) {
-  if (act === 'rm' && !confirm('¿Eliminar container ' + id + '?')) return;
+  if (act === 'rm' && !await ui.confirm('¿Eliminar container ' + id + '?', {title: 'Eliminar container', danger: true, confirmText: 'Eliminar'})) return;
   const r = await fetch("{{ url_for('docker.action') }}", {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({container: id, action: act})
   });
   const d = await r.json();
-  if (!d.ok) alert('Error: ' + d.error);
+  if (!d.ok) ui.alert(d.error, {title: 'Error', icon: 'error'});
   setTimeout(() => { loadInfo(); loadContainers(); }, 800);
 }
 

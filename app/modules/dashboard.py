@@ -1,9 +1,11 @@
 """Dashboard principal: veredicto de salud y métricas en vivo del sistema."""
 import platform
 import socket
+import threading
 import time
+from collections import deque
 import psutil
-from flask import Blueprint, render_template, jsonify
+from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required, current_user
 from ..util import bytes_to_human as _bytes_to_human, run
 from ..distro import detect
@@ -13,6 +15,56 @@ dashboard_bp = Blueprint("dashboard", __name__)
 # ponytail: caché en memoria (1 worker); apt tarda ~1 s, no hace falta consultarlo cada 15 s
 _UPDATES_TTL = 1800
 _updates_cache = {"at": 0.0, "count": None}
+
+# Historial: una muestra cada 5 s, última hora.
+# ponytail: en memoria (se pierde al reiniciar el servicio); persistir en disco si se necesita más historia.
+SAMPLE_EVERY = 5
+_history = deque(maxlen=720)
+_sampler_started = False
+
+
+def _sample_loop():
+    net0, io0, t0 = psutil.net_io_counters(), psutil.disk_io_counters(), time.time()
+    psutil.cpu_percent(None)
+    while True:
+        time.sleep(SAMPLE_EVERY)
+        try:
+            net, io, t = psutil.net_io_counters(), psutil.disk_io_counters(), time.time()
+            dt = max(t - t0, 0.001)
+            _history.append({
+                "t": round(t, 1),
+                "cpu": round(psutil.cpu_percent(None), 1),
+                "mem": psutil.virtual_memory().percent,
+                "swap": psutil.swap_memory().percent,
+                "rx": max(0, (net.bytes_recv - net0.bytes_recv) / dt),
+                "tx": max(0, (net.bytes_sent - net0.bytes_sent) / dt),
+                "rd": max(0, (io.read_bytes - io0.read_bytes) / dt) if io and io0 else 0,
+                "wr": max(0, (io.write_bytes - io0.write_bytes) / dt) if io and io0 else 0,
+                "procs": len(psutil.pids()),
+                "load": round(psutil.getloadavg()[0], 2),
+            })
+            net0, io0, t0 = net, io, t
+        except Exception:  # el muestreo nunca debe morir por un error puntual
+            pass
+
+
+@dashboard_bp.record_once
+def _start_sampler(_state):
+    global _sampler_started
+    if not _sampler_started:
+        _sampler_started = True
+        threading.Thread(target=_sample_loop, daemon=True, name="matipanel-sampler").start()
+
+
+def _cpu_model():
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine()
 
 
 def _uptime_str():
@@ -39,6 +91,8 @@ def index():
         distro=detect()["name"],
         arch=platform.machine(),
         cores=psutil.cpu_count(logical=True),
+        cpu_model=_cpu_model(),
+        sample_every=SAMPLE_EVERY,
     )
 
 
@@ -53,8 +107,8 @@ def stats():
     return jsonify({
         "ts": time.time(),
         "cpu": {
-            # interval=None: uso desde la llamada anterior, sin bloquear el worker
-            "percent": round(psutil.cpu_percent(None), 1),
+            # Última muestra del historial (cpu_percent comparte contador: un solo lector)
+            "percent": _history[-1]["cpu"] if _history else 0.0,
             "count": psutil.cpu_count(logical=True),
             "load": [round(x, 2) for x in psutil.getloadavg()],
         },
@@ -73,8 +127,17 @@ def stats():
             "free_h": _bytes_to_human(disk.free),
         },
         "network": {"rx": net.bytes_recv, "tx": net.bytes_sent},
+        "procs": len(psutil.pids()),
         "uptime": _uptime_str(),
     })
+
+
+@dashboard_bp.route("/api/history")
+@login_required
+def history():
+    """Muestras posteriores a `since` (incremental); sin `since`, toda la última hora."""
+    since = request.args.get("since", 0, type=float)
+    return jsonify({"every": SAMPLE_EVERY, "points": [p for p in _history if p["t"] > since]})
 
 
 @dashboard_bp.route("/api/overview")

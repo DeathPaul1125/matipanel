@@ -16,7 +16,7 @@ sudo systemctl restart matipanel</pre>
       &nbsp; Estás protegido con un código adicional al iniciar sesión.
     </p>
     <form method="POST" action="{{ url_for('auth.tfa_disable') }}"
-          onsubmit="return confirm('¿Desactivar 2FA? Volverás a iniciar sesión solo con contraseña.')">
+          onsubmit="event.preventDefault(); ui.confirm('¿Desactivar 2FA? Volverás a iniciar sesión solo con contraseña.', {title: 'Desactivar 2FA', danger: true, confirmText: 'Desactivar'}).then(ok => { if (ok) this.submit(); })">
       <button type="submit" class="btn btn-danger">Desactivar 2FA</button>
     </form>
   {% else %}
