@@ -15,6 +15,9 @@ FIELD_RE = re.compile(rf"^{_TOK}(?:[-/,]{_TOK})*$", re.I)
 ENV_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*=")
 USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
 SPOOL_DIRS = ("/var/spool/cron/crontabs", "/var/spool/cron")  # Debian, RHEL
+# Marca de las tareas desactivadas por el panel. Un "# 0 5 * * 1 tar …" cualquiera (como la
+# plantilla de ejemplo de Debian) es solo un comentario: no se lista ni se puede "activar".
+OFF_MARK = "#[matipanel-off]"
 
 
 # ── Parseo / serialización (funciones puras) ──
@@ -39,10 +42,12 @@ def parse_crontab(text):
     for i, raw in enumerate(text.splitlines()):
         e = {"i": i, "raw": raw, "type": "other"}
         s = raw.strip()
-        if s.startswith("#"):
-            job = parse_job(s.lstrip("#"))
+        if s.startswith(OFF_MARK):
+            job = parse_job(s[len(OFF_MARK):])
             if job:
                 e.update(type="job", enabled=False, **job)
+        elif s.startswith("#"):
+            pass  # comentario: se conserva tal cual
         elif ENV_RE.match(raw):
             e["type"] = "env"
         elif s:
@@ -59,13 +64,17 @@ def serialize(lines):
 
 
 def job_line(schedule, command, enabled=True):
-    return ("" if enabled else "# ") + f"{schedule} {command}"
+    return ("" if enabled else OFF_MARK + " ") + f"{schedule} {command}"
 
 
 def toggle_line(raw):
-    """Comenta o descomenta una línea de tarea."""
+    """Desactiva (con la marca del panel) o reactiva una línea de tarea."""
     s = raw.strip()
-    return s.lstrip("#").lstrip() if s.startswith("#") else "# " + raw
+    return s[len(OFF_MARK):].lstrip() if s.startswith(OFF_MARK) else f"{OFF_MARK} {raw}"
+
+
+def is_job_line(raw):
+    return parse_crontab(raw)[0]["type"] == "job"
 
 
 def build_schedule(data):
@@ -212,6 +221,8 @@ def toggle_job():
     user, lines, idx, error = _load_for_edit(data)
     if error:
         return error
+    if not is_job_line(lines[idx]):
+        return _err("Esa línea no es una tarea del panel")
     lines[idx] = toggle_line(lines[idx])
     return _save(user, lines)
 
@@ -240,15 +251,23 @@ def system():
 
 if __name__ == "__main__":
     src = ("SHELL=/bin/bash\n# m h  dom mon dow   command\n*/5 * * * * /usr/bin/backup.sh --x\n"
-           "# 0 3 * * mon-fri echo hi\n@reboot /opt/start\n\n# For example, you can run a backup\n")
+           "#[matipanel-off] 0 3 * * mon-fri echo hi\n@reboot /opt/start\n\n# For example, you can run a backup\n"
+           "# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/\n")
     es = parse_crontab(src)
     assert serialize([e["raw"] for e in es]) == src
-    assert [e["type"] for e in es] == ["env", "other", "job", "job", "job", "other", "other"]
+    assert [e["type"] for e in es] == ["env", "other", "job", "job", "job", "other", "other", "other"]
     assert es[2]["enabled"] and es[2]["schedule"] == "*/5 * * * *" and es[2]["command"] == "/usr/bin/backup.sh --x"
     assert not es[3]["enabled"] and es[3]["command"] == "echo hi"
     assert es[4]["schedule"] == "@reboot"
-    assert toggle_line(es[3]["raw"]) == "0 3 * * mon-fri echo hi" and toggle_line("@daily x") == "# @daily x"
+    # La plantilla de Debian ("# 0 5 * * 1 tar …") es un comentario, no una tarea desactivada
+    assert not is_job_line(es[7]["raw"]) and is_job_line(es[3]["raw"]) and is_job_line(es[2]["raw"])
+    assert toggle_line(es[3]["raw"]) == "0 3 * * mon-fri echo hi"
+    assert toggle_line("@daily x") == "#[matipanel-off] @daily x"
+    assert toggle_line(toggle_line("*/5 * * * * a b")) == "*/5 * * * * a b"
+    assert job_line("1 2 * * *", "ls", False) == "#[matipanel-off] 1 2 * * * ls"
     assert parse_job(toggle_line(job_line("1 2 * * *", "ls", False))) == {"schedule": "1 2 * * *", "command": "ls"}
+    off = parse_crontab(job_line("@daily", "ls", False))[0]
+    assert off["type"] == "job" and not off["enabled"] and off["command"] == "ls"
     assert build_schedule({"preset": "@daily"}) == "@daily" and build_schedule({"preset": "@x"}) is None
     assert build_schedule(dict(minute="0", hour="*/2", day="1-15", month="jan,jun", weekday="*")) == "0 */2 1-15 jan,jun *"
     assert build_schedule(dict(minute="0;rm", hour="*", day="*", month="*", weekday="*")) is None

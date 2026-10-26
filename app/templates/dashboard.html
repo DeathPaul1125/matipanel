@@ -33,7 +33,7 @@
   <div class="card-head">
     <h3>Historial</h3>
     <div class="seg" id="range">
-      {% for r, l in [("300", "5 min"), ("900", "15 min"), ("3600", "1 hora")] %}<button data-r="{{ r }}" {% if prefs.range == r %}class="active"{% endif %}>{{ l }}</button>{% endfor %}
+      {% for r, l in [("300", "5 min"), ("900", "15 min"), ("3600", "1 h"), ("21600", "6 h"), ("86400", "24 h"), ("604800", "7 días")] %}<button data-r="{{ r }}" {% if prefs.range == r %}class="active"{% endif %}>{{ l }}</button>{% endfor %}
     </div>
   </div>
   <div class="charts">
@@ -133,11 +133,12 @@ $('range').addEventListener('click', e => {
   if (!b) return;
   range = Number(b.dataset.r);
   $('range').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
-  drawCharts();
+  points = [];
+  loadHistory();
 });
 
 function drawCharts() {
-  for (const c of Object.values(C)) c.update(points, range);
+  for (const c of Object.values(C)) c.update(points, range, every);
   const p = points.at(-1);
   if (!p) return;
   const legend = (a, b, alt) => `<span><i class="sw"></i>${a}</span>` + (b !== undefined ? `<span><i class="sw alt"></i>${b}</span>` : '');
@@ -146,14 +147,23 @@ function drawCharts() {
   $('now-net').innerHTML = legend('↓ ' + fmtRate(p.rx), '↑ ' + fmtRate(p.tx));
   $('now-io').innerHTML = legend('L ' + fmtRate(p.rd), 'E ' + fmtRate(p.wr));
   $('now-load').textContent = p.load.toFixed(2) + ' / ' + CORES + ' núcleos';
-  $('now-procs').textContent = p.procs;
+  $('now-procs').textContent = Math.round(p.procs);
 }
 
+// Rangos cortos: refresco incremental (solo lo nuevo). Rangos largos (promediados): recarga completa.
+let every = {{ sample_every }}, lastFull = 0;
 async function loadHistory() {
-  const since = points.length ? points.at(-1).t : 0;
+  const incremental = points.length && range <= 3600;
+  if (!incremental && points.length && Date.now() - lastFull < 60000) return;
+  const qs = new URLSearchParams({ range });
+  if (incremental) qs.set('since', points.at(-1).t);
   try {
-    const d = await (await fetch("{{ url_for('dashboard.history') }}?since=" + since)).json();
-    points = points.concat(d.points).filter(p => p.t >= Date.now() / 1000 - 3700);
+    const d = await (await fetch("{{ url_for('dashboard.history') }}?" + qs)).json();
+    if (d.range !== range) return;  // llegó tarde una respuesta de otro rango
+    every = d.every;
+    const cut = Date.now() / 1000 - range - every;
+    points = (incremental ? points.concat(d.points) : d.points).filter(p => p.t >= cut);
+    if (!incremental) lastFull = Date.now();
     drawCharts();
   } catch (e) {}
 }

@@ -27,7 +27,11 @@ def register_websockets(sock):
         unit = unit.strip()
 
         cmd = ["journalctl", "-f", "--no-pager", "--output=short-iso", "-n", "50"]
-        if valid_name(unit):
+        if unit:
+            if not valid_name(unit):
+                ws.send(f"__error__: nombre de unidad inválido: {unit}")
+                ws.close()
+                return
             cmd += ["-u", unit]
 
         try:
@@ -45,7 +49,16 @@ def register_websockets(sock):
         def reader():
             count = 0
             for line in iter(proc.stdout.readline, ""):
-                if stop_flag["stop"] or count >= MAX_LINES_PER_SESSION:
+                if stop_flag["stop"]:
+                    break
+                if count >= MAX_LINES_PER_SESSION:
+                    # Avisar y cerrar: el receive() del bucle principal termina y limpia.
+                    try:
+                        ws.send(f"__error__: límite de {MAX_LINES_PER_SESSION} líneas "
+                                "alcanzado; reconecta para seguir")
+                        ws.close()
+                    except Exception:
+                        pass
                     break
                 try:
                     ws.send(line.rstrip())

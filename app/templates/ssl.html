@@ -51,9 +51,9 @@
       <input class="input" id="o-email" type="email" placeholder="admin@ejemplo.com"></label>
     <label class="form-row"><span>Método</span>
       <select class="input" id="o-plugin" onchange="syncPlugin()">
-        <option value="apache">Apache (instala en el vhost)</option>
-        <option value="nginx">Nginx (instala en el vhost)</option>
-        <option value="webroot">Webroot (solo obtener)</option>
+        <option value="apache" {% if default_plugin == 'apache' %}selected{% endif %}>Apache (instala en el vhost)</option>
+        <option value="nginx" {% if default_plugin == 'nginx' %}selected{% endif %}>Nginx (instala en el vhost)</option>
+        <option value="webroot" {% if default_plugin == 'webroot' %}selected{% endif %}>Webroot (solo obtener)</option>
       </select></label>
     <label class="form-row" id="o-webroot-row" style="display:none;"><span>Ruta webroot</span>
       <input class="input mono" id="o-webroot" placeholder="/var/www/ejemplo.com/public_html"></label>

@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+{% block title %}Servidores{% endblock %}
+{% block heading %}Servidores{% endblock %}
+
+{% block content %}
+{# Resumen de todos los servidores #}
+<section class="health" id="sum" data-level="ok">
+  <span class="led lg mute live" id="sum-led"></span>
+  <div class="health-main">
+    <div class="health-greet">Resumen</div>
+    <h1 class="health-verdict" id="sum-verdict">Consultando servidores…</h1>
+    <div class="health-sub" id="sum-sub">Se actualiza cada 15 segundos.</div>
+  </div>
+  <div class="health-chips">
+    <button class="btn" onclick="refresh(true)">Actualizar</button>
+    <button class="btn btn-primary" onclick="openForm()">Agregar servidor</button>
+  </div>
+</section>
+
+{# Alta / edición de un servidor #}
+<div class="card" id="srv-form" hidden style="max-width:760px;">
+  <div class="card-head"><h3 id="form-title">Agregar servidor</h3></div>
+  <p class="muted small" style="margin-top:0;">En el otro servidor abre <b>Servidores → Acceso remoto a este servidor</b>, genera un token y ten a la vista su huella SHA-256.</p>
+  <input type="hidden" id="f-id">
+  <label class="form-row"><span>Nombre</span>
+    <input class="input" id="f-name" maxlength="60" placeholder="Web producción" autocomplete="off"></label>
+  <label class="form-row"><span>Dirección del panel</span>
+    <input class="input mono" id="f-url" placeholder="https://10.0.0.5:8443" autocomplete="off">
+    <span class="muted small">Si no escribes el puerto, se usa 8443.</span></label>
+  <label class="form-row"><span>Token de acceso</span>
+    <input class="input mono" id="f-token" type="password" autocomplete="new-password" spellcheck="false">
+    <span class="muted small" id="f-token-help">Pega el token que generaste en el otro servidor.</span></label>
+  <div class="form-row"><span>Huella SHA-256 del certificado</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input class="input mono" id="f-fp" style="flex:1;min-width:240px;" placeholder="AB:CD:EF:…" autocomplete="off" spellcheck="false">
+      <button type="button" class="btn" id="btn-fp" onclick="getFp()">Obtener huella</button>
+    </div>
+    <span class="muted small">Compárala con la que muestra el otro servidor. Si no coinciden, no guardes.</span>
+  </div>
+  <div class="form-actions">
+    <button type="button" class="btn" onclick="closeForm()">Cancelar</button>
+    <button type="button" class="btn btn-primary" id="btn-save" onclick="saveServer()">Guardar servidor</button>
+  </div>
+</div>
+
+{# Tarjetas: este servidor primero #}
+<div class="grid grid-3" id="cards"></div>
+
+{# Lado monitoreado: tokens para que otros paneles vean este #}
+<div class="card">
+  <div class="card-head">
+    <h3>Acceso remoto a este servidor</h3>
+    <button class="btn btn-sm btn-primary" onclick="newToken()">Generar token</button>
+  </div>
+  <p class="muted small" style="margin-top:0;">Para vigilar <b class="mono">{{ hostname }}</b> desde otro MatiPanel, genera un token y escríbelo allá junto con la dirección y la huella. Los tokens son de <b>solo lectura</b>: permiten ver las métricas, nada más.</p>
+  <dl class="kv" style="grid-template-columns:minmax(0,1fr);">
+    <div><dt>Dirección</dt><dd class="mono" id="this-url"></dd></div>
+    <div><dt>Huella SHA-256</dt><dd>
+      {% if local_fp %}
+        <span class="mono" id="this-fp" style="word-break:break-all;">{{ local_fp }}</span>
+        <button class="btn btn-sm" style="margin-left:6px;" onclick="copyText(document.getElementById('this-fp').textContent)">Copiar</button>
+      {% else %}
+        <span class="pill warn">No se pudo leer <span class="mono">{{ cert_path }}</span></span>
+      {% endif %}
+    </dd></div>
+  </dl>
+
+  <div id="new-token" hidden style="margin:14px 0;padding:12px 14px;border:1px solid var(--warn);background:var(--warn-bg);border-radius:8px;">
+    <div class="small" style="color:var(--warn);font-weight:600;margin-bottom:6px;">Copia este token ahora: no se volverá a mostrar.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <code class="mono" id="new-token-val" style="word-break:break-all;flex:1;min-width:200px;"></code>
+      <button class="btn btn-sm" onclick="copyText(document.getElementById('new-token-val').textContent)">Copiar</button>
+      <button class="btn btn-sm" onclick="document.getElementById('new-token').hidden = true">Listo</button>
+    </div>
+  </div>
+
+  <div class="table-wrap" style="margin-top:12px;">
+    <table class="lx">
+      <thead><tr><th>Etiqueta</th><th>Creado</th><th>Último uso</th><th>Desde</th><th class="right"></th></tr></thead>
+      <tbody id="tok-body"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+const API = {
+  status: {{ url_for('remote.status')|tojson }},
+  fp: {{ url_for('remote.fingerprint')|tojson }},
+  save: {{ url_for('remote.server_save')|tojson }},
+  del: {{ url_for('remote.server_delete')|tojson }},
+  tokNew: {{ url_for('remote.token_create')|tojson }},
+  tokRevoke: {{ url_for('remote.token_revoke')|tojson }},
+  dashboard: {{ url_for('dashboard.index')|tojson }},
+};
+const REFRESH_MS = 15000;
+const $ = id => document.getElementById(id);
+let tokens = {{ tokens|tojson }};
+const known = new Map(({{ servers|tojson }}).map(s => [s.id, s]));  // datos públicos (sin token)
+const cards = new Map();  // id → {el, g, parts}
+
+$('this-url').textContent = location.origin;
+
+// ── Utilidades ──
+const fmtDate = ts => ts ? new Date(ts * 1000).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : 'Nunca';
+const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString('es');
+const hostOf = url => String(url || '').replace(/^https:\/\//, '');
+const pct = v => v === null || v === undefined ? '—' : Math.round(v) + '%';
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const t = document.createElement('textarea');
+    t.value = text; document.body.appendChild(t); t.select();
+    document.execCommand('copy'); t.remove();
+  }
+  ui.toast('Copiado al portapapeles');
+}
+
+// Avisos de un servidor que está en línea
+function issues(d) {
+  const out = [];
+  if (!d) return out;
+  if (d.failed) out.push(`${d.failed} servicio${d.failed === 1 ? '' : 's'} con fallo`);
+  if (d.disk >= 90) out.push('Disco al ' + pct(d.disk));
+  if (d.mem >= 95) out.push('Memoria al ' + pct(d.mem));
+  if (d.cpu >= 90) out.push('CPU al ' + pct(d.cpu));
+  return out;
+}
+
+const STATE = {
+  pending: ['mute', 'Consultando…'],
+  online: ['ok', 'En línea'],
+  offline: ['err', 'Sin conexión'],
+  auth: ['err', 'Token rechazado'],
+  mismatch: ['err', 'Huella distinta'],
+  error: ['err', 'Error'],
+};
+
+// ── Tarjetas ──
+function makeCard(s) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.style.display = 'flex';
+  el.style.flexDirection = 'column';
+  const actions = s.local
+    ? `<a class="btn btn-sm" href="${escapeHtml(API.dashboard)}">Dashboard</a>`
+    : `<a class="btn btn-sm btn-primary" data-k="open" target="_blank" rel="noopener noreferrer">Abrir</a>
+       <button class="btn btn-sm" onclick="editServer(${jsArg(s.id)})">Editar</button>
+       <button class="btn btn-sm btn-danger" onclick="removeServer(${jsArg(s.id)})">Quitar</button>`;
+  el.innerHTML = `
+    <div class="card-head" style="align-items:flex-start;">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <span class="led mute" data-k="led"></span>
+        <div style="min-width:0;">
+          <h3 style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-k="name"></h3>
+          <div class="mono muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-k="host"></div>
+        </div>
+      </div>
+      <span class="pill mute" data-k="state">Consultando…</span>
+    </div>
+    <div data-k="alert" hidden></div>
+    <div data-k="body" style="transition:opacity .3s;">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;">
+        <div class="gauge" style="border:0;padding:0;background:none;"></div>
+        <div class="gauge" style="border:0;padding:0;background:none;"></div>
+        <div class="gauge" style="border:0;padding:0;background:none;"></div>
+      </div>
+      <svg data-k="spark" viewBox="0 0 120 24" preserveAspectRatio="none" style="width:100%;height:26px;display:block;margin:6px 0 2px;" aria-label="CPU de los últimos minutos">
+        <polyline fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke" points=""/>
+      </svg>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;">
+        <span class="chip" data-k="failed-chip"><span class="led sm mute"></span><b data-k="failed">—</b> servicios con fallo</span>
+        <span class="chip"><b data-k="updates">—</b> actualizaciones</span>
+      </div>
+      <div class="small muted" data-k="meta"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:12px;">
+      <span class="small muted" data-k="time"></span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</div>
+    </div>`;
+  const gEls = el.querySelectorAll('.gauge');
+  const g = {
+    cpu: gauge(gEls[0], { label: 'CPU' }),
+    mem: gauge(gEls[1], { label: 'Memoria', warn: 85, err: 95 }),
+    disk: gauge(gEls[2], { label: 'Disco', warn: 80, err: 90 }),
+  };
+  gEls.forEach(x => { const sub = x.querySelector('.g-sub'); sub.style.fontSize = '11px'; sub.style.marginTop = '-8px'; });
+  const parts = {};
+  el.querySelectorAll('[data-k]').forEach(x => { parts[x.dataset.k] = x; });
+  return { el, g, parts, last: null };
+}
+
+function sparkPoints(hist) {
+  const h = (hist || []).filter(p => typeof p.cpu === 'number');
+  if (h.length < 2) return '';
+  return h.map((p, i) => `${(i / (h.length - 1) * 120).toFixed(1)},${(24 - p.cpu / 100 * 22 - 1).toFixed(1)}`).join(' ');
+}
+
+function updateCard(c, s) {
+  const p = c.parts, state = s.state || 'pending';
+  const d = s.data || null;
+  if (d) c.last = { data: d, at: Date.now() / 1000 };
+  const shown = d || (c.last && c.last.data);
+  const warns = state === 'online' ? issues(d) : [];
+  let [lvl, label] = STATE[state] || STATE.error;
+  if (state === 'online' && warns.length) { lvl = 'warn'; label = 'Con avisos'; }
+
+  p.led.className = 'led ' + (lvl === 'ok' ? '' : lvl) + (state === 'online' ? ' live' : '');
+  p.state.className = 'pill ' + lvl;
+  p.state.textContent = label;
+  p.name.textContent = s.local ? (shown?.hostname || s.name) : s.name;
+  p.name.title = p.name.textContent;
+  p.host.textContent = s.local ? 'Este servidor' : hostOf(s.url);
+  if (p.open) {
+    const u = String(s.url || '');
+    if (u.startsWith('https://')) p.open.href = u + '/';
+  }
+
+  // Aviso (seguridad o error de conexión)
+  if (state === 'mismatch') {
+    p.alert.innerHTML = `<div style="border:1px solid var(--err);background:var(--err-bg);color:var(--err);border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:10px;">
+      <b>Alerta de seguridad: la huella del certificado no coincide.</b>
+      Puede ser un ataque de intermediario o que el otro servidor regeneró su certificado. <b>No se envió el token.</b>
+      Comprueba en el otro servidor su huella y, solo si coincide con la recibida, actualízala con <b>Editar</b>.
+      <div class="mono" style="word-break:break-all;margin-top:6px;">Recibida: ${escapeHtml(s.got_fp || '—')}</div>
+      <div class="mono" style="word-break:break-all;">Guardada: ${escapeHtml(s.fp || '—')}</div></div>`;
+    p.alert.hidden = false;
+  } else if (state !== 'online' && state !== 'pending') {
+    p.alert.innerHTML = `<div style="border:1px solid var(--warn);background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;">${escapeHtml(s.error || 'Sin datos.')}</div>`;
+    p.alert.hidden = false;
+  } else if (warns.length) {
+    p.alert.innerHTML = `<div class="small" style="color:var(--warn);margin-bottom:8px;">${warns.map(escapeHtml).join(' · ')}</div>`;
+    p.alert.hidden = false;
+  } else {
+    p.alert.hidden = true;
+  }
+
+  p.body.style.opacity = state === 'online' ? '1' : '.35';
+  if (shown) {
+    c.g.cpu.set(shown.cpu ?? 0, shown.cores ? `${shown.cores} núcleos` : '');
+    c.g.mem.set(shown.mem ?? 0, shown.mem_h || '');
+    c.g.disk.set(shown.disk ?? 0, shown.disk_h || '');
+    p.spark.querySelector('polyline').setAttribute('points', sparkPoints(shown.history));
+    const f = shown.failed;
+    p.failed.textContent = f ?? '—';
+    p['failed-chip'].querySelector('.led').className = 'led sm ' + (f ? 'err' : f === 0 ? '' : 'mute');
+    p['failed-chip'].title = (shown.failed_units || []).join(', ');
+    p.updates.textContent = shown.updates ?? '—';
+    const load = (shown.load || []).map(x => Number(x).toFixed(2)).join(' · ');
+    p.meta.textContent = [shown.distro, shown.uptime && 'encendido hace ' + shown.uptime,
+                          load && 'carga ' + load, shown.version && 'MatiPanel ' + shown.version].filter(Boolean).join(' · ');
+  }
+  if (state === 'online') {
+    p.time.textContent = 'Actualizado ' + fmtTime(Date.now() / 1000) + (s.ms ? ` · ${s.ms} ms` : '');
+  } else if (c.last) {
+    p.time.textContent = 'Últimos datos: ' + fmtTime(c.last.at);
+  } else {
+    p.time.textContent = state === 'pending' ? '' : 'Sin datos todavía';
+  }
+}
+
+function render(list) {
+  const box = $('cards'), seen = new Set();
+  for (const s of list) {
+    seen.add(s.id);
+    let c = cards.get(s.id);
+    if (!c) { c = makeCard(s); cards.set(s.id, c); }
+    box.appendChild(c.el);  // reordena: este servidor primero, luego en el orden guardado
+    updateCard(c, s);
+  }
+  for (const [id, c] of cards) if (!seen.has(id)) { c.el.remove(); cards.delete(id); }
+}
+
+function summarize(list) {
+  const total = list.length;
+  const online = list.filter(s => s.state === 'online').length;
+  const problems = list.filter(s => s.state !== 'online' || issues(s.data).length).length;
+  const mismatch = list.some(s => s.state === 'mismatch');
+  const level = online < total ? 'err' : problems ? 'warn' : 'ok';
+  $('sum').dataset.level = level;
+  $('sum-led').className = 'led lg live ' + (level === 'ok' ? '' : level);
+  $('sum-verdict').textContent = total === 1
+    ? (problems ? 'Este servidor tiene avisos' : 'Este servidor está bien. Agrega otros para vigilarlos aquí.')
+    : !problems ? `Los ${total} servidores están en línea y sin problemas`
+    : `${online} de ${total} servidores en línea · ${problems} con problemas`;
+  $('sum-sub').textContent = (mismatch ? 'Atención: hay una alerta de seguridad de certificado. ' : '')
+    + `Actualizado a las ${fmtTime(Date.now() / 1000)} · se actualiza cada 15 segundos.`;
+}
+
+let busy = false;
+async function refresh(manual) {
+  if (busy) return;
+  busy = true;
+  try {
+    const r = await fetch(API.status, { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    for (const s of j.servers) if (!s.local) known.set(s.id, { id: s.id, name: s.name, url: s.url, fp: s.fp, token_hint: s.token_hint });
+    render(j.servers);
+    summarize(j.servers);
+    if (manual) ui.toast('Servidores actualizados', 'info', 1800);
+  } catch (e) {
+    $('sum-sub').textContent = 'No se pudo consultar el estado: ' + e.message;
+    if (manual) ui.toast('No se pudo actualizar: ' + e.message, 'error');
+  } finally {
+    busy = false;
+  }
+}
+
+// ── Alta / edición ──
+function openForm(s) {
+  $('form-title').textContent = s ? 'Editar servidor' : 'Agregar servidor';
+  $('f-id').value = s ? s.id : '';
+  $('f-name').value = s ? s.name : '';
+  $('f-url').value = s ? s.url : '';
+  $('f-fp').value = s ? s.fp : '';
+  $('f-token').value = '';
+  $('f-token-help').textContent = s
+    ? `Déjalo vacío para conservar el actual (termina en ${s.token_hint || '—'}).`
+    : 'Pega el token que generaste en el otro servidor.';
+  $('srv-form').hidden = false;
+  $('srv-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('f-name').focus();
+}
+function closeForm() { $('srv-form').hidden = true; }
+function editServer(id) { const s = known.get(id); if (s) openForm(s); }
+
+async function getFp() {
+  const url = $('f-url').value.trim();
+  if (!url) { ui.toast('Escribe primero la dirección del panel.', 'warning'); $('f-url').focus(); return; }
+  const btn = $('btn-fp');
+  btn.disabled = true; btn.textContent = 'Conectando…';
+  const r = await postJSON(API.fp, { url });
+  btn.disabled = false; btn.textContent = 'Obtener huella';
+  if (!r.ok) { ui.alert(r.error || 'No se pudo conectar.', { title: 'No se pudo obtener la huella', icon: 'error' }); return; }
+  const prev = $('f-fp').value.trim();
+  const same = prev && prev.replace(/[\s:]/g, '').toLowerCase() === r.fp.replace(/:/g, '').toLowerCase();
+  if (same) { ui.toast('La huella coincide con la guardada.'); $('f-url').value = r.url; return; }
+  const ok = await ui.confirm(
+    `${r.url} presenta este certificado:\n\n${r.fp}\n\n` +
+    'Compáralo con la huella que muestra el otro servidor en Servidores → Acceso remoto a este servidor. ' +
+    'Acéptala solo si es idéntica.' +
+    (prev ? '\n\nAtención: es DISTINTA de la huella que tenías escrita.' : ''),
+    { title: 'Confirma la huella', icon: prev ? 'warning' : 'question', confirmText: 'Sí, es idéntica', danger: !!prev });
+  if (ok) { $('f-fp').value = r.fp; $('f-url').value = r.url; }
+}
+
+async function saveServer() {
+  const data = { id: $('f-id').value, name: $('f-name').value, url: $('f-url').value,
+                 token: $('f-token').value, fp: $('f-fp').value };
+  const btn = $('btn-save');
+  btn.disabled = true;
+  const r = await postJSON(API.save, data);
+  btn.disabled = false;
+  if (!r.ok) { ui.toast(r.error || 'No se pudo guardar.', 'error', 5000); return; }
+  $('f-token').value = '';
+  known.set(r.server.id, r.server);
+  closeForm();
+  ui.toast(data.id ? 'Servidor actualizado' : 'Servidor agregado');
+  refresh();
+}
+
+async function removeServer(id) {
+  const s = known.get(id);
+  const ok = await ui.confirm(`¿Quitar «${s ? s.name : id}» de la lista? Se borra el token guardado aquí. ` +
+    'Para que deje de servir también debes revocarlo en el otro servidor.',
+    { title: 'Quitar servidor', danger: true, confirmText: 'Quitar' });
+  if (!ok) return;
+  const r = await postJSON(API.del, { id });
+  if (!r.ok) { ui.toast(r.error || 'No se pudo quitar.', 'error'); return; }
+  known.delete(id);
+  const c = cards.get(id);
+  if (c) { c.el.remove(); cards.delete(id); }
+  ui.toast('Servidor quitado');
+  refresh();
+}
+
+// ── Tokens de este servidor ──
+function renderTokens() {
+  const tb = $('tok-body');
+  if (!tokens.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="muted center">Ningún otro panel tiene acceso a este servidor.</td></tr>';
+    return;
+  }
+  tb.innerHTML = tokens.map(t => `<tr>
+    <td>${escapeHtml(t.label)}</td>
+    <td class="muted">${escapeHtml(fmtDate(t.created))}</td>
+    <td>${t.last_used ? escapeHtml(fmtDate(t.last_used)) : '<span class="pill mute">Nunca</span>'}</td>
+    <td class="mono">${escapeHtml(t.last_ip || '—')}</td>
+    <td class="right"><button class="btn btn-sm btn-danger" onclick="revokeToken(${jsArg(t.id)}, ${jsArg(t.label)})">Revocar</button></td>
+  </tr>`).join('');
+}
+
+async function newToken() {
+  const label = await ui.prompt('Ponle un nombre para reconocer quién lo usa (por ejemplo, el panel que vigilará este servidor).',
+    { title: 'Generar token de solo lectura', placeholder: 'monitor-central', confirmText: 'Generar' });
+  if (!label) return;
+  const r = await postJSON(API.tokNew, { label });
+  if (!r.ok) { ui.toast(r.error || 'No se pudo generar.', 'error'); return; }
+  tokens.push(r.entry);
+  renderTokens();
+  $('new-token-val').textContent = r.token;
+  $('new-token').hidden = false;
+  $('new-token').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function revokeToken(id, label) {
+  const ok = await ui.confirm(`¿Revocar el token «${label}»? El panel que lo use dejará de ver este servidor de inmediato.`,
+    { title: 'Revocar token', danger: true, confirmText: 'Revocar' });
+  if (!ok) return;
+  const r = await postJSON(API.tokRevoke, { id });
+  if (!r.ok) { ui.toast(r.error || 'No se pudo revocar.', 'error'); return; }
+  tokens = tokens.filter(t => t.id !== id);
+  renderTokens();
+  ui.toast('Token revocado');
+}
+
+// ── Inicio ──
+renderTokens();
+render([{ id: 'local', local: true, name: {{ hostname|tojson }}, state: 'pending' },
+        ...[...known.values()].map(s => ({ ...s, state: 'pending' }))]);
+refresh();
+setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+</script>
+{% endblock %}

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from ..util import run
+from .webserver import _installed as _web_installed
 
 ssl_bp = Blueprint("ssl", __name__)
 
@@ -20,6 +21,13 @@ def _available():
     return shutil.which("certbot") is not None
 
 
+def _default_plugin():
+    """Método preseleccionado al obtener: el servidor web que esté instalado."""
+    if _web_installed("apache"):
+        return "apache"
+    return "nginx" if _web_installed("nginx") else "webroot"
+
+
 def _err(msg, code=400, **extra):
     return jsonify({"ok": False, "error": msg, **extra}), code
 
@@ -27,7 +35,7 @@ def _err(msg, code=400, **extra):
 @ssl_bp.route("/")
 @login_required
 def index():
-    return render_template("ssl.html", available=_available())
+    return render_template("ssl.html", available=_available(), default_plugin=_default_plugin())
 
 
 def parse_certificates(text):

@@ -8,12 +8,14 @@ from ..util import valid_name
 
 docker_bp = Blueprint("docker", __name__)
 
-DOCKER_AVAILABLE = shutil.which("docker") is not None
+def _available():
+    # Por request (no al importar): instalar Docker no obliga a reiniciar el panel.
+    return shutil.which("docker") is not None
 
 
 def _docker(*args, timeout=15):
     """Wrapper para subprocess de docker. Retorna (returncode, stdout, stderr)."""
-    if not DOCKER_AVAILABLE:
+    if not _available():
         return 127, "", "docker no instalado"
     try:
         r = subprocess.run(
@@ -30,7 +32,7 @@ def _docker(*args, timeout=15):
 @docker_bp.route("/")
 @login_required
 def index():
-    return render_template("docker.html", available=DOCKER_AVAILABLE)
+    return render_template("docker.html", available=_available())
 
 
 @docker_bp.route("/api/info")

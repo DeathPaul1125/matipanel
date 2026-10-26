@@ -113,8 +113,13 @@ def read():
         return jsonify({"error": "Permiso denegado"}), 403
     if b"\x00" in raw[:8192]:
         return jsonify({"error": "Archivo binario (descárgalo)"}), 415
-    return jsonify({"path": path, "size": size,
-                    "content": raw.decode("utf-8", errors="replace"),
+    # No-UTF-8 (p. ej. Latin-1): se muestra aproximado y el editor lo abre en solo
+    # lectura, porque guardarlo reemplazaría para siempre los bytes no válidos.
+    try:
+        content, lossy = raw.decode("utf-8"), False
+    except UnicodeDecodeError:
+        content, lossy = raw.decode("utf-8", errors="replace"), True
+    return jsonify({"path": path, "size": size, "content": content, "lossy": lossy,
                     "language": _detect_language(path)})
 
 
@@ -208,8 +213,12 @@ def copy():
     if (g := _write_guard()):
         return g
     data = request.get_json(silent=True) or {}
-    src, dest = _path(data.get("path", "")), _path(data.get("dest", ""))
+    src, dest = _path(data.get("path", "")), data.get("dest", "")
     if not src or not dest or not os.path.lexists(src):
+        return _bad("Ruta inválida")
+    # Igual que rename(): un destino relativo se toma respecto al directorio del origen.
+    dest = _path(dest if dest.startswith("/") else os.path.join(os.path.dirname(src), dest))
+    if not dest:
         return _bad("Ruta inválida")
     if os.path.isdir(dest) and not os.path.islink(dest):
         dest = os.path.join(dest, os.path.basename(src))
@@ -350,10 +359,12 @@ def download():
     path = _path(request.args.get("path", ""))
     if not path or not os.path.exists(path):
         return jsonify({"error": "No existe"}), 404
+    name = os.path.basename(path)
+    if not name:  # "/": empaquetaría todo el sistema (incluidos /proc y /sys)
+        return jsonify({"error": "No se puede descargar la raíz del sistema"}), 400
     if os.path.isfile(path):
         return send_file(path, as_attachment=True)
-    name = os.path.basename(path) or "root"
-    proc = subprocess.Popen(["tar", "-czf", "-", "-C", os.path.dirname(path) or "/", "--", name],
+    proc = subprocess.Popen(["tar", "-czf", "-", "-C", os.path.dirname(path), "--", name],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     def stream():

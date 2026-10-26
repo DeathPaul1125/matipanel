@@ -149,7 +149,7 @@ async function pasteClip() {
   try {
     const text = await navigator.clipboard.readText();
     if (text && ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: text }));
-  } catch (e) { ui.toast('Usa Ctrl+Shift+V o el menú contextual del navegador para pegar', 'warning'); }
+  } catch (e) { ui.toast('El navegador no permitió leer el portapapeles. Pega con clic derecho → Pegar sobre la terminal, o con Ctrl+V.', 'warning', 6000); }
 }
 
 function toggleFull() {

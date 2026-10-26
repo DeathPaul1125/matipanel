@@ -33,6 +33,14 @@ PHP_RE = re.compile(r"^\d+\.\d+$")
 DOCROOT_BASES = ("/var/www/", "/srv/", "/home/")
 
 
+# Respaldos de editores y temporales que no son sitios reales (nginx los incluiría igual).
+JUNK_SUFFIXES = (".bak", "~", ".dpkg-old", ".dpkg-dist", ".swp")  # .matipanel.bak cae en .bak
+
+
+def _is_junk(name):
+    return name.startswith(".") or name.endswith(JUNK_SUFFIXES)
+
+
 def _installed(key):
     s = SERVERS[key]
     return os.path.isdir(s["etc"]) and shutil.which(s["bin"]) is not None
@@ -152,7 +160,7 @@ def sites(srv):
     names = set()
     for d in (avail, enabled):
         if os.path.isdir(d):
-            names.update(f for f in os.listdir(d) if not f.startswith("."))
+            names.update(f for f in os.listdir(d) if not _is_junk(f))
     items = []
     for name in sorted(names):
         in_avail = os.path.isfile(os.path.join(avail, name))
@@ -290,6 +298,7 @@ def _nginx_vhost(domain, aliases, docroot, php):
 
 
 def _make_docroot(docroot, domain):
+    """Crea el docroot y un index.html; devuelve lo que creó (para poder revertirlo)."""
     missing, p = [], docroot
     while p and p != "/" and not os.path.exists(p):
         missing.append(p)
@@ -303,6 +312,16 @@ def _make_docroot(docroot, domain):
         missing.append(index)
     for path in missing:
         shutil.chown(path, "www-data", "www-data")
+    return missing
+
+
+def _undo_docroot(created):
+    # Lo más profundo primero (index.html, luego carpetas); rmdir no borra si ya tiene algo.
+    for path in sorted(created, key=len, reverse=True):
+        try:
+            os.rmdir(path) if os.path.isdir(path) and not os.path.islink(path) else os.unlink(path)
+        except OSError:
+            pass
 
 
 @webserver_bp.route("/api/<srv>/create", methods=["POST"])
@@ -334,7 +353,7 @@ def create(srv):
         return _err("Ya existe un sitio con ese nombre", 409)
 
     try:
-        _make_docroot(docroot, domain)
+        created = _make_docroot(docroot, domain)
     except (OSError, LookupError) as e:
         return _err(f"No se pudo crear el document root: {e}", 500)
 
@@ -353,6 +372,7 @@ def create(srv):
         _disable(srv, s, name)
         if os.path.exists(path):
             os.remove(path)
+        _undo_docroot(created)  # solo lo que creó este asistente en este mismo intento
         return _err("La prueba de configuración falló; se revirtió el sitio", 409,
                     output="\n".join(filter(None, log)))
     return jsonify({"ok": True, "path": path, "output": "\n".join(filter(None, log))})

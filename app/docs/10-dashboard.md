@@ -50,10 +50,15 @@ Los cuatro tacómetros muestran el uso actual y se actualizan cada 3 segundos:
 
 La tarjeta **Historial** muestra seis gráficas: **CPU**, **Memoria y swap**, **Red** (bajada y subida), **E/S de disco** (lectura y escritura), **Carga (1 min)** y **Procesos**. Junto a cada título ves el valor más reciente.
 
-1. Elige el rango con los botones **5 min**, **15 min** o **1 hora**.
-2. Las gráficas se redibujan al momento. Se agrega un punto nuevo cada 5 segundos.
+1. Elige el rango con los botones **5 min**, **15 min**, **1 h**, **6 h**, **24 h** o **7 días**.
+2. Las gráficas se redibujan al momento. En los rangos de hasta 1 hora se agrega un punto nuevo cada 5 segundos; los rangos largos se recalculan cada minuto.
+3. Pasa el mouse sobre una gráfica para ver la fecha, la hora y los valores exactos de ese momento.
 
-> **Importante:** El historial se guarda solo en memoria y cubre como máximo la última hora. Si reinicias el servicio `matipanel` o el servidor, el historial empieza de cero. No sirve para revisar qué pasó ayer.
+El panel toma una muestra cada 5 segundos y la guarda en disco (`/var/lib/matipanel/metrics.db`), así que **el historial se conserva aunque reinicies el servicio o el servidor**. Se guardan los últimos **7 días**; lo más antiguo se borra solo.
+
+En los rangos largos (6 h, 24 h y 7 días) cada punto es el **promedio** de varias muestras, para que la gráfica siga siendo ágil. Por eso un pico muy breve puede verse más bajo que en el rango de 5 o 15 minutos.
+
+> **Nota:** si el servidor o el panel estuvieron apagados, la línea se **corta** en ese tramo en lugar de unir los puntos. Así distingues un apagón de un periodo de poca actividad.
 
 > **Nota:** El botón de rango que eliges aquí solo dura mientras tengas la página abierta. Para cambiar el rango predeterminado, usa **Menú → Cuenta → Apariencia → Rango del historial**.
 
@@ -112,7 +117,7 @@ No necesitas recargar la página. Todo se refresca solo mientras la pestaña est
 
 ### ¿Por qué el historial está vacío o solo muestra unos minutos?
 
-El historial vive en memoria. Se borra cada vez que se reinicia el servicio `matipanel` o el servidor. Espera unos minutos y se irá llenando, hasta un máximo de una hora.
+Si acabas de instalar MatiPanel, todavía no hay datos: el historial empieza a llenarse desde ese momento (una muestra cada 5 segundos) y llega hasta 7 días. Los reinicios del servicio o del servidor no lo borran; solo dejan un corte en la línea durante el tiempo que estuvo apagado.
 
 ### ¿Por qué dice "Atención" si el servidor funciona bien?
 

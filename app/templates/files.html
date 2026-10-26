@@ -33,8 +33,8 @@
         <div class="muted small" id="ed-info"></div>
       </div>
       <div style="display:flex; gap:8px;">
-        {% if write_enabled %}<button class="btn btn-primary" onclick="saveFile()">Guardar</button>{% endif %}
-        <button class="btn" onclick="closeModal('editor-modal')">Cerrar</button>
+        {% if write_enabled %}<button class="btn btn-primary" id="ed-save" onclick="saveFile()">Guardar</button>{% endif %}
+        <button class="btn" onclick="closeEditor()">Cerrar</button>
       </div>
     </div>
     <textarea id="editor" spellcheck="false" style="flex:1; width:100%; font-family:var(--mono); font-size:13px; padding:14px; border:none; resize:none; background:var(--surface); color:var(--text); outline:none; tab-size:4;"></textarea>
@@ -105,6 +105,8 @@ const WRITE = {{ 'true' if write_enabled else 'false' }};
 const API = "{{ url_for('files.index') }}api/";
 let currentPath = '/';
 let editingPath = '';
+let editorOriginal = '';   // contenido al abrir/guardar, para avisar de cambios sin guardar
+let editorLocked = true;   // solo lectura (sin permiso de escritura o archivo no UTF-8)
 let permItem = null;
 
 function join(dir, name) { return dir === '/' ? '/' + name : dir + '/' + name; }
@@ -138,7 +140,7 @@ async function load(path) {
       acts += ` <button class="btn btn-sm" onclick="renameItem(${p})" title="Renombrar / mover">✎</button>`
         + ` <button class="btn btn-sm" onclick="copyItem(${p})" title="Copiar">⧉</button>`
         + ` <button class="btn btn-sm" onclick="permDialog(${jsArg(Object.assign({path: full}, it))})" title="Permisos">🔑</button>`
-        + (isArchive ? ` <button class="btn btn-sm" onclick="simple('extract', ${p}, '¿Extraer aquí?')" title="Extraer">📦</button>`
+        + (isArchive ? ` <button class="btn btn-sm" onclick="simple('extract', ${p}, '¿Extraer aquí? Los archivos existentes con el mismo nombre se sobrescribirán.')" title="Extraer">📦</button>`
                      : ` <button class="btn btn-sm" onclick="simple('compress', ${p}, '¿Comprimir a .tar.gz?')" title="Comprimir">🗜</button>`)
         + ` <button class="btn btn-sm btn-danger" onclick="deleteItem(${p}, ${it.is_dir})" title="Borrar">🗑</button>`;
     }
@@ -155,20 +157,35 @@ async function editFile(path) {
   const d = await r.json();
   if (d.error) { ui.alert(d.error, { title: 'No se pudo abrir el archivo', icon: 'error' }); return; }
   editingPath = d.path;
+  editorLocked = !WRITE || !!d.lossy;
   document.getElementById('ed-filename').textContent = d.path;
-  document.getElementById('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '') + (WRITE ? '' : ' · solo lectura');
+  document.getElementById('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '')
+    + (d.lossy ? ' · solo lectura: no es UTF-8 (p. ej. Latin-1); guardarlo aquí dañaría los caracteres especiales. Descárgalo para editarlo.'
+       : (WRITE ? '' : ' · solo lectura'));
   const ed = document.getElementById('editor');
   ed.value = d.content;
-  ed.readOnly = !WRITE;
+  editorOriginal = ed.value;
+  ed.readOnly = editorLocked;
+  const saveBtn = document.getElementById('ed-save');
+  if (saveBtn) saveBtn.hidden = editorLocked;
   document.getElementById('editor-modal').classList.add('open');
   ed.focus();
 }
 
+async function closeEditor() {
+  const changed = !editorLocked && document.getElementById('editor').value !== editorOriginal;
+  if (changed && !await ui.confirm('Hay cambios sin guardar en ' + editingPath + '. ¿Cerrar y descartarlos?',
+    { title: 'Cambios sin guardar', danger: true, confirmText: 'Descartar cambios', cancelText: 'Seguir editando' })) return;
+  closeModal('editor-modal');
+}
+
 async function saveFile() {
+  if (editorLocked) return;
   if (!await ui.confirm('¿Guardar ' + editingPath + '? Se crea un backup .matipanel.bak', { title: 'Guardar archivo', confirmText: 'Guardar' })) return;
   const d = await postJSON(API + "write", { path: editingPath, content: document.getElementById('editor').value });
   if (!d.ok) { ui.alert(d.error, { title: 'No se pudo guardar', icon: 'error' }); return; }
   ui.toast('Guardado ✓ · Backup: ' + d.backup);
+  editorOriginal = document.getElementById('editor').value;
   closeModal('editor-modal');
   load(currentPath);
 }
@@ -179,7 +196,7 @@ document.getElementById('editor').addEventListener('keydown', e => {
     e.preventDefault();
     const t = e.target, s = t.selectionStart;
     t.setRangeText('\t', s, t.selectionEnd, 'end');
-  } else if ((e.ctrlKey || e.metaKey) && e.key === 's' && WRITE) {
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 's' && !editorLocked) {
     e.preventDefault(); saveFile();
   }
 });
@@ -210,16 +227,21 @@ async function copyItem(path) {
   load(currentPath);
 }
 
+// Rutas del sistema donde un borrado por error rompe el servidor: piden escribir el nombre.
+const CRITICAL_DIRS = ['/etc', '/boot', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/var/lib', '/root'];
 async function deleteItem(path, isDir) {
+  const name = path.split('/').pop();
+  const critical = isDir || CRITICAL_DIRS.some(d => path === d || path.startsWith(d + '/'));
   if (!await ui.confirm((isDir ? '¿Borrar la carpeta y TODO su contenido?\n' : '¿Borrar el archivo?\n') + path,
-    { title: isDir ? 'Borrar carpeta' : 'Borrar archivo', danger: true, confirmText: 'Borrar' })) return;
+    { title: isDir ? 'Borrar carpeta' : 'Borrar archivo', danger: true, confirmText: 'Borrar',
+      typed: critical ? name : undefined })) return;
   const d = await postJSON(API + "delete", { path });
   if (!d.ok) ui.alert(d.error, { title: 'No se pudo borrar', icon: 'error' });
   load(currentPath);
 }
 
 async function simple(action, path, msg) {
-  if (!await ui.confirm(msg + '\n' + path, { title: action === 'extract' ? 'Extraer' : 'Comprimir', confirmText: action === 'extract' ? 'Extraer' : 'Comprimir' })) return;
+  if (!await ui.confirm(msg + '\n' + path, { title: action === 'extract' ? 'Extraer' : 'Comprimir', danger: action === 'extract', confirmText: action === 'extract' ? 'Extraer y sobrescribir' : 'Comprimir' })) return;
   const d = await postJSON(API + action, { path });
   if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
   load(currentPath);

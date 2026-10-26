@@ -202,7 +202,7 @@ def _apt_summary():
         )
         lines = out.strip().splitlines()[1:]
         info["upgradable"] = len(lines)
-        for line in lines[:50]:
+        for line in lines:  # el conteo de seguridad cubre todo; la lista se corta en 50
             parts = line.split()
             if len(parts) >= 4:
                 name = parts[0].split("/")[0]
@@ -211,10 +211,11 @@ def _apt_summary():
                 is_security = "security" in origin
                 if is_security:
                     info["security"] += 1
-                info["upgradable_list"].append({
-                    "name": name, "new_version": new_ver,
-                    "origin": origin, "security": is_security,
-                })
+                if len(info["upgradable_list"]) < 50:
+                    info["upgradable_list"].append({
+                        "name": name, "new_version": new_ver,
+                        "origin": origin, "security": is_security,
+                    })
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         pass
     return info

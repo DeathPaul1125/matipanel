@@ -152,7 +152,10 @@ async function saveJob() {
 
 async function jobAction(act, i) {
   const e = entries.find(x => x.i === i);
-  if (act === 'delete' && !await ui.confirm('¿Eliminar la tarea?\n\n' + e.schedule + ' ' + e.command, {title: 'Eliminar tarea', danger: true, confirmText: 'Eliminar'})) return;
+  const line = e.schedule + ' ' + e.command;
+  if (act === 'delete' && !await ui.confirm('¿Eliminar la tarea?\n\n' + line, {title: 'Eliminar tarea', danger: true, confirmText: 'Eliminar'})) return;
+  if (act === 'toggle' && !await ui.confirm((e.enabled ? '¿Desactivar la tarea? Dejará de ejecutarse hasta que la actives de nuevo.' : '¿Activar la tarea? Volverá a ejecutarse según su programación.') + '\n\n' + line,
+    {title: e.enabled ? 'Desactivar tarea' : 'Activar tarea', danger: e.enabled, confirmText: e.enabled ? 'Desactivar' : 'Activar'})) return;
   const d = await postJSON(API + 'job/' + act, {user: curUser(), index: e.i, raw: e.raw});
   if (!d.ok) ui.alert(d.error || 'desconocido', {title: 'Error', icon: 'error'});
   loadCrontab();

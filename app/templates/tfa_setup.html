@@ -4,6 +4,7 @@
 
 {% block content %}
 <div class="card" style="max-width:640px;">
+  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
   <h3>Paso 1 · Escanea el QR con tu app</h3>
   <p class="muted small">Google Authenticator, Authy, FreeOTP, Aegis, 1Password, etc.</p>
 
@@ -22,7 +23,8 @@
 
   <h3 style="margin-top:24px;">Paso 3 · Confirma con tu primer código</h3>
   <form method="POST" action="{{ url_for('auth.tfa_activate') }}" style="display:flex; gap:8px; align-items:center;">
-    <input type="text" name="code" required placeholder="000000" inputmode="numeric"
+    {% for c in codes %}<input type="hidden" name="codes" value="{{ c }}">{% endfor %}
+    <input type="text" name="code" required placeholder="000000" inputmode="numeric" autofocus
            style="font-family:var(--mono); letter-spacing:0.2em; text-align:center; flex:1; max-width:200px;">
     <button type="submit" class="btn btn-primary">Activar 2FA</button>
     <a href="{{ url_for('auth.security') }}" class="btn">Cancelar</a>

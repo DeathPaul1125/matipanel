@@ -84,7 +84,11 @@ Otro proceso está usando apt (por ejemplo, las actualizaciones automáticas). E
 
 ## Los gráficos del dashboard están vacíos
 
-El historial se guarda en memoria y se reinicia cuando se reinicia el servicio. Espera unos minutos para que se llene (una muestra cada 5 segundos).
+El historial se guarda en `/var/lib/matipanel/metrics.db` y se conserva 7 días, incluso tras reiniciar. Si está vacío:
+
+1. Si acabas de instalar, espera unos minutos: se toma una muestra cada 5 segundos.
+2. Comprueba que el archivo exista y crezca: `ls -lh /var/lib/matipanel/metrics.db`.
+3. Si el disco estaba lleno, el panel no puede escribir; libera espacio y reinicia el servicio.
 
 ## La terminal no conecta
 

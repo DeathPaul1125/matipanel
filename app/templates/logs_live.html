@@ -44,7 +44,8 @@ function start() {
 
   ws.onmessage = e => {
     if (e.data.startsWith('__error__')) {
-      out.textContent += '\n[ERROR] ' + e.data + '\n';
+      out.textContent += '\n[ERROR] ' + e.data.replace(/^__error__:\s*/, '') + '\n';
+      out.scrollTop = out.scrollHeight;
       return;
     }
     out.textContent += e.data + '\n';

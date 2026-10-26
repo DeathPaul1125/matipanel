@@ -10,15 +10,24 @@
     <p class="muted">El módulo <code>pyotp</code> no está instalado. Reinstala con:</p>
     <pre class="terminal">/opt/matipanel/venv/bin/pip install pyotp qrcode
 sudo systemctl restart matipanel</pre>
+  {% elif tfa_error %}
+    <p class="muted">No se puede mostrar ni cambiar el estado de 2FA mientras
+      <code>/var/lib/matipanel/2fa.json</code> no se pueda leer. Por seguridad, el inicio de
+      sesión queda bloqueado hasta que lo repares (o lo borres desde la consola del servidor
+      para desactivar 2FA).</p>
   {% elif tfa_enabled %}
     <p>
       <span class="pill ok">2FA activado</span>
       &nbsp; Estás protegido con un código adicional al iniciar sesión.
     </p>
-    <form method="POST" action="{{ url_for('auth.tfa_disable') }}"
+    <form method="POST" action="{{ url_for('auth.tfa_disable') }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
           onsubmit="event.preventDefault(); ui.confirm('¿Desactivar 2FA? Volverás a iniciar sesión solo con contraseña.', {title: 'Desactivar 2FA', danger: true, confirmText: 'Desactivar'}).then(ok => { if (ok) this.submit(); })">
+      <input type="text" name="code" required placeholder="Código actual" autocomplete="one-time-code"
+             title="Código de 6 dígitos de tu app o un código de recuperación"
+             style="font-family:var(--mono); letter-spacing:0.1em; text-align:center; max-width:200px;">
       <button type="submit" class="btn btn-danger">Desactivar 2FA</button>
     </form>
+    <p class="muted small">Para desactivarlo ingresa el código actual de tu app o un código de recuperación.</p>
   {% else %}
     <p class="muted">Añade una capa extra de seguridad con Google Authenticator, Authy, FreeOTP o similar.</p>
     <a href="{{ url_for('auth.tfa_setup') }}" class="btn btn-primary">Configurar 2FA</a>

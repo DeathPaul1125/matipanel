@@ -24,7 +24,7 @@ DEFAULTS = {
     "font": "plex",            # plex | system
     "motion": "on",            # on | off
     "dash": {s: True for s in DASH_SECTIONS},
-    "range": "900",            # 300 | 900 | 3600 (segundos)
+    "range": "900",            # 300 | 900 | 3600 | 21600 | 86400 | 604800 (segundos)
 }
 CHOICES = {
     "density": ("comfortable", "compact"),
@@ -32,7 +32,7 @@ CHOICES = {
     "radius": ("square", "soft", "round"),
     "font": ("plex", "system"),
     "motion": ("on", "off"),
-    "range": ("300", "900", "3600"),
+    "range": ("300", "900", "3600", "21600", "86400", "604800"),
 }
 SIDEBAR_PRESETS = {"navy": "#0F1E3A", "graphite": "#1C1E22"}
 DEFAULT_ACCENT = "#0E7C6B"

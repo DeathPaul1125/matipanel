@@ -59,7 +59,7 @@ window.lineChart = function (el, opts) {
   el.classList.add('chart');
   el.innerHTML = '<svg class="chart-svg"></svg><div class="chart-tip" hidden></div>';
   const svg = el.querySelector('svg'), tip = el.querySelector('.chart-tip');
-  let pts = [], range = 900, geo = null;
+  let pts = [], range = 900, every = 5, geo = null;
 
   function niceMax(v) {
     if (v <= 0) return 1;
@@ -86,18 +86,30 @@ window.lineChart = function (el, opts) {
       g += `<line class="c-grid" x1="${padL}" x2="${W - padR}" y1="${y(max * f)}" y2="${y(max * f)}"/>`
          + `<text class="c-ylab" x="${padL - 8}" y="${y(max * f) + 4}">${escapeHtml(fmt(max * f))}</text>`;
     }
-    // Marcas de tiempo en minutos redondos
-    const stepMin = [1, 2, 5, 10, 15, 30].find(m => range / 60 / m <= 6) || 30;
-    for (let t = Math.ceil(t0 / (stepMin * 60)) * stepMin * 60; t <= now; t += stepMin * 60) {
-      const lab = new Date(t * 1000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    // Marcas de tiempo redondas (minutos, horas o días según el rango)
+    const stepMin = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].find(m => range / 60 / m <= 7) || 1440;
+    const tz = new Date().getTimezoneOffset() * 60;  // alinear a la hora local
+    for (let t = Math.ceil((t0 - tz) / (stepMin * 60)) * stepMin * 60 + tz; t <= now; t += stepMin * 60) {
+      const dt = new Date(t * 1000);
+      const lab = stepMin >= 1440 ? dt.toLocaleDateString('es', { weekday: 'short', day: 'numeric' })
+        : range > 86400 ? dt.toLocaleString('es', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+        : dt.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
       g += `<line class="c-grid v" x1="${x(t)}" x2="${x(t)}" y1="${padT}" y2="${H - padB}"/>`
          + `<text class="c-xlab" x="${x(t)}" y="${H - 5}">${lab}</text>`;
     }
+    // Cortar la línea donde faltan datos (servidor o panel apagado) en vez de unir los puntos
+    const segs = [];
+    for (const p of vis) {
+      const last = segs.at(-1);
+      if (!last || p.t - last.at(-1).t > every * 3) segs.push([p]); else last.push(p);
+    }
     opts.series.forEach((s, i) => {
-      if (vis.length < 2) return;
-      const line = vis.map(p => `${x(p.t).toFixed(1)},${y(p[s.key] || 0).toFixed(1)}`).join(' ');
-      if (i === 0) g += `<polygon class="c-area" points="${x(vis[0].t).toFixed(1)},${y(0)} ${line} ${x(vis[vis.length - 1].t).toFixed(1)},${y(0)}"/>`;
-      g += `<polyline class="c-line${s.alt ? ' alt' : ''}" points="${line}"/>`;
+      for (const seg of segs) {
+        if (seg.length < 2) continue;
+        const line = seg.map(p => `${x(p.t).toFixed(1)},${y(p[s.key] || 0).toFixed(1)}`).join(' ');
+        if (i === 0) g += `<polygon class="c-area" points="${x(seg[0].t).toFixed(1)},${y(0)} ${line} ${x(seg.at(-1).t).toFixed(1)},${y(0)}"/>`;
+        g += `<polyline class="c-line${s.alt ? ' alt' : ''}" points="${line}"/>`;
+      }
     });
     if (vis.length < 2) g += `<text class="c-empty" x="${(W + padL) / 2}" y="${H / 2}">Recolectando datos…</text>`;
     g += `<line class="c-cross" y1="${padT}" y2="${H - padB}" x1="0" x2="0" visibility="hidden"/>`;
@@ -112,7 +124,7 @@ window.lineChart = function (el, opts) {
     const cx = geo.x(best.t), cross = svg.querySelector('.c-cross');
     cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
     tip.hidden = false;
-    tip.innerHTML = `<div class="muted">${new Date(best.t * 1000).toLocaleTimeString('es')}</div>`
+    tip.innerHTML = `<div class="muted">${new Date(best.t * 1000).toLocaleString('es', { weekday: 'short', hour: '2-digit', minute: '2-digit', second: range <= 3600 ? '2-digit' : undefined })}</div>`
       + opts.series.map(s => `<div><i class="sw${s.alt ? ' alt' : ''}"></i>${escapeHtml(s.label)} <b>${escapeHtml(fmt(best[s.key] || 0))}</b></div>`).join('');
     const left = cx / geo.W * rect.width;
     tip.style.left = Math.min(left + 12, rect.width - tip.offsetWidth - 4) + 'px';
@@ -124,7 +136,7 @@ window.lineChart = function (el, opts) {
   });
   new ResizeObserver(() => draw()).observe(el);
 
-  return { update(points, rangeSeconds) { pts = points; range = rangeSeconds || range; draw(); } };
+  return { update(points, rangeSeconds, step) { pts = points; range = rangeSeconds || range; every = step || every; draw(); } };
 };
 
 // Formatos compartidos

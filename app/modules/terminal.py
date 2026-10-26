@@ -59,7 +59,7 @@ def register_websockets(sock):
             os.environ.update({
                 "HOME": user_info.pw_dir, "USER": username, "LOGNAME": username,
                 "SHELL": user_info.pw_shell or "/bin/bash", "TERM": "xterm-256color",
-                "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": lang,
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": lang,
             })
             try:
                 os.chdir(user_info.pw_dir)

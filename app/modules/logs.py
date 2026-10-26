@@ -30,7 +30,10 @@ def recent():
     priority = request.args.get("priority", "").strip()
 
     cmd = ["journalctl", "--no-pager", "-n", str(n), "--output=short-iso"]
-    if valid_name(unit):
+    if unit:
+        # Antes una unidad inválida se ignoraba y se mostraba TODO el journal sin avisar.
+        if not valid_name(unit):
+            return jsonify({"error": f"Nombre de unidad inválido: {unit}"}), 400
         cmd += ["-u", unit]
     if priority in ("emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"):
         cmd += ["-p", priority]
@@ -48,19 +51,28 @@ def recent():
 @logs_bp.route("/api/files")
 @login_required
 def files():
-    """Archivos de texto en /var/log (sin rotados comprimidos)."""
+    """Archivos de texto en /var/log (sin rotados comprimidos ni binarios)."""
     found = []
-    for root, _, names in os.walk(LOG_DIR):
+    for root, dirs, names in os.walk(LOG_DIR):
+        if root == LOG_DIR and "journal" in dirs:
+            dirs.remove("journal")  # journal de systemd: binario, se consulta con journalctl
         for name in names:
             if name.endswith((".gz", ".xz", ".bz2", ".zst")) or name in ("wtmp", "btmp", "lastlog"):
                 continue
             full = os.path.join(root, name)
             try:
+                if _is_binary(full):
+                    continue
                 found.append({"path": full, "size": os.path.getsize(full)})
             except OSError:
                 pass
     found.sort(key=lambda f: f["path"])
     return jsonify({"files": found})
+
+
+def _is_binary(path):
+    with open(path, "rb") as f:
+        return b"\x00" in f.read(4096)
 
 
 @logs_bp.route("/api/file")

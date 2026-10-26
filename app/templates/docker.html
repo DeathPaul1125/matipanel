@@ -6,10 +6,8 @@
 {% if not available %}
 <div class="card">
   <h3>Docker no está instalado</h3>
-  <p class="muted">Instala Docker con:</p>
-  <pre class="terminal">curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker matipanel
-sudo systemctl restart matipanel</pre>
+  <p class="muted">Instálalo desde los repositorios de Debian (o en <a href="{{ url_for('packages.index') }}">Paquetes</a>) y recarga esta página:</p>
+  <pre class="terminal">sudo apt install docker.io</pre>
 </div>
 {% else %}
 <div class="grid grid-4">
@@ -43,11 +41,11 @@ sudo systemctl restart matipanel</pre>
   </table>
 </div>
 
-<div id="logs-modal" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center;">
-  <div style="background:var(--surface); border-radius:var(--radius-lg); width:90%; max-width:1000px; height:80vh; display:flex; flex-direction:column; overflow:hidden;">
+<div id="logs-modal" class="modal">
+  <div class="modal-box wide" style="height:80vh; display:flex; flex-direction:column; overflow:hidden; padding:0;">
     <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
       <div class="mono" id="logs-title">logs</div>
-      <button class="btn" onclick="document.getElementById('logs-modal').style.display='none'">Cerrar</button>
+      <button class="btn" onclick="document.getElementById('logs-modal').classList.remove('open')">Cerrar</button>
     </div>
     <pre id="logs-content" class="terminal" style="flex:1; margin:0; border-radius:0;">Cargando…</pre>
   </div>
@@ -85,9 +83,9 @@ async function loadContainers() {
       <td><span class="pill ${cls}">${escapeHtml(c.state)}</span> <span class="small muted">${escapeHtml(c.status)}</span></td>
       <td class="small mono">${escapeHtml(c.ports || '—')}</td>
       <td>
-        <button class="btn btn-sm" onclick="dockerAction(${jsArg(c.id)},'start')">▶</button>
-        <button class="btn btn-sm" onclick="dockerAction(${jsArg(c.id)},'stop')">■</button>
-        <button class="btn btn-sm" onclick="dockerAction(${jsArg(c.id)},'restart')">↻</button>
+        <button class="btn btn-sm" title="Iniciar" onclick="dockerAction(${jsArg(c.id)},'start',${jsArg(c.name)})">▶</button>
+        <button class="btn btn-sm" title="Detener" onclick="dockerAction(${jsArg(c.id)},'stop',${jsArg(c.name)})">■</button>
+        <button class="btn btn-sm" title="Reiniciar" onclick="dockerAction(${jsArg(c.id)},'restart',${jsArg(c.name)})">↻</button>
         <button class="btn btn-sm" onclick="viewLogs(${jsArg(c.id)},${jsArg(c.name)})">logs</button>
       </td>
     </tr>`;
@@ -121,8 +119,17 @@ async function loadVolumes() {
   `).join('');
 }
 
-async function dockerAction(id, act) {
-  if (act === 'rm' && !await ui.confirm('¿Eliminar container ' + id + '?', {title: 'Eliminar container', danger: true, confirmText: 'Eliminar'})) return;
+const DOCKER_ACTIONS = {
+  start:   {verb: 'Iniciar',   text: '¿Iniciar el container {n}?'},
+  stop:    {verb: 'Detener',   text: '¿Detener el container {n}? El servicio que presta quedará fuera de línea.', danger: true},
+  restart: {verb: 'Reiniciar', text: '¿Reiniciar el container {n}? El servicio que presta se cortará unos segundos.', danger: true},
+  rm:      {verb: 'Eliminar',  text: '¿Eliminar el container {n}?', danger: true},
+};
+
+async function dockerAction(id, act, name) {
+  const a = DOCKER_ACTIONS[act];
+  if (a && !await ui.confirm(a.text.replace('{n}', name || id),
+    {title: a.verb + ' container', danger: !!a.danger, confirmText: a.verb})) return;
   const r = await fetch("{{ url_for('docker.action') }}", {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({container: id, action: act})
@@ -136,8 +143,8 @@ async function viewLogs(id, name) {
   const modal = document.getElementById('logs-modal');
   document.getElementById('logs-title').textContent = 'docker logs ' + name;
   document.getElementById('logs-content').textContent = 'Cargando…';
-  modal.style.display = 'flex';
-  const r = await fetch("/docker/api/logs/" + encodeURIComponent(id));
+  modal.classList.add('open');
+  const r = await fetch("{{ url_for('docker.logs', container='__ID__') }}".replace('__ID__', encodeURIComponent(id)));
   const d = await r.json();
   document.getElementById('logs-content').textContent = d.error || d.logs || '(vacío)';
   document.getElementById('logs-content').scrollTop = 999999;

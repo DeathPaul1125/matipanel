@@ -9,6 +9,7 @@ from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required, current_user
 from ..util import bytes_to_human as _bytes_to_human, run
 from ..distro import detect
+from .. import metrics
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -16,14 +17,18 @@ dashboard_bp = Blueprint("dashboard", __name__)
 _UPDATES_TTL = 1800
 _updates_cache = {"at": 0.0, "count": None}
 
-# Historial: una muestra cada 5 s, última hora.
-# ponytail: en memoria (se pierde al reiniciar el servicio); persistir en disco si se necesita más historia.
+# Historial: una muestra cada 5 s, guardada en SQLite (app/metrics.py, 7 días).
+# _history es la última hora en memoria, para respuestas rápidas y para el módulo multi-servidor.
 SAMPLE_EVERY = 5
+RANGES = (300, 900, 3600, 21600, 86400, 604800)
 _history = deque(maxlen=720)
 _sampler_started = False
 
 
 def _sample_loop():
+    metrics.open_db()
+    _history.extend(metrics.recent(720))  # retomar la última hora tras un reinicio
+    last_prune = 0.0
     net0, io0, t0 = psutil.net_io_counters(), psutil.disk_io_counters(), time.time()
     psutil.cpu_percent(None)
     while True:
@@ -31,7 +36,7 @@ def _sample_loop():
         try:
             net, io, t = psutil.net_io_counters(), psutil.disk_io_counters(), time.time()
             dt = max(t - t0, 0.001)
-            _history.append({
+            sample = {
                 "t": round(t, 1),
                 "cpu": round(psutil.cpu_percent(None), 1),
                 "mem": psutil.virtual_memory().percent,
@@ -42,7 +47,12 @@ def _sample_loop():
                 "wr": max(0, (io.write_bytes - io0.write_bytes) / dt) if io and io0 else 0,
                 "procs": len(psutil.pids()),
                 "load": round(psutil.getloadavg()[0], 2),
-            })
+            }
+            _history.append(sample)
+            metrics.insert(sample)
+            if t - last_prune > 3600:
+                metrics.prune(t)
+                last_prune = t
             net0, io0, t0 = net, io, t
         except Exception:  # el muestreo nunca debe morir por un error puntual
             pass
@@ -142,9 +152,16 @@ def stats():
 @dashboard_bp.route("/api/history")
 @login_required
 def history():
-    """Muestras posteriores a `since` (incremental); sin `since`, toda la última hora."""
-    since = request.args.get("since", 0, type=float)
-    return jsonify({"every": SAMPLE_EVERY, "points": [p for p in _history if p["t"] > since]})
+    """Historial del rango pedido (segundos), promediado si es largo; `since` = solo lo nuevo."""
+    rng = request.args.get("range", 900, type=int)
+    if rng not in RANGES:
+        rng = 900
+    since = request.args.get("since", 0, type=float) or None
+    try:
+        bucket, points = metrics.query(rng, since=since, min_bucket=SAMPLE_EVERY)
+    except Exception:  # base aún no abierta (primeros segundos) → memoria
+        bucket, points = SAMPLE_EVERY, [p for p in _history if p["t"] > (since or 0)]
+    return jsonify({"every": bucket, "range": rng, "points": points})
 
 
 @dashboard_bp.route("/api/overview")

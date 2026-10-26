@@ -64,7 +64,7 @@ En la tarjeta **Texto y espaciado**:
 En la tarjeta **Dashboard**:
 
 1. En **Secciones visibles**, marca o desmarca: **Tacómetros**, **Historial**, **Información del sistema**, **Procesos y almacenamiento** y **Accesos rápidos**.
-2. En **Rango del historial**, elige **5 min**, **15 min** o **1 hora** para las gráficas.
+2. En **Rango del historial**, elige **5 min**, **15 min**, **1 h**, **6 h**, **24 h** o **7 días** para las gráficas.
 
 Ver [Dashboard](10-dashboard.md) para saber qué muestra cada sección.
 

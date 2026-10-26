@@ -57,6 +57,28 @@ def _authenticate_pam(username, password):
     return check()
 
 
+@auth_bp.errorhandler(totp.StoreError)
+def _tfa_store_error(e):
+    # Falla cerrado: si 2fa.json existe pero no se puede leer, nadie entra.
+    flash(str(e), "error")
+    if current_user.is_authenticated:
+        return render_template("security.html", tfa_enabled=False,
+                               has_pyotp=totp.HAS_PYOTP, tfa_error=True), 500
+    session.pop("pending_2fa_user", None)
+    return render_template("login.html"), 500
+
+
+def _is_recovery_code(code):
+    return len(code) == 8 and all(c in "0123456789abcdef" for c in code.lower())
+
+
+def _check_second_factor(username, code):
+    """Valida un código TOTP o de recuperación (este último se consume)."""
+    is_recovery = _is_recovery_code(code)
+    ok = totp.consume_recovery(username, code) if is_recovery else totp.verify(username, code)
+    return ok, is_recovery
+
+
 def _too_many_attempts():
     if limiter.blocked(request.remote_addr):
         flash("Demasiados intentos fallidos. Espera unos minutos.", "error")
@@ -88,6 +110,7 @@ def login():
             session["pending_2fa_user"] = username
             return redirect(url_for("auth.login_2fa"))
 
+        session.permanent = True  # aplica PERMANENT_SESSION_LIFETIME
         login_user(User(username), remember=False)
         return redirect(url_for("dashboard.index"))
 
@@ -105,16 +128,18 @@ def login_2fa():
             return render_template("login_2fa.html"), 429
 
         code = request.form.get("code", "").strip().replace(" ", "")
-        is_recovery = len(code) == 8 and all(c in "0123456789abcdef" for c in code.lower())
-
-        ok = totp.consume_recovery(username, code) if is_recovery else totp.verify(username, code)
+        ok, is_recovery = _check_second_factor(username, code)
 
         if ok:
             limiter.reset(request.remote_addr)
             session.pop("pending_2fa_user", None)
+            session.permanent = True  # aplica PERMANENT_SESSION_LIFETIME
             login_user(User(username), remember=False)
             if is_recovery:
-                flash("Usaste un código de recuperación. Genera uno nuevo en Seguridad.", "info")
+                left = totp.recovery_remaining(username)
+                flash(f"Usaste un código de recuperación; te quedan {left}. "
+                      "Para obtener códigos nuevos, desactiva y vuelve a activar 2FA en Seguridad.",
+                      "info" if left > 2 else "error")
             return redirect(url_for("dashboard.index"))
         limiter.fail(request.remote_addr)
         flash("Código inválido.", "error")
@@ -149,9 +174,13 @@ def tfa_setup():
         flash("2FA ya está activo. Desactívalo primero para reconfigurarlo.", "info")
         return redirect(url_for("auth.security"))
     secret, codes = totp.generate_secret(current_user.username)
+    return _render_setup(secret, codes)
+
+
+def _render_setup(secret, codes, error=None):
     uri = totp.provisioning_uri(current_user.username, secret)
-    return render_template("tfa_setup.html",
-                           secret=secret, codes=codes, qr_svg=_qr_svg(uri))
+    return render_template("tfa_setup.html", secret=secret, codes=codes,
+                           qr_svg=_qr_svg(uri), error=error)
 
 
 def _qr_svg(data):
@@ -167,17 +196,35 @@ def _qr_svg(data):
 @auth_bp.route("/security/2fa/activate", methods=["POST"])
 @login_required
 def tfa_activate():
-    code = request.form.get("code", "").strip()
+    code = request.form.get("code", "").strip().replace(" ", "")
     if totp.activate(current_user.username, code):
         flash("2FA activado correctamente. Guarda tus códigos de recuperación.", "success")
-    else:
-        flash("Código inválido. Intenta de nuevo.", "error")
-    return redirect(url_for("auth.security"))
+        return redirect(url_for("auth.security"))
+    # Reintento con el MISMO secret: el QR ya escaneado sigue siendo válido.
+    secret = totp.pending_secret(current_user.username)
+    if not secret:
+        flash("No hay una configuración de 2FA pendiente. Empieza de nuevo.", "error")
+        return redirect(url_for("auth.security"))
+    codes = totp.valid_recovery_codes(current_user.username, request.form.getlist("codes"))
+    return _render_setup(secret, codes,
+                         error="Código inválido. Revisa la hora del teléfono y vuelve a intentarlo."), 400
 
 
 @auth_bp.route("/security/2fa/disable", methods=["POST"])
 @login_required
 def tfa_disable():
+    if _too_many_attempts():
+        return redirect(url_for("auth.security"))
+    code = request.form.get("code", "").strip().replace(" ", "")
+    if not totp.is_enabled(current_user.username):
+        return redirect(url_for("auth.security"))
+    ok, _ = _check_second_factor(current_user.username, code) if code else (False, False)
+    if not ok:
+        limiter.fail(request.remote_addr)
+        flash("Código inválido: para desactivar 2FA ingresa el código actual de tu app "
+              "o un código de recuperación.", "error")
+        return redirect(url_for("auth.security"))
+    limiter.reset(request.remote_addr)
     totp.disable(current_user.username)
     flash("2FA desactivado.", "info")
     return redirect(url_for("auth.security"))
