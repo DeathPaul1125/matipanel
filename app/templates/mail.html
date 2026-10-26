@@ -1,0 +1,563 @@
+{% extends "base.html" %}
+{% block title %}Correo{% endblock %}
+{% block heading %}Correo (Postfix + Dovecot){% endblock %}
+
+{% block content %}
+<section class="health" id="m-head" data-level="ok" style="margin-bottom:12px;">
+  <span class="led lg" id="m-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="m-title">Consultando el servidor de correo…</h1>
+    <div class="health-sub" id="m-sub"></div>
+    <div id="m-ports" style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;"></div>
+  </div>
+  <div class="health-chips">
+    <button class="btn" onclick="loadStatus()">Refrescar</button>
+  </div>
+</section>
+
+<div class="card" id="install-postfix" hidden>
+  <div class="card-head"><h3>Postfix no está instalado</h3></div>
+  <p class="muted" style="margin-top:0;"><b>Postfix</b> es el servidor SMTP: recibe correo de internet para tus dominios,
+    entrega el correo a los buzones locales y envía los mensajes que salen del servidor (avisos del sistema,
+    formularios de tus sitios, etc.). Se instala como <b>Sitio de Internet</b> usando como nombre de correo
+    <span class="mono" id="inst-fqdn">el nombre completo del servidor</span>.</p>
+  <button class="btn btn-primary install-btn" data-what="postfix" onclick="install('postfix')">Instalar Postfix</button>
+  <pre class="terminal install-cmd" hidden>apt install postfix</pre>
+</div>
+
+<div class="card" id="install-dovecot" hidden>
+  <div class="card-head"><h3>Dovecot no está instalado</h3></div>
+  <p class="muted" style="margin-top:0;"><b>Dovecot</b> es el servidor IMAP y POP3: permite que los usuarios lean su correo
+    desde Thunderbird, Outlook o el celular. Solo lo necesitas si este servidor guarda buzones de usuarios;
+    para un servidor que solo envía avisos basta con Postfix.</p>
+  <button class="btn btn-primary install-btn" data-what="dovecot" onclick="install('dovecot')">Instalar Dovecot</button>
+  <pre class="terminal install-cmd" hidden>apt install dovecot-imapd dovecot-pop3d</pre>
+</div>
+
+<div class="tabs" id="m-tabs" hidden>
+  <button class="tab" data-tab="postfix" data-needs="postfix" onclick="selectTab('postfix')">Postfix</button>
+  <button class="tab" data-tab="queue" data-needs="postfix" onclick="selectTab('queue')">Cola de correo</button>
+  <button class="tab" data-tab="aliases" data-needs="postfix" onclick="selectTab('aliases')">Alias</button>
+  <button class="tab" data-tab="dovecot" data-needs="dovecot" onclick="selectTab('dovecot')">Dovecot</button>
+  <button class="tab" data-tab="log" data-needs="any" onclick="selectTab('log')">Registro</button>
+  <button class="tab" data-tab="test" data-needs="postfix" onclick="selectTab('test')">Enviar prueba</button>
+</div>
+
+{# ── Postfix ── #}
+<div class="tab-panel" id="tab-postfix" hidden>
+  <div class="card">
+    <div class="card-head">
+      <h3>Configuración de Postfix</h3>
+      <div class="toolbar" style="margin:0;">
+        <button class="btn btn-sm" onclick="svc('postfix','check')">Comprobar config</button>
+        <button class="btn btn-sm" onclick="svc('postfix','reload')">Recargar</button>
+        <button class="btn btn-sm" onclick="svc('postfix','restart')">Reiniciar</button>
+        <button class="btn btn-sm" id="pf-startstop" onclick="svcToggle('postfix')">Detener</button>
+        <a class="btn btn-sm" href="{{ url_for('files.index') }}?edit={{ main_cf | urlencode }}">Editar main.cf</a>
+        <a class="btn btn-sm" href="{{ url_for('files.index') }}?edit={{ '/etc/postfix/master.cf' | urlencode }}">Editar master.cf</a>
+      </div>
+    </div>
+    <p class="muted small" style="margin-top:0;">Se guardan con <code>postconf -e</code> (con copia
+      <code>main.cf.matipanel.bak</code>), se valida con <code>postfix check</code> y se recarga Postfix.
+      Si la validación falla, se restaura el archivo anterior.</p>
+    <div class="grid grid-2" style="margin:0;" id="pf-form">
+      {% for key, label, help, ph in params %}
+      <label class="form-row"><span>{{ label }}</span>
+        {% if key == 'inet_protocols' %}
+        <select class="input mono" id="pf-{{ key }}" data-key="{{ key }}">
+          {% for p in inet_protocols %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+        </select>
+        {% else %}
+        <input class="input mono" id="pf-{{ key }}" data-key="{{ key }}" placeholder="{{ ph }}" autocomplete="off" spellcheck="false">
+        {% endif %}
+        <small class="muted">{{ help }}</small>
+        <small class="pf-err" id="pf-err-{{ key }}" style="color:var(--err);" hidden></small>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="loadConfig()">Descartar cambios</button>
+      <button class="btn btn-primary" id="pf-save" onclick="saveConfig()">Guardar y aplicar</button>
+    </div>
+  </div>
+</div>
+
+{# ── Cola ── #}
+<div class="tab-panel" id="tab-queue" hidden>
+  <div class="card">
+    <div class="card-head">
+      <h3>Cola de correo <span class="muted small" id="q-count"></span></h3>
+      <div class="toolbar" style="margin:0;">
+        <input type="text" id="q-filter" class="input" placeholder="Filtrar por ID, remitente o destino…">
+        <button class="btn btn-sm" onclick="loadQueue()">Refrescar</button>
+        <button class="btn btn-sm btn-primary" onclick="queueFlush()">Reintentar envío</button>
+        <button class="btn btn-sm btn-danger" onclick="queueDeleteAll()">Eliminar todo</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="lx" id="q-table">
+        <thead><tr><th>ID</th><th>Cola</th><th>Llegada</th><th>Tamaño</th><th>Remitente</th><th>Destinatarios</th><th>Motivo</th><th>Acciones</th></tr></thead>
+        <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="small muted">«deferred» = diferido (se reintentará); «hold» = retenido (no se envía hasta liberarlo);
+      «active» = enviándose ahora.</p>
+  </div>
+</div>
+
+{# ── Alias ── #}
+<div class="tab-panel" id="tab-aliases" hidden>
+  <div class="card">
+    <div class="card-head">
+      <h3>Alias de correo <span class="muted small mono">{{ aliases_path }}</span></h3>
+      <div class="toolbar" style="margin:0;">
+        <button class="btn btn-sm" onclick="loadAliases()">Refrescar</button>
+        <a class="btn btn-sm" href="{{ url_for('files.index') }}?edit={{ aliases_path | urlencode }}">Editar archivo</a>
+        <button class="btn btn-sm btn-primary" onclick="editAlias(null)">+ Nuevo alias</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="lx" id="al-table">
+        <thead><tr><th>Alias</th><th>Destinos</th><th>Línea</th><th>Acciones</th></tr></thead>
+        <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="small muted">Al guardar se crea la copia <code>aliases.matipanel.bak</code>, se ejecuta <code>newaliases</code>
+      y se conservan los comentarios del archivo. Las entradas con tuberías (<code>|comando</code>) se editan desde el archivo.</p>
+  </div>
+</div>
+
+{# ── Dovecot ── #}
+<div class="tab-panel" id="tab-dovecot" hidden>
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h3>Dovecot (IMAP / POP3)</h3>
+        <div class="toolbar" style="margin:0;">
+          <button class="btn btn-sm" onclick="svc('dovecot','check')">Comprobar config</button>
+          <button class="btn btn-sm btn-primary" onclick="svc('dovecot','restart')">Reiniciar</button>
+          <button class="btn btn-sm" id="dc-startstop" onclick="svcToggle('dovecot')">Detener</button>
+        </div>
+      </div>
+      <dl class="kv" style="grid-template-columns: minmax(0, 1fr);">
+        <div><dt>Configuración</dt><dd id="dc-valid">—</dd></div>
+        <div><dt>Protocolos</dt><dd class="mono" id="dc-protocols">—</dd></div>
+        <div><dt>Ubicación del buzón</dt><dd class="mono" id="dc-location">—</dd></div>
+        <div><dt>SSL / TLS</dt><dd>
+          <span id="dc-ssl">—</span>
+          <div class="seg" id="dc-ssl-seg" style="margin-left:8px;">
+            <button data-v="yes" onclick="setSsl('yes')">Sí</button>
+            <button data-v="required" onclick="setSsl('required')">Obligatorio</button>
+            <button data-v="no" onclick="setSsl('no')">No</button>
+          </div>
+        </dd></div>
+      </dl>
+      <p class="small muted">Los protocolos dependen de los paquetes instalados (<code>dovecot-imapd</code>,
+        <code>dovecot-pop3d</code>). El SSL se cambia en <code>conf.d/10-ssl.conf</code>, se valida con
+        <code>doveconf -n</code> y se reinicia Dovecot.</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Archivos de configuración</h3></div>
+      <div class="table-wrap">
+        <table class="lx" id="dc-files"><tbody><tr><td class="muted center">Cargando…</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+  <details class="card">
+    <summary style="cursor:pointer; font-weight:600; font-size:13px;">Configuración efectiva (<code>doveconf -n</code>)</summary>
+    <pre class="terminal output" id="dc-config" style="margin-top:12px;">—</pre>
+  </details>
+</div>
+
+{# ── Registro ── #}
+<div class="tab-panel" id="tab-log" hidden>
+  <div class="card">
+    <div class="card-head">
+      <h3>Registro de correo <span class="muted small mono" id="log-src"></span></h3>
+      <div class="toolbar" style="margin:0;">
+        <div class="seg" id="log-seg">
+          <button data-v="auto" class="active" onclick="loadLog('auto')">Automático</button>
+          <button data-v="file" onclick="loadLog('file')">mail.log</button>
+          <button data-v="journal" onclick="loadLog('journal')">journal</button>
+        </div>
+        <input type="text" id="log-filter" class="input" placeholder="Filtrar líneas…">
+        <button class="btn btn-sm" onclick="loadLog()">Refrescar</button>
+      </div>
+    </div>
+    <pre class="terminal output" id="log-out" style="max-height:60vh;">Cargando…</pre>
+  </div>
+</div>
+
+{# ── Prueba ── #}
+<div class="tab-panel" id="tab-test" hidden>
+  <div class="card" style="max-width:720px;">
+    <div class="card-head"><h3>Enviar correo de prueba</h3></div>
+    <p class="muted small" style="margin-top:0;">Se envía con <code>sendmail -t</code> desde este servidor. Después revisa
+      la pestaña <b>Cola de correo</b> (si queda diferido) y <b>Registro</b> para ver qué respondió el servidor de destino.</p>
+    <label class="form-row"><span>Para</span><input class="input mono" id="t-to" type="email" placeholder="tu.cuenta@ejemplo.gob.gt" autocomplete="off"></label>
+    <label class="form-row"><span>Asunto</span><input class="input" id="t-subject" maxlength="200" value="Prueba de correo desde MatiPanel"></label>
+    <label class="form-row"><span>Mensaje</span><textarea class="input" id="t-body" rows="6">Hola:
+
+Este es un correo de prueba enviado desde MatiPanel. Si lo recibiste, el servidor puede enviar correo.</textarea></label>
+    <div class="form-actions"><button class="btn btn-primary" id="t-send" onclick="sendTest()">Enviar</button></div>
+  </div>
+</div>
+
+<div class="modal" id="out-modal">
+  <div class="modal-box wide">
+    <h3 id="out-title">Salida</h3>
+    <pre class="terminal output" id="out-content"></pre>
+    <div class="form-actions"><button class="btn" onclick="closeModal('out-modal')">Cerrar</button></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = "{{ url_for('mail.index') }}";
+const EDIT_URL = "{{ url_for('files.index') }}?edit=";
+const api = p => BASE + 'api/' + p;
+let st = null, curTab = null, queueItems = [], logSource = 'auto', logText = '';
+const loaded = {};
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function showOutput(title, text) {
+  document.getElementById('out-title').textContent = title;
+  document.getElementById('out-content').textContent = text || '(sin salida)';
+  document.getElementById('out-modal').classList.add('open');
+}
+function report(d, okTitle) {
+  if (d.ok) { if (d.output) showOutput(okTitle, d.output); else ui.toast(okTitle); }
+  else if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
+  else ui.alert(d.error || 'Error desconocido', { title: 'Error', icon: 'error' });
+}
+async function getJSON(url) {
+  try { return await (await fetch(url)).json(); }
+  catch (e) { return { error: String(e) }; }
+}
+function fmtSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+function fmtDate(ts) { return ts ? new Date(ts * 1000).toLocaleString('es') : '—'; }
+function emptyRow(cols, text) { return `<tr><td colspan="${cols}" class="muted center">${escapeHtml(text)}</td></tr>`; }
+
+/* Estado */
+function head(level, title, sub) {
+  document.getElementById('m-head').dataset.level = level;
+  document.getElementById('m-led').className = 'led lg ' + (level === 'ok' ? '' : level);
+  document.getElementById('m-title').textContent = title;
+  document.getElementById('m-sub').textContent = sub || '';
+}
+
+function svcText(name, s) {
+  if (!s.installed) return name + ': no instalado';
+  return `${name} ${s.version ? s.version.split(' ')[0] + ' ' : ''}— ${s.active}, arranque ${s.enabled}`;
+}
+
+async function loadStatus() {
+  const d = await getJSON(api('status'));
+  if (d.error) { head('err', 'No se pudo consultar el estado', d.error); return; }
+  st = d;
+  const pf = d.postfix, dc = d.dovecot;
+  const failed = [pf, dc].some(s => s.installed && s.active === 'failed');
+  if (!pf.installed && !dc.installed) head('warn', 'No hay servidor de correo instalado', 'Instala Postfix para enviar y recibir correo.');
+  else if (failed) head('err', 'Un servicio de correo ha fallado', svcText('Postfix', pf) + ' · ' + svcText('Dovecot', dc));
+  else if (pf.installed && pf.active !== 'active') head('warn', 'Postfix está detenido', svcText('Postfix', pf) + ' · ' + svcText('Dovecot', dc));
+  else if (dc.installed && dc.active !== 'active') head('warn', 'Dovecot está detenido', svcText('Postfix', pf) + ' · ' + svcText('Dovecot', dc));
+  else head('ok', 'Correo funcionando', svcText('Postfix', pf) + ' · ' + svcText('Dovecot', dc));
+
+  const names = { 25: 'SMTP', 465: 'SMTPS', 587: 'Submission', 110: 'POP3', 995: 'POP3S', 143: 'IMAP', 993: 'IMAPS' };
+  document.getElementById('m-ports').innerHTML = d.ports.map(p =>
+    `<span class="pill ${p.listening ? 'ok' : 'mute'}" title="${p.listening ? 'En escucha' : 'Cerrado'}">${escapeHtml(p.port)} ${escapeHtml(names[p.port] || '')}</span>`).join('');
+
+  document.getElementById('inst-fqdn').textContent = d.hostname;
+  document.getElementById('install-postfix').hidden = pf.installed;
+  document.getElementById('install-dovecot').hidden = dc.installed;
+  document.querySelectorAll('.install-btn').forEach(b => b.hidden = !d.apt);
+  document.querySelectorAll('.install-cmd').forEach(b => b.hidden = d.apt);
+  document.getElementById('pf-startstop').textContent = pf.active === 'active' ? 'Detener' : 'Iniciar';
+  document.getElementById('dc-startstop').textContent = dc.active === 'active' ? 'Detener' : 'Iniciar';
+
+  const avail = { postfix: pf.installed, dovecot: dc.installed, any: pf.installed || dc.installed };
+  let first = null;
+  document.querySelectorAll('#m-tabs .tab').forEach(t => {
+    t.hidden = !avail[t.dataset.needs];
+    if (!t.hidden && !first) first = t.dataset.tab;
+  });
+  document.getElementById('m-tabs').hidden = !first;
+  const curBtn = curTab && document.querySelector(`#m-tabs .tab[data-tab="${curTab}"]`);
+  if (!curBtn || curBtn.hidden) curTab = null;
+  if (first && !curTab) selectTab(first);
+}
+
+function selectTab(tab) {
+  curTab = tab;
+  document.querySelectorAll('#m-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.hidden = p.id !== 'tab-' + tab);
+  if (loaded[tab]) return;
+  loaded[tab] = true;
+  ({ postfix: loadConfig, queue: loadQueue, aliases: loadAliases, dovecot: loadDovecot, log: () => loadLog(), test: () => {} })[tab]();
+}
+
+async function install(what) {
+  const label = what === 'postfix' ? 'Postfix' : 'Dovecot';
+  const extra = what === 'postfix'
+    ? ' Se configurará como «Sitio de Internet» con el nombre ' + (st ? st.hostname : '') + '. Si hay otro servidor de correo (por ejemplo exim4), apt lo reemplazará.'
+    : ' Se instalarán dovecot-imapd y dovecot-pop3d.';
+  if (!await ui.confirm('Se instalará ' + label + ' con apt.' + extra, { title: 'Instalar ' + label, confirmText: 'Instalar' })) return;
+  const btn = document.querySelector(`.install-btn[data-what="${what}"]`);
+  btn.disabled = true; btn.textContent = 'Instalando… (puede tardar unos minutos)';
+  const d = await postJSON(api('install'), { what });
+  btn.disabled = false; btn.textContent = 'Instalar ' + label;
+  report(d, label + ' instalado');
+  Object.keys(loaded).forEach(k => delete loaded[k]);
+  curTab = null;
+  loadStatus();
+}
+
+async function svc(service, action) {
+  const label = service === 'postfix' ? 'Postfix' : 'Dovecot';
+  if (action === 'restart' && !await ui.confirm(`¿Reiniciar ${label}? ` + (service === 'dovecot'
+      ? 'Los usuarios conectados por IMAP/POP3 se desconectarán un momento.' : 'Se cortarán las conexiones SMTP en curso.'),
+      { title: 'Reiniciar ' + label, confirmText: 'Reiniciar' })) return;
+  if (action === 'stop' && !await ui.confirm(`¿Detener ${label}? ` + (service === 'postfix'
+      ? 'El servidor dejará de enviar y recibir correo.' : 'Los usuarios no podrán leer su correo.'),
+      { title: 'Detener ' + label, danger: true, confirmText: 'Detener' })) return;
+  const d = await postJSON(api('service'), { service, action });
+  const titles = { check: 'Comprobación: configuración válida', reload: label + ' recargado', restart: label + ' reiniciado',
+                   start: label + ' iniciado', stop: label + ' detenido' };
+  report(d, titles[action]);
+  loadStatus();
+}
+function svcToggle(service) {
+  const active = st && st[service] && st[service].active === 'active';
+  svc(service, active ? 'stop' : 'start');
+}
+
+/* Postfix: configuración */
+const pfInputs = () => [...document.querySelectorAll('#pf-form [data-key]')];
+function clearFieldErrors() { document.querySelectorAll('.pf-err').forEach(e => { e.hidden = true; e.textContent = ''; }); }
+
+async function loadConfig() {
+  clearFieldErrors();
+  const d = await getJSON(api('postfix/config'));
+  if (d.error) { ui.alert(d.error, { title: 'No se pudo leer main.cf', icon: 'error' }); return; }
+  pfInputs().forEach(el => {
+    const v = d.values[el.dataset.key] ?? '';
+    if (el.tagName === 'SELECT' && v && ![...el.options].some(o => o.value === v)) el.add(new Option(v, v));
+    el.value = v;
+  });
+}
+
+async function saveConfig() {
+  clearFieldErrors();
+  const params = {};
+  pfInputs().forEach(el => params[el.dataset.key] = el.value.trim());
+  const btn = document.getElementById('pf-save');
+  btn.disabled = true;
+  const d = await postJSON(api('postfix/config'), { params });
+  btn.disabled = false;
+  if (d.fields) {
+    Object.entries(d.fields).forEach(([k, msg]) => {
+      const e = document.getElementById('pf-err-' + k);
+      if (e) { e.textContent = msg; e.hidden = false; }
+    });
+    ui.toast(d.error || 'Revisa los campos', 'error');
+    return;
+  }
+  if (d.ok && !(d.changed || []).length) { ui.toast('No hay cambios que guardar', 'info'); return; }
+  report(d, 'Configuración guardada y aplicada');
+  loadConfig(); loadStatus();
+}
+
+/* Cola */
+async function loadQueue() {
+  const tbody = document.querySelector('#q-table tbody');
+  const d = await getJSON(api('queue'));
+  if (d.error) { queueItems = []; tbody.innerHTML = emptyRow(8, d.error); document.getElementById('q-count').textContent = ''; return; }
+  queueItems = d.items;
+  document.getElementById('q-count').textContent = '(' + d.total + ' mensaje' + (d.total === 1 ? '' : 's')
+    + (d.total > d.items.length ? ', mostrando ' + d.items.length : '') + ')';
+  renderQueue();
+}
+
+function renderQueue() {
+  const q = document.getElementById('q-filter').value.toLowerCase();
+  const tbody = document.querySelector('#q-table tbody');
+  const items = queueItems.filter(m => !q || [m.id, m.sender, ...m.recipients].join(' ').toLowerCase().includes(q));
+  if (!items.length) { tbody.innerHTML = emptyRow(8, queueItems.length ? 'Sin resultados' : 'La cola está vacía'); return; }
+  const cls = { active: 'ok', deferred: 'warn', hold: 'mute', corrupt: 'err' };
+  tbody.innerHTML = items.map(m => `<tr>
+    <td class="mono small">${escapeHtml(m.id)}</td>
+    <td><span class="pill ${cls[m.queue] || 'mute'}">${escapeHtml(m.queue)}</span></td>
+    <td class="small">${escapeHtml(fmtDate(m.arrival))}</td>
+    <td class="small">${escapeHtml(fmtSize(m.size))}</td>
+    <td class="mono small">${escapeHtml(m.sender)}</td>
+    <td class="mono small">${m.recipients.map(escapeHtml).join('<br>')}</td>
+    <td class="small" style="max-width:320px;">${escapeHtml(m.reason || '—')}</td>
+    <td style="white-space:nowrap;">
+      <button class="btn btn-sm" onclick="viewMessage(${jsArg(m.id)})">Ver</button>
+      ${m.queue === 'hold'
+        ? `<button class="btn btn-sm" onclick="queueAction('release', ${jsArg(m.id)})">Liberar</button>`
+        : `<button class="btn btn-sm" onclick="queueAction('hold', ${jsArg(m.id)})">Retener</button>`}
+      <button class="btn btn-sm btn-danger" onclick="queueAction('delete', ${jsArg(m.id)})">Eliminar</button>
+    </td></tr>`).join('');
+}
+
+async function viewMessage(id) {
+  showOutput('Mensaje ' + id, 'Cargando…');
+  const d = await getJSON(api('queue/message') + '?id=' + encodeURIComponent(id));
+  document.getElementById('out-content').textContent = d.error
+    ? 'Error: ' + d.error
+    : d.content + (d.truncated ? '\n\n[… mensaje recortado a 200 KB …]' : '');
+}
+
+async function queueAction(action, id) {
+  if (action === 'delete' && !await ui.confirm('¿Eliminar el mensaje ' + id + ' de la cola? No se podrá recuperar.',
+      { title: 'Eliminar mensaje', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(api('queue/action'), { action, id });
+  if (d.ok) ui.toast({ delete: 'Mensaje eliminado', hold: 'Mensaje retenido', release: 'Mensaje liberado' }[action]);
+  else ui.alert(d.error, { title: 'Error', icon: 'error' });
+  loadQueue();
+}
+
+async function queueFlush() {
+  const d = await postJSON(api('queue/action'), { action: 'flush' });
+  if (d.ok) ui.toast('Se pidió a Postfix reintentar todos los mensajes diferidos');
+  else ui.alert(d.error, { title: 'Error', icon: 'error' });
+  setTimeout(loadQueue, 1500);
+}
+
+async function queueDeleteAll() {
+  if (!await ui.confirm('Se eliminarán TODOS los mensajes de la cola (activos, diferidos y retenidos). No se podrán recuperar.',
+      { title: 'Vaciar la cola', danger: true, confirmText: 'Eliminar todo', typed: 'ELIMINAR' })) return;
+  const d = await postJSON(api('queue/action'), { action: 'delete_all', confirm: 'ELIMINAR' });
+  report(d, 'Cola vaciada');
+  loadQueue();
+}
+
+/* Alias */
+let aliasList = [];
+async function loadAliases() {
+  const tbody = document.querySelector('#al-table tbody');
+  const d = await getJSON(api('aliases'));
+  if (d.error) { tbody.innerHTML = emptyRow(4, d.error); return; }
+  aliasList = d.aliases;
+  if (!aliasList.length) { tbody.innerHTML = emptyRow(4, 'Sin alias. Pulsa «+ Nuevo alias».'); return; }
+  tbody.innerHTML = aliasList.map((a, i) => `<tr>
+    <td class="mono">${escapeHtml(a.name)}</td>
+    <td class="mono small">${a.dest.map(escapeHtml).join('<br>') || '<span class="muted">—</span>'}</td>
+    <td class="muted small">${escapeHtml(a.line)}</td>
+    <td style="white-space:nowrap;">
+      <button class="btn btn-sm" onclick="editAlias(${i})">Editar</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteAlias(${jsArg(a.name)})">Eliminar</button>
+    </td></tr>`).join('');
+}
+
+async function editAlias(i) {
+  const a = i === null ? null : aliasList[i];
+  const v = await ui.form({
+    title: a ? 'Editar alias ' + a.name : 'Nuevo alias',
+    text: 'El correo enviado al alias se reenvía a sus destinos.',
+    fields: [
+      { name: 'name', label: 'Alias (parte antes de la @)', value: a ? a.name : '', placeholder: 'soporte', required: true,
+        help: 'Letras minúsculas, números y . _ + -' },
+      { name: 'dest', label: 'Destinos', type: 'textarea', rows: 3, value: a ? a.dest.join(', ') : '',
+        placeholder: 'root, admin@ejemplo.gob.gt', required: true,
+        help: 'Separados por coma: usuarios locales, correos, /ruta/archivo o :include:/ruta/lista' },
+    ],
+    validate: v => /^[a-z0-9_][a-z0-9._+-]{0,63}$/.test(v.name.trim().toLowerCase()) ? null : 'Nombre de alias inválido.',
+    confirmText: 'Guardar',
+  });
+  if (!v) return;
+  const d = await postJSON(api('aliases'), { action: 'save', orig: a ? a.name : '', name: v.name.trim(), dest: v.dest });
+  report(d, 'Alias guardado');
+  loadAliases();
+}
+
+async function deleteAlias(name) {
+  if (!await ui.confirm('¿Eliminar el alias ' + name + '? El correo dirigido a él dejará de entregarse.',
+      { title: 'Eliminar alias', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(api('aliases'), { action: 'delete', name });
+  report(d, 'Alias eliminado');
+  loadAliases();
+}
+
+/* Dovecot */
+async function loadDovecot() {
+  const d = await getJSON(api('dovecot'));
+  const files = document.querySelector('#dc-files tbody');
+  if (d.error) { files.innerHTML = emptyRow(1, d.error); return; }
+  document.getElementById('dc-valid').innerHTML = d.valid
+    ? '<span class="pill ok">válida</span>' : '<span class="pill err">con errores</span>';
+  document.getElementById('dc-protocols').textContent = (d.protocols || '—').replace(/"/g, '').trim() || '—';
+  document.getElementById('dc-location').textContent = d.mail_location || '— (valor por defecto)';
+  const sslCls = { yes: 'ok', required: 'ok', no: 'warn' };
+  const sslTxt = { yes: 'activado', required: 'obligatorio', no: 'desactivado' };
+  document.getElementById('dc-ssl').innerHTML = `<span class="pill ${sslCls[d.ssl] || 'mute'}">${escapeHtml(sslTxt[d.ssl] || d.ssl || '—')}</span>`;
+  document.querySelectorAll('#dc-ssl-seg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.v === d.ssl);
+    b.disabled = !d.ssl_conf;
+  });
+  document.getElementById('dc-config').textContent = d.config || '—';
+  files.innerHTML = d.files.length ? d.files.map(f => `<tr>
+    <td class="mono small">${escapeHtml(f)}</td>
+    <td class="right"><a class="btn btn-sm" href="${escapeHtml(EDIT_URL + encodeURIComponent(f))}">Editar</a></td>
+  </tr>`).join('') : emptyRow(2, 'Sin archivos');
+}
+
+async function setSsl(value) {
+  const msgs = {
+    yes: 'Dovecot aceptará conexiones cifradas (IMAPS/POP3S y STARTTLS) y también sin cifrar.',
+    required: 'Dovecot exigirá cifrado: no se aceptarán contraseñas por conexiones sin TLS.',
+    no: 'Dovecot dejará de usar cifrado. Las contraseñas viajarán en texto plano. No se recomienda.',
+  };
+  if (!await ui.confirm(msgs[value] + ' Se reiniciará Dovecot.',
+      { title: 'SSL de Dovecot', danger: value === 'no', confirmText: 'Aplicar' })) return;
+  const d = await postJSON(api('dovecot/ssl'), { ssl: value });
+  report(d, 'SSL actualizado');
+  loadDovecot(); loadStatus();
+}
+
+/* Registro */
+async function loadLog(source) {
+  if (source) logSource = source;
+  document.querySelectorAll('#log-seg button').forEach(b => b.classList.toggle('active', b.dataset.v === logSource));
+  const pre = document.getElementById('log-out');
+  pre.textContent = 'Cargando…';
+  const d = await getJSON(api('log') + '?source=' + logSource);
+  document.getElementById('log-src').textContent = d.source || '';
+  logText = d.error ? 'Error: ' + d.error : (d.log || d.note || '(vacío)');
+  renderLog();
+  pre.scrollTop = pre.scrollHeight;
+}
+function renderLog() {
+  const q = document.getElementById('log-filter').value.toLowerCase();
+  document.getElementById('log-out').textContent = q
+    ? logText.split('\n').filter(l => l.toLowerCase().includes(q)).join('\n') || '(sin coincidencias)'
+    : logText;
+}
+
+/* Prueba */
+async function sendTest() {
+  const to = document.getElementById('t-to').value.trim();
+  if (!/^[^\s@]+@[^\s@]+$/.test(to)) return ui.alert('Escribe una dirección de correo válida.', { title: 'Falta el destinatario', icon: 'warning' });
+  const btn = document.getElementById('t-send');
+  btn.disabled = true;
+  const d = await postJSON(api('test'), {
+    to, subject: document.getElementById('t-subject').value, body: document.getElementById('t-body').value,
+  });
+  btn.disabled = false;
+  if (d.ok) ui.alert('Postfix aceptó el mensaje para ' + to + '. Si no llega en unos minutos, revisa la cola, el registro y la carpeta de spam.',
+    { title: 'Correo enviado', icon: 'success' });
+  else ui.alert(d.error, { title: 'No se pudo enviar', icon: 'error' });
+  loaded.queue = false; loaded.log = false;
+}
+
+document.getElementById('q-filter').addEventListener('input', renderQueue);
+document.getElementById('log-filter').addEventListener('input', renderLog);
+loadStatus();
+</script>
+{% endblock %}

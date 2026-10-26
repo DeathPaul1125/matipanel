@@ -56,7 +56,7 @@
 <script>
 const DL_URL = "{{ url_for('backups.download', fname='__F__') }}";
 const DAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-let jobs = {}, scheduled = false;
+let jobs = {}, scheduled = false, editingJob = null;
 
 function fmtBytes(n) {
   for (const u of ['B', 'KB', 'MB', 'GB', 'TB']) { if (n < 1024) return n.toFixed(1) + ' ' + u; n /= 1024; }
@@ -100,6 +100,7 @@ async function load() {
 
 function openForm(isJob, job, name) {
   scheduled = isJob;
+  editingJob = name || null;
   document.getElementById('form-title').textContent = isJob ? (name ? 'Editar trabajo' : 'Nuevo trabajo programado') : 'Nuevo respaldo';
   document.getElementById('f-submit').textContent = isJob ? 'Guardar' : 'Crear';
   document.getElementById('f-sched').style.display = isJob ? '' : 'none';
@@ -127,10 +128,21 @@ async function submitForm() {
     data.keep = parseInt(document.getElementById('f-keep').value, 10);
     data.schedule = { type, time: document.getElementById('f-time').value };
     if (type === 'weekly') data.schedule.dow = parseInt(document.getElementById('f-dow').value, 10);
+    if (editingJob) data.overwrite = true;
+    else if (jobs[data.name]) {
+      if (!await ui.confirm(`Ya existe un trabajo programado llamado ${data.name}. ¿Reemplazar su configuración?`,
+        { title: 'Trabajo existente', danger: true, confirmText: 'Reemplazar' })) return;
+      data.overwrite = true;
+    }
   }
   const btn = document.getElementById('f-submit');
   btn.disabled = true; btn.textContent = 'Procesando…';
-  const d = await postJSON(url, data);
+  let d = await postJSON(url, data);
+  // Otro usuario lo creó mientras tanto: preguntar antes de pisarlo
+  if (!d.ok && d.exists && await ui.confirm(d.error + '. ¿Reemplazar su configuración?',
+      { title: 'Trabajo existente', danger: true, confirmText: 'Reemplazar' })) {
+    d = await postJSON(url, { ...data, overwrite: true });
+  } else if (!d.ok && d.exists) { btn.disabled = false; btn.textContent = 'Guardar'; return; }
   btn.disabled = false; btn.textContent = scheduled ? 'Guardar' : 'Crear';
   if (!d.ok) { ui.alert(d.error, { title: scheduled ? 'No se pudo guardar el trabajo' : 'No se pudo crear el respaldo', icon: 'error' }); return; }
   if (d.file) ui.toast('Respaldo creado: ' + d.file);
@@ -138,7 +150,7 @@ async function submitForm() {
 }
 
 async function runJob(name) {
-  if (!await ui.confirm(`¿Ejecutar ahora el trabajo ${name}? Puede tardar varios minutos.`, { title: 'Ejecutar trabajo', confirmText: 'Ejecutar' })) return;
+  if (!await ui.confirm(`¿Ejecutar ahora el trabajo ${name}? Puede tardar varios minutos. La copia se guarda como respaldo manual: no cuenta para "Conservar" ni se borra sola.`, { title: 'Ejecutar trabajo', confirmText: 'Ejecutar' })) return;
   const d = await postJSON("{{ url_for('backups.job_run') }}", { name });
   if (d.ok) ui.alert(d.output, { title: 'Trabajo completado', icon: 'success' });
   else ui.alert(d.error, { title: 'El trabajo falló', icon: 'error' });

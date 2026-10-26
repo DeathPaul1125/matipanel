@@ -19,7 +19,15 @@ CRON_LOG = "/var/log/matipanel-backups.log"
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
-FILE_RE = re.compile(r"^([A-Za-z0-9_-]{1,40})-(\d{8}-\d{6})\.tar\.gz$")
+# Manual: <nombre>-YYYYmmdd-HHMMSS.tar.gz · Programado: <trabajo>-auto-YYYYmmdd-HHMMSS.tar.gz.
+# Solo los "-auto-" de un trabajo entran en su retención; los manuales nunca se podan.
+FILE_RE = re.compile(r"^([A-Za-z0-9_-]{1,40}?)(-auto)?-(\d{8}-\d{6})\.tar\.gz$")
+AUTO_TAG = "-auto"
+
+
+def valid_name(name):
+    """Nombre de respaldo/trabajo. Prohíbe terminar en -auto (se confundiría con uno programado)."""
+    return bool(NAME_RE.match(name or "")) and not name.endswith(AUTO_TAG)
 EXCLUDE_RE = re.compile(r"^[A-Za-z0-9_.*?/\[\]-]{1,200}$")
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
@@ -52,12 +60,13 @@ def check_excludes(excludes):
     return excludes
 
 
-def create_backup(name, paths, excludes=()):
-    """Crea BACKUP_DIR/<name>-YYYYmmdd-HHMMSS.tar.gz. Retorna (ok, ruta | error)."""
-    if not NAME_RE.match(name or ""):
+def create_backup(name, paths, excludes=(), auto=False):
+    """Crea BACKUP_DIR/<name>[-auto]-YYYYmmdd-HHMMSS.tar.gz. Retorna (ok, ruta | error)."""
+    if not valid_name(name):
         return False, "Nombre inválido"
     os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
-    dest = os.path.join(BACKUP_DIR, f"{name}-{datetime.now():%Y%m%d-%H%M%S}.tar.gz")
+    tag = AUTO_TAG if auto else ""
+    dest = os.path.join(BACKUP_DIR, f"{name}{tag}-{datetime.now():%Y%m%d-%H%M%S}.tar.gz")
     if os.path.exists(dest):
         return False, "Ya existe un respaldo con ese nombre en este segundo; reintenta"
     cmd = ["tar", "-czf", dest, "-C", "/"] + [f"--exclude={e}" for e in excludes] \
@@ -83,7 +92,8 @@ def list_backups():
         if not m:
             continue
         st = os.stat(os.path.join(BACKUP_DIR, f))
-        items.append({"file": f, "job": m.group(1), "stamp": m.group(2), "size": st.st_size, "mtime": int(st.st_mtime)})
+        items.append({"file": f, "job": m.group(1), "auto": bool(m.group(2)), "stamp": m.group(3),
+                      "size": st.st_size, "mtime": int(st.st_mtime)})
     return sorted(items, key=lambda x: x["stamp"], reverse=True)
 
 
@@ -96,9 +106,9 @@ def backup_path(fname):
 
 
 def prune(name, keep):
-    """Borra los respaldos de <name> más antiguos que las últimas <keep> copias."""
+    """Borra las copias PROGRAMADAS (-auto-) de <name> más antiguas que las últimas <keep>."""
     removed = []
-    for b in [b for b in list_backups() if b["job"] == name][keep:]:
+    for b in [b for b in list_backups() if b["job"] == name and b["auto"]][keep:]:
         os.remove(os.path.join(BACKUP_DIR, b["file"]))
         removed.append(b["file"])
     return removed
@@ -148,7 +158,7 @@ def write_cron(jobs):
     lines = ["# Generado por MatiPanel (Respaldos). No editar a mano.",
              "SHELL=/bin/sh", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", ""]
     for name, job in sorted(jobs.items()):
-        if not NAME_RE.match(name):
+        if not valid_name(name):
             continue
         lines.append(f"{check_schedule(job['schedule'])} root cd {shlex.quote(APP_ROOT)} && "
                      f"{shlex.quote(py)} -m app.backup_cli {name} >> {CRON_LOG} 2>&1")
@@ -159,8 +169,12 @@ def write_cron(jobs):
     os.replace(tmp, CRON_FILE)
 
 
-def run_job(name):
-    """Ejecuta un trabajo guardado y poda copias viejas. Retorna (ok, mensaje)."""
+def run_job(name, scheduled=False):
+    """Ejecuta un trabajo guardado. Retorna (ok, mensaje).
+
+    scheduled=True (cron): copia <job>-auto-… y poda las programadas que sobren.
+    scheduled=False ("Ejecutar ahora"): copia manual, que la retención nunca borra.
+    """
     job = load_jobs().get(name)
     if not job:
         return False, f"Trabajo desconocido: {name}"
@@ -169,10 +183,10 @@ def run_job(name):
         excludes = check_excludes(job.get("excludes"))
     except ValueError as e:
         return False, str(e)
-    ok, msg = create_backup(name, paths, excludes)
+    ok, msg = create_backup(name, paths, excludes, auto=scheduled)
     if not ok:
         return False, msg
-    removed = prune(name, int(job.get("keep", 7)))
+    removed = prune(name, int(job.get("keep", 7))) if scheduled else []
     return True, msg + (f" (eliminados: {', '.join(removed)})" if removed else "")
 
 
@@ -209,8 +223,8 @@ def list_all():
 def create():
     d = request.get_json(silent=True) or {}
     name = str(d.get("name", ""))
-    if not NAME_RE.match(name):
-        return _err("Nombre inválido (letras, números, _ y -, máx. 40)")
+    if not valid_name(name):
+        return _err("Nombre inválido (letras, números, _ y -, máx. 40; sin terminar en -auto)")
     try:
         paths, excludes = check_paths(d.get("paths")), check_excludes(d.get("excludes"))
     except ValueError as e:
@@ -261,8 +275,8 @@ def restore():
 def job_save():
     d = request.get_json(silent=True) or {}
     name, keep = str(d.get("name", "")), d.get("keep")
-    if not NAME_RE.match(name):
-        return _err("Nombre inválido (letras, números, _ y -, máx. 40)")
+    if not valid_name(name):
+        return _err("Nombre inválido (letras, números, _ y -, máx. 40; sin terminar en -auto)")
     if not isinstance(keep, int) or isinstance(keep, bool) or not 1 <= keep <= 365:
         return _err("Copias a conservar: entre 1 y 365")
     try:
@@ -270,6 +284,9 @@ def job_save():
                "keep": keep, "schedule": d.get("schedule")}
         check_schedule(job["schedule"])
         jobs = load_jobs()
+        if name in jobs and d.get("overwrite") is not True:
+            return jsonify({"ok": False, "exists": True,
+                            "error": f"Ya existe un trabajo llamado {name}"}), 409
         jobs[name] = job
         save_jobs(jobs)
     except ValueError as e:
@@ -300,5 +317,5 @@ def job_run():
     name = str((request.get_json(silent=True) or {}).get("name", ""))
     if not NAME_RE.match(name):
         return _err("Nombre inválido")
-    ok, msg = run_job(name)
+    ok, msg = run_job(name)  # manual: no poda
     return jsonify({"ok": True, "output": msg}) if ok else _err(msg, 500)

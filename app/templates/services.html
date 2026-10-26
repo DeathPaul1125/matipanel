@@ -60,9 +60,9 @@ function render() {
         <td><span class="pill ${s.enabled === 'enabled' ? 'ok' : 'mute'}">${escapeHtml(s.enabled || '—')}</span></td>
         <td>${escapeHtml(s.description)}</td>
         <td>
-          <button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'start')">▶</button>
-          <button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'stop')">■</button>
-          <button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'restart')">↻</button>
+          <button class="btn btn-sm" title="Iniciar" onclick="action(${jsArg(s.unit)}, 'start')">▶</button>
+          <button class="btn btn-sm" title="Detener" onclick="action(${jsArg(s.unit)}, 'stop')">■</button>
+          <button class="btn btn-sm" title="Reiniciar" onclick="action(${jsArg(s.unit)}, 'restart')">↻</button>
           ${s.enabled === 'enabled'
             ? `<button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'disable')" title="No iniciar al arrancar">⏻ off</button>`
             : s.enabled === 'disabled'
@@ -73,9 +73,18 @@ function render() {
   }).join('');
 }
 
+const ACTION_TEXT = {
+  start:   ['Iniciar', '¿Iniciar el servicio {u}?'],
+  stop:    ['Detener', '¿Detener el servicio {u}? Dejará de funcionar hasta que lo inicies de nuevo.'],
+  restart: ['Reiniciar', '¿Reiniciar el servicio {u}? Se cortará unos segundos.'],
+  enable:  ['Habilitar al arranque', '¿Habilitar {u} al arranque? Se iniciará solo cada vez que arranque el servidor.'],
+  disable: ['Deshabilitar al arranque', '¿Deshabilitar {u} al arranque? No se iniciará solo la próxima vez que arranque el servidor.'],
+};
+
 async function action(unit, act) {
-  if (!await ui.confirm(`¿Ejecutar ${act} en ${unit}?`,
-      { title: 'Servicio ' + unit, danger: ['stop', 'restart', 'disable'].includes(act), confirmText: act })) return;
+  const [verb, text] = ACTION_TEXT[act] || [act, '¿Ejecutar ' + act + ' en {u}?'];
+  if (!await ui.confirm(text.replace('{u}', unit),
+      { title: verb + ' · ' + unit, danger: ['stop', 'restart', 'disable'].includes(act), confirmText: verb })) return;
   const d = await postJSON("{{ url_for('services.action') }}", { unit, action: act });
   if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
   setTimeout(loadServices, 600);

@@ -13,7 +13,7 @@
     <input type="text" id="filter" placeholder="Filtrar usuario…" class="input">
     <select id="type-filter" class="input">
       <option value="">Todos</option>
-      <option value="regular" selected>Regulares (UID ≥ 1000)</option>
+      <option value="regular" selected>Regulares (UID ≥ 1000, sin nobody)</option>
       <option value="sistema">Sistema</option>
     </select>
     <button class="btn btn-primary" onclick="openCreateUser()">+ Nuevo usuario</button>
@@ -30,8 +30,8 @@
   <div class="toolbar">
     <input type="text" id="gfilter" placeholder="Filtrar grupo…" class="input">
     <select id="gtype-filter" class="input">
-      <option value="">Todos</option>
-      <option value="regular" selected>Regulares (GID ≥ 1000)</option>
+      <option value="" selected>Todos</option>
+      <option value="regular">Regulares (GID ≥ 1000)</option>
       <option value="sistema">Sistema</option>
     </select>
     <button class="btn btn-primary" onclick="openModal('m-group')">+ Nuevo grupo</button>
@@ -158,6 +158,8 @@ async function load() {
   const [ru, rg] = await Promise.all([fetch(API + 'users'), fetch(API + 'groups')]);
   const du = await ru.json(), dg = await rg.json();
   users = du.users; me = du.me; groups = dg.groups;
+  // nobody (UID 65534) es una cuenta del sistema aunque su UID sea ≥ 1000
+  users.forEach(u => { if (u.uid === 65534) u.type = 'sistema'; });
   render(); renderGroups();
 }
 
