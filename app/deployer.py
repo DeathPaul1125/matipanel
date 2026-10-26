@@ -150,7 +150,9 @@ def persist_volumes(cfg):
 
 
 def db_name(cfg):
-    return "app" if is_php(cfg) else "laravel"
+    """Nombre de la base y de su usuario. Se fija al crear la app y no sigue al tipo de proyecto:
+    MariaDB/PostgreSQL solo lo aplican al inicializar el volumen. Apps antiguas: «laravel»."""
+    return cfg.get("db_name") or "laravel"
 
 
 def valid_artisan(cmd):
@@ -1632,6 +1634,7 @@ def finish_create(name, opts):
             raise KeyError(name)
         cfg.update(opts)
         cfg["draft"] = False
+        cfg.setdefault("db_name", "app" if is_php(cfg) else "laravel")
         sec = load_secrets(name)
         if cfg["database"] in ("mariadb", "postgres") and not sec.get("db_password"):
             sec.update(db_password=new_password(), db_root_password=new_password())
@@ -1851,7 +1854,7 @@ if __name__ == "__main__":
     df = render_dockerfile_php("8.3", ["intl", "bad;rm"], "app")
     assert "FROM serversideup/php:8.3-fpm-apache" in df and "RUN cd app && composer install --no-dev" in df
     assert "install-php-extensions intl\n" in df and "composer" not in render_dockerfile_php("8.4", (), None)
-    pc = {"name": "quetzal", "kind": "php", "slot_base": 20010, "active_slot": "blue", "database": "mariadb",
+    pc = {"name": "quetzal", "kind": "php", "db_name": "app", "slot_base": 20010, "active_slot": "blue", "database": "mariadb",
           "docroot": "", "env_path": "app/config/.env", "persist": ["assets/uploads", "app/logs"], "worker": True}
     doc = json.loads(render_compose(pc, "/apps/quetzal", {"blue": "matipanel/quetzal:abc1234"}).split("\n", 1)[1])
     app_svc = doc["services"]["app_blue"]
@@ -1865,6 +1868,8 @@ if __name__ == "__main__":
                    "LDB_HOST": "db", "LDB_PASS": "P" * 32}, upd
     assert set(service_env(pc, sec)) == {"DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"}
     assert dict(parse_env(db_env(pc, sec))[0])["MARIADB_DATABASE"] == "app"
+    legacy = {k: v for k, v in pc.items() if k != "db_name"}  # creada como Laravel y cambiada a PHP
+    assert service_env(legacy, sec, "LDB_USER=x\n") == {"LDB_USER": "laravel"} and db_name(legacy) == "laravel"
     filled = dict(parse_env(fill_db_placeholders(pc, sec, "LDB_HOST='localhost'\nLDB_NAME='db_quetzal'\nLDB_USER='root'\n"
                                                  "LDB_PASS=''\nDB_HOST=ext.local\nDB_NAME=prod\nDB_PASS=\n"))[0])
     assert filled == {"LDB_HOST": "db", "LDB_NAME": "app", "LDB_USER": "app", "LDB_PASS": "P" * 32,
