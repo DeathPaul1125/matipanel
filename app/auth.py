@@ -41,8 +41,12 @@ def _authenticate_pam(username, password):
         import pam
     except ImportError:
         return False
+    # pam.pam() localiza libpam con un subprocess (ldconfig): debe crearse en el hilo
+    # principal; gevent no permite subprocesos desde su threadpool.
+    p = pam.pam()
+
     def check():
-        return pam.pam().authenticate(username, password, service="matipanel")
+        return p.authenticate(username, password, service="matipanel")
     # PAM bloquea ~2 s al fallar; en un hilo real para no congelar el worker gevent.
     try:
         from gevent import get_hub, monkey

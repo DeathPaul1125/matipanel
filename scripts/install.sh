@@ -133,8 +133,8 @@ fi
 echo "  Si tienes firewall activo, abre el puerto:"
 echo "    ufw allow ${PORT}/tcp"
 echo
-echo "  Para habilitar la edición de archivos (opcional):"
+echo "  Para dejar el explorador de archivos en solo lectura (opcional):"
 echo "    systemctl edit matipanel"
 echo "    [Service]"
-echo "    Environment=\"MATIPANEL_FILE_WRITE=1\""
+echo "    Environment=\"MATIPANEL_FILE_WRITE=0\""
 echo
