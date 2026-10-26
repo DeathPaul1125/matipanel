@@ -1609,6 +1609,7 @@ if __name__ == "__main__":
     assert s["app_blue"]["ports"] == ["127.0.0.1:20000:8080"] and s["app_blue"]["env_file"] == ["/var/lib/matipanel/apps/miapp/env"]
     assert s["app_blue"]["deploy"]["resources"]["limits"] == {"memory": "512M", "cpus": "1.5"}
     assert s["worker"]["image"] == "matipanel/miapp:abc1234" and "queue:work" in s["worker"]["command"]
+    assert s["worker"]["healthcheck"] == {"disable": True} and s["scheduler"]["healthcheck"] == {"disable": True}
     assert s["app_blue"]["depends_on"]["db"]["condition"] == "service_healthy" and "storage:/var/www/html/storage" in s["app_blue"]["volumes"]
     assert set(doc["volumes"]) == {"storage", "mariadb_data", "redis_data"} and s["db"]["image"] == "mariadb:11"
     doc = json.loads(render_compose({**cfg, "database": "postgres", "redis": False, "worker": False, "scheduler": False,

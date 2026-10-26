@@ -1166,3 +1166,39 @@ table.dbx-create .input { height: 30px; width: 100%; min-width: 90px; }
 table.dbx-create .center-cell { text-align: center; }
 .dbx-len-in { max-width: 90px; }
 .dbx-defcell { display: flex; gap: 4px; min-width: 160px; }
+
+/* ── Despliegues ── */
+.dp-back { margin: 0 0 10px; }
+.dp-req-actions { display: flex; gap: 8px; }
+#req-chips { margin-bottom: 10px; }
+.dp-empty { text-align: center; padding: 28px 16px; max-width: 680px; margin: 0 auto; }
+.dp-empty h3 { margin: 0 0 8px; font-size: 16px; }
+.dp-empty p { line-height: 1.6; text-wrap: pretty; margin: 0 0 16px; }
+.dp-state { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.dp-nowrap { white-space: nowrap; }
+.dp-msg { display: inline-block; max-width: 260px; vertical-align: bottom; }
+.dp-sel td { background: var(--accent-bg); }
+.dp-good { color: var(--ok); }
+.dp-bad { color: var(--err); }
+.dp-mt { margin-top: 8px; margin-bottom: 0; }
+.dp-wiz { max-width: 620px; }
+.dp-steps { display: flex; gap: 6px; margin: -6px 0 18px; font-size: 12px; }
+.dp-steps span { flex: 1; padding: 6px 8px; border-bottom: 2px solid var(--border); color: var(--text-faint); font-weight: 500; }
+.dp-steps span.active { border-bottom-color: var(--accent); color: var(--text); }
+.dp-form2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.dp-checks { display: flex; flex-direction: column; gap: 2px; }
+.dp-checks .dlg-check { margin-bottom: 6px; }
+.dp-key { width: 100%; min-height: 0; font-size: 12px; word-break: break-all; resize: none; }
+.dp-kv1 { grid-template-columns: minmax(0, 1fr); }
+.dp-kv1 > div { grid-template-columns: 130px minmax(0, 1fr); }
+.dp-log { height: 55vh; max-height: 55vh; margin: 0; font-size: 12px; overflow: auto; }
+.dp-narrow { width: auto; max-width: 220px; }
+.dp-env td { padding: 4px 6px; vertical-align: top; }
+.dp-env .input { width: 100%; height: 30px; }
+.dp-env textarea.input { height: auto; min-height: 60px; }
+.dp-envtext { display: block; width: 100%; min-height: 50vh; font: 12.5px/1.55 var(--mono); }
+.dp-blur { filter: blur(4px); transition: filter 120ms var(--ease); }
+.dp-blur:focus { filter: none; }
+.dp-danger { border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+.dp-danger .btn-danger-solid { margin-top: 8px; }
+@media (max-width: 720px) { .dp-form2 { grid-template-columns: 1fr; } }

@@ -53,11 +53,15 @@ def create_app():
     def _load_user(user_id):
         return load_user(user_id)
 
+    # El webhook de despliegues lo llama un runner, no un navegador: no trae Origin ni sesión.
+    # Se protege con su propia firma HMAC (X-Hub-Signature-256), tope de 1 MB y límite por IP.
+    WEBHOOK_PREFIX = "/despliegues/webhook/"
+
     @app.before_request
     def _limit_anonymous_body():
         # El límite de 1 GB es para subidas de usuarios ya autenticados; sin sesión
         # (login, 2FA, API remota) basta con 64 KB.
-        if request.content_length and request.content_length > 64 * 1024                 and not current_user.is_authenticated:
+        if request.content_length and request.content_length > 64 * 1024                 and not current_user.is_authenticated and not request.path.startswith(WEBHOOK_PREFIX):
             abort(413)
 
     @app.before_request
@@ -66,7 +70,7 @@ def create_app():
         # en orden: Sec-Fetch-Site (la pone el navegador y una página ajena no puede falsearla),
         # Origin y, si falta o es "null", Referer. Sin ninguna señal válida se rechaza.
         # GET/HEAD nunca modifican nada en el panel.
-        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE") or request.path.startswith(WEBHOOK_PREFIX):
             return
         site = request.headers.get("Sec-Fetch-Site", "")
         if site in ("cross-site", "same-site"):

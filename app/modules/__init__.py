@@ -21,6 +21,7 @@ from .shares import shares_bp
 from .storage import storage_bp
 from .dns import dns_bp
 from .dbexplorer import dbexplorer_bp
+from .deploy import deploy_bp
 from .help import help_bp, CONTEXT as HELP_CONTEXT
 from .files import files_bp
 from .packages import packages_bp
@@ -40,7 +41,7 @@ def register_modules(app, sock):
         (packages_bp, "/packages"), (logs_bp, "/logs"), (terminal_bp, "/terminal"),
         (appearance_bp, "/apariencia"), (help_bp, "/ayuda"),
         (mail_bp, "/correo"), (dns_bp, "/dns"), (shares_bp, "/compartidos"),
-        (storage_bp, "/almacenamiento"), (dbexplorer_bp, "/bd"),
+        (storage_bp, "/almacenamiento"), (dbexplorer_bp, "/bd"), (deploy_bp, "/despliegues"),
         (remote_bp, "/servidores"),  # ruta fija: los paneles se consultan entre sí en /servidores/api/remote/summary
     ]:
         app.register_blueprint(bp, url_prefix=prefix)
