@@ -10,7 +10,7 @@ import threading
 import zlib
 from datetime import datetime
 from functools import wraps
-from flask import Blueprint, render_template, jsonify, request, Response
+from flask import Blueprint, render_template, jsonify, request, Response, g, has_request_context
 from flask_login import login_required
 from ..util import run, bytes_to_human
 
@@ -40,9 +40,53 @@ def _installed(engine):
     return shutil.which("mysql" if engine == "mysql" else "psql") is not None
 
 
+def db_target():
+    """Base de una app desplegada elegida para esta petición (la fija el Explorador BD), o None = servidor."""
+    return g.get("db_target") if has_request_context() else None
+
+
+def app_db_target(name):
+    """{app, engine, container, user} de la base del contenedor de una app desplegada, o None."""
+    from .. import deployer as D
+    if not D.valid_name(name) or name not in D.list_apps():
+        return None
+    cfg = D.load_config(name) or {}
+    if cfg.get("draft") or cfg.get("database") not in ("mariadb", "postgres"):
+        return None
+    return {"app": name, "engine": "mysql" if cfg["database"] == "mariadb" else "pg",
+            "container": f"{D.project_name(name)}-db-1", "user": D.db_name(cfg)}
+
+
+def my_base(prog="mysql"):
+    """Inicio del comando mysql/mysqldump. En el contenedor de una app: docker exec como root de
+    MariaDB, con la contraseña que el contenedor ya tiene en su entorno (no pasa por la línea de órdenes)."""
+    t = db_target()
+    if t:
+        tool = {"mysql": "mariadb", "mysqldump": "mariadb-dump"}[prog]
+        return ["docker", "exec", "-i", t["container"], "sh", "-c",
+                f'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec {tool} -uroot "$@"', "sh"]
+    return [prog, *_my_opts()]
+
+
+def pg_base(prog="psql"):
+    """Inicio del comando psql/pg_dump. En el contenedor: el superusuario de la imagen (POSTGRES_USER);
+    PGOPTIONS y PGCLIENTENCODING se pasan desde el entorno del proceso."""
+    t = db_target()
+    if t:
+        return ["docker", "exec", "-i", "-e", "PGOPTIONS", "-e", "PGCLIENTENCODING", t["container"], prog, "-U", t["user"]]
+    return ["runuser", "-u", "postgres", "--", prog]
+
+
 def needs_engine(f):
     @wraps(f)
     def wrapper(engine, *a, **kw):
+        t = db_target()
+        if t:
+            if t["engine"] != engine:
+                return jsonify({"ok": False, "error": "La base de esa aplicación no usa este motor"}), 400
+            if not shutil.which("docker"):
+                return jsonify({"ok": False, "error": "Docker no está disponible"}), 503
+            return f(engine, *a, **kw)
         if not _installed(engine):
             return jsonify({"ok": False, "error": "Motor no instalado"}), 404
         return f(engine, *a, **kw)
@@ -76,6 +120,8 @@ def _my_sandbox_opt():
     """MariaDB >= 10.5.25 / 11.x: --sandbox desactiva \\! (shell), \\. (source), tee… en el cliente.
     Un volcado restaurado como root no debe poder ejecutar comandos del sistema."""
     global _my_sandbox
+    if db_target():
+        return ["--sandbox"]  # mariadb:11 del contenedor
     if _my_sandbox is None:
         code, out, _ = run(["mysql", "--help"], timeout=10)
         _my_sandbox = ["--sandbox"] if code == 0 and "--sandbox" in out else []
@@ -108,13 +154,13 @@ def _tail(f, n=4000):
 def _cmd(engine, db=None, names=False):
     """Comando cliente que lee SQL por stdin. Salida separada por tabuladores."""
     if engine == "mysql":
-        cmd = ["mysql", *_my_opts(), "--batch"]
+        cmd = [*my_base(), "--batch"]
         if not names:
             cmd += ["--skip-column-names", "--raw"]
         if db:
             cmd.append(f"--database={db}")
         return cmd
-    cmd = ["runuser", "-u", "postgres", "--", "psql", "-X", "-A", "-F", "\t",
+    cmd = [*pg_base("psql"), "-X", "-A", "-F", "\t",
            "-v", "ON_ERROR_STOP=1", "-P", "footer=off", "-d", db or "postgres"]
     if not names:
         cmd.append("-t")
@@ -480,9 +526,9 @@ def _dump_cmd(engine, db, table=None, schema="public"):
     db y table ya deben estar validados (existen); el nombre de tabla va tras "--" o citado."""
     if engine == "mysql":
         if table:
-            return ["mysqldump", *_my_opts(), "--single-transaction", "--triggers", "--", db, table]
-        return ["mysqldump", *_my_opts(), "--single-transaction", "--routines", "--triggers", "--", db]
-    cmd = ["runuser", "-u", "postgres", "--", "pg_dump"]
+            return [*my_base("mysqldump"), "--single-transaction", "--triggers", "--", db, table]
+        return [*my_base("mysqldump"), "--single-transaction", "--routines", "--triggers", "--", db]
+    cmd = pg_base("pg_dump")
     if table:
         # Patrón de pg_dump: entre comillas dobles todo es literal (*, ?, . no son comodines)
         cmd.append("--table=" + _ident("pg", schema) + "." + _ident("pg", table))

@@ -283,6 +283,10 @@ Si la aplicación despliega bien pero muestra **500**, mira la pestaña **Logs**
 
 Sí. Para cualquier proyecto PHP elige el tipo **PHP** (ver [Proyectos PHP que no son Laravel](#proyectos-php-que-no-son-laravel)). Para otros lenguajes, agrega tu propio `Dockerfile` que sirva HTTP en el puerto interno configurado.
 
+### ¿Cómo administro la base de datos de una aplicación?
+
+La base vive dentro del contenedor `db` de la aplicación, no en el MariaDB/PostgreSQL del servidor. Ábrela en **Explorador BD** y elige en **Servidor** la opción **App «<nombre>»**, o usa el enlace **Abrir la base en el Explorador BD** del **Resumen** de la aplicación. Tienes las mismas funciones que con las bases del servidor: tablas, datos, consola SQL, exportar e importar.
+
 ### ¿Dónde guarda el panel los datos de cada aplicación?
 
 En `/var/lib/matipanel/apps/<app>/`: configuración, `.env`, clave de despliegue, historial y logs, todos legibles solo por root. El sitio de Nginx es `/etc/nginx/sites-available/matipanel-app-<app>.conf`; el panel no toca ningún otro sitio.

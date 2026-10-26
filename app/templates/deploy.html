@@ -360,6 +360,7 @@
 <script>
 const BASE = {{ url_for('deploy.index')|tojson }};
 const APP = {{ (app_name or '')|tojson }};
+const DBX_URL = {{ url_for('dbexplorer.index')|tojson }};
 const api = p => BASE + 'api/' + p;
 const appApi = (p, name) => BASE + 'api/apps/' + encodeURIComponent(name || APP) + (p ? '/' + p : '');
 const $ = s => document.querySelector(s);
@@ -654,7 +655,8 @@ function renderSummary() {
     ['Desplegado', d.current ? escapeHtml(fmtDate(d.current.at)) : '—'],
     ['Slot activo', c.active_slot ? `<span class="mono">${escapeHtml(c.active_slot)} · 127.0.0.1:${escapeHtml(d.slot_ports[c.active_slot])}</span>` : '—'],
     ['PHP', escapeHtml(c.php)],
-    ['Servicios', escapeHtml(services.join(', ') || 'Solo la aplicación')],
+    ['Servicios', escapeHtml(services.join(', ') || 'Solo la aplicación')
+      + (c.database !== 'none' ? ` · <a href="${escapeHtml(DBX_URL + '?srv=' + encodeURIComponent(c.name))}">Abrir la base en el Explorador BD</a>` : '')],
     ['Auto-despliegue', c.auto_deploy ? '<span class="pill ok">Activado</span>' : '<span class="pill mute">Desactivado</span>'],
   ];
   $('#sum-kv').innerHTML = rows.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join('');

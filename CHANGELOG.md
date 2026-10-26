@@ -3,6 +3,8 @@
 ## [Sin publicar]
 
 ### Añadido
+- 🗄️ **Explorador BD para apps desplegadas** — selector «Servidor» para gestionar la base del contenedor de cada aplicación (MariaDB o PostgreSQL), con enlace desde el Resumen de la app.
+- 🔀 **Nombre interno con Apache** — si Apache ocupa el puerto 80, el panel crea un sitio en Apache que reenvía el nombre interno a la app.
 - 🐘 **Despliegues de PHP genérico** — tipo de proyecto «PHP» para frameworks que no son Laravel (Quetzal/Bee, PHP puro): Apache con `.htaccess`, carpeta pública, ruta del `.env`, carpetas persistentes y comando de migraciones propio. También en Docker, sin cortes.
 
 ### Seguridad (auditoría con security-review)

@@ -30,10 +30,28 @@ from flask_login import login_required
 
 from ..util import run, bytes_to_human
 from .databases import (needs_engine, _installed, _my_opts, _my_sandbox_opt, _popen, _kill, _feed, _tail,
+                        db_target, app_db_target, my_base, pg_base,
                         _run_capped, _dump_stream, _dump_cmd, _str, _ident, SYSTEM_DBS, QUERY_TIMEOUT, CHUNK)
 from .files import _disposition
 
 dbexplorer_bp = Blueprint("dbexplorer", __name__)
+
+
+@dbexplorer_bp.before_request
+def _pick_target():
+    """?srv=<app>: la base del contenedor de esa app desplegada en vez de los motores del servidor."""
+    from flask import g
+    srv = request.args.get("srv", "")
+    if srv:
+        t = app_db_target(srv)
+        if not t:
+            return jsonify({"ok": False, "error": "Esa aplicación no existe o no tiene base de datos propia"}), 404
+        g.db_target = t
+
+
+def _app_targets():
+    from .. import deployer as D
+    return [t for t in (app_db_target(n) for n in D.list_apps()) if t]
 
 DB_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$-]{0,63}$")  # BD existentes (sin '=', ':' ni '/': psql -d)
 NEW_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")      # nombres que crea el panel
@@ -454,8 +472,10 @@ _flavor = None
 
 def _is_mariadb():
     global _flavor
+    if db_target():
+        return True  # mariadb:11 del contenedor
     if _flavor is None:
-        code, out, _ = run(["mysql", *_my_opts(), "--batch", "--skip-column-names"], input="SELECT VERSION();", timeout=10)
+        code, out, _ = run([*my_base(), "--batch", "--skip-column-names"], input="SELECT VERSION();", timeout=10)
         if code == 0:
             _flavor = "mariadb" if "mariadb" in out.lower() else "mysql"
     return _flavor == "mariadb"
@@ -463,9 +483,9 @@ def _is_mariadb():
 
 def _client(engine, db=None, quiet=True):
     if engine == "mysql":
-        cmd = ["mysql", *_my_opts(), *_my_sandbox_opt(), "--xml", "--quick", "--default-character-set=utf8mb4"]
+        cmd = [*my_base(), *_my_sandbox_opt(), "--xml", "--quick", "--default-character-set=utf8mb4"]
         return cmd + ([f"--database={db}"] if db else [])
-    cmd = ["runuser", "-u", "postgres", "--", "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-P", "footer=off"]
+    cmd = [*pg_base("psql"), "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-P", "footer=off"]
     return cmd + (["-q"] if quiet else []) + ["-d", db or "postgres"]
 
 
@@ -1138,6 +1158,7 @@ def _types_for_ui():
 @login_required
 def index():
     return render_template("dbexplorer.html", has_mysql=_installed("mysql"), has_pg=_installed("pg"),
+                           apps=[{"name": t["app"], "engine": t["engine"]} for t in _app_targets()],
                            types=_types_for_ui(), exprs=DEFAULT_EXPRS, per_page=PER_PAGE)
 
 

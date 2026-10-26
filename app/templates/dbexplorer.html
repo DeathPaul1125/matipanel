@@ -3,7 +3,7 @@
 {% block heading %}Explorador de bases de datos{% endblock %}
 
 {% block content %}
-{% if not has_mysql and not has_pg %}
+{% if not has_mysql and not has_pg and not apps %}
 <div class="card">
   <h3>No hay motores de base de datos instalados</h3>
   <p class="muted">Instala MariaDB (compatible con MySQL) o PostgreSQL desde <a href="{{ url_for('databases.index') }}">Bases de datos</a> y recarga esta página.</p>
@@ -11,6 +11,13 @@
 {% else %}
 <div class="dbx">
   <aside class="card dbx-side">
+    {% if apps %}
+    <label class="form-row dbx-srv"><span>Servidor</span>
+      <select class="input" id="srv-sel">
+        {% if has_mysql or has_pg %}<option value="">Este servidor</option>{% endif %}
+        {% for a in apps %}<option value="{{ a.name }}">App «{{ a.name }}» · {{ 'MariaDB' if a.engine == 'mysql' else 'PostgreSQL' }} (Docker)</option>{% endfor %}
+      </select></label>
+    {% endif %}
     {% if has_mysql and has_pg %}
     <div class="seg dbx-eng" id="eng-seg">
       <button type="button" data-eng="mysql">MariaDB / MySQL</button>
@@ -42,7 +49,7 @@
 {% endblock %}
 
 {% block scripts %}
-{% if has_mysql or has_pg %}
+{% if has_mysql or has_pg or apps %}
 <script>
 (() => {
 const BASE = {{ url_for('dbexplorer.index')|tojson }} + 'api/';
@@ -51,17 +58,25 @@ const EXPRS = {{ exprs|tojson }};
 const PER_PAGE = {{ per_page|tojson }};
 const ENGINES = [{% if has_mysql %}'mysql',{% endif %}{% if has_pg %}'pg',{% endif %}];
 const ENG_LABEL = {mysql: 'MariaDB / MySQL', pg: 'PostgreSQL'};
+// Bases de apps desplegadas (contenedor «db» de cada una): ?srv=<app> en cada llamada a la API.
+const APPS = {{ apps|tojson }};
+const APP_ENGINE = Object.fromEntries(APPS.map(a => [a.name, a.engine]));
+const engLabel = () => S.srv ? `App «${S.srv}»` : ENG_LABEL[S.engine];
 const DB_TABS = [['tables', 'Tablas'], ['sql', 'SQL'], ['create', 'Crear tabla'], ['export', 'Exportar']];
 const TABLE_TABS = [['data', 'Datos'], ['structure', 'Estructura'], ['sql', 'SQL'], ['ops', 'Operaciones'], ['io', 'Exportar / Importar']];
 const OPS = [['', '—'], ['like', 'contiene'], ['eq', '='], ['ne', '≠'], ['gt', '>'], ['lt', '<'], ['starts', 'empieza con'], ['null', 'es NULL'], ['notnull', 'no es NULL']];
 const $ = id => document.getElementById(id);
 const esc = escapeHtml;
 
-const S = {engine: null, db: null, schema: null, table: null, tab: null, dbs: [], tree: {}, meta: null, grid: null,
+const S = {srv: '', engine: null, db: null, schema: null, table: null, tab: null, dbs: [], tree: {}, meta: null, grid: null,
            nav: 0, create: null, imp: null, qres: null, sqlDraft: {}};
 
 // ── Utilidades ─────────────────────────────────────────────────────
-const api = (p, params) => BASE + S.engine + '/' + p + (params ? '?' + new URLSearchParams(params) : '');
+const api = (p, params) => {
+  const q = new URLSearchParams(params || {});
+  if (S.srv) q.set('srv', S.srv);
+  return BASE + S.engine + '/' + p + (q.toString() ? '?' + q : '');
+};
 async function getJSON(url) {
   try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; }
 }
@@ -134,24 +149,28 @@ document.addEventListener('keydown', e => {
 // ── Navegación (estado en la URL) ──────────────────────────────────
 function readUrl() {
   const p = new URLSearchParams(location.search);
+  let srv = p.get('srv') || '';
+  if (srv && !APP_ENGINE[srv]) srv = '';
+  if (!srv && !ENGINES.length) srv = APPS[0].name;  // sin motores en el servidor: la primera app
   let engine = p.get('engine');
-  if (!ENGINES.includes(engine)) engine = ENGINES[0];
-  return {engine, db: p.get('db') || null, schema: engine === 'pg' ? (p.get('schema') || 'public') : null,
+  if (srv) engine = APP_ENGINE[srv];
+  else if (!ENGINES.includes(engine)) engine = ENGINES[0];
+  return {srv, engine, db: p.get('db') || null, schema: engine === 'pg' ? (p.get('schema') || 'public') : null,
           table: p.get('table') || null, tab: p.get('tab') || null};
 }
 
 async function go(next, push = true) {
-  const prev = {engine: S.engine, db: S.db, schema: S.schema, table: S.table};
+  const prev = {srv: S.srv, engine: S.engine, db: S.db, schema: S.schema, table: S.table};
   Object.assign(S, next);
   if (S.engine !== 'pg') S.schema = null; else if (!S.schema) S.schema = 'public';
   if (!S.db) S.table = null;
-  if (prev.engine !== S.engine) { S.tree = {}; S.dbs = []; await loadDbs(); }
-  if (prev.engine !== S.engine || prev.db !== S.db || prev.schema !== S.schema || prev.table !== S.table) {
+  if (prev.engine !== S.engine || prev.srv !== S.srv) { S.tree = {}; S.dbs = []; await loadDbs(); }
+  if (prev.engine !== S.engine || prev.srv !== S.srv || prev.db !== S.db || prev.schema !== S.schema || prev.table !== S.table) {
     S.meta = null; S.grid = null; S.imp = null; S.qres = null;
   }
   if (push) {
     const p = new URLSearchParams();
-    for (const k of ['engine', 'db', 'schema', 'table', 'tab']) if (S[k]) p.set(k, S[k]);
+    for (const k of ['srv', 'engine', 'db', 'schema', 'table', 'tab']) if (S[k]) p.set(k, S[k]);
     history.pushState(null, '', '?' + p);
   }
   render();
@@ -173,15 +192,21 @@ async function render() {
 }
 
 function renderEngineSeg() {
+  if ($('eng-seg')) $('eng-seg').hidden = !!S.srv;
+  if ($('srv-sel')) $('srv-sel').value = S.srv;
   document.querySelectorAll('#eng-seg button').forEach(b => b.classList.toggle('active', b.dataset.eng === S.engine));
 }
+$('srv-sel')?.addEventListener('change', e => {
+  const srv = e.target.value;
+  go({srv, engine: srv ? APP_ENGINE[srv] : ENGINES[0], db: null, schema: null, table: null, tab: null});
+});
 $('eng-seg')?.addEventListener('click', e => {
   const b = e.target.closest('[data-eng]');
   if (b && b.dataset.eng !== S.engine) go({engine: b.dataset.eng, db: null, schema: null, table: null, tab: null});
 });
 
 function renderCrumbs() {
-  const parts = [`<button type="button" data-nav="home">${esc(ENG_LABEL[S.engine])}</button>`];
+  const parts = [`<button type="button" data-nav="home">${esc(engLabel())}</button>`];
   if (S.db) parts.push(`<button type="button" data-nav="db">${svg('db')} ${esc(S.db)}</button>`);
   if (S.db && S.engine === 'pg') parts.push(`<button type="button" data-nav="db">${svg('schema')} ${esc(S.schema)}</button>`);
   if (S.table) parts.push(`<span class="dbx-crumb-cur">${svg('table')} ${esc(S.table)}</span>`);
@@ -319,7 +344,7 @@ function viewHome(tok) {
       <td class="right">${db.supported ? `<button type="button" class="btn btn-sm" data-act="open-db" data-db="${esc(db.name)}">Explorar</button>` : '<span class="small muted">nombre no admitido</span>'}</td>
     </tr>`).join('');
   $('view').innerHTML = `<div class="card">
-    <div class="card-head"><h3>Bases de datos · ${esc(ENG_LABEL[S.engine])}</h3></div>
+    <div class="card-head"><h3>Bases de datos · ${esc(engLabel())}</h3></div>
     ${S.dbsError ? flash(S.dbsError) : ''}
     <p class="small muted">Elige una base en la lista o en el panel izquierdo para ver sus tablas.</p>
     <div class="table-wrap"><table class="lx"><thead><tr><th>Base de datos</th><th></th></tr></thead>
@@ -923,7 +948,7 @@ async function runDdl(body, {title, danger = false, typed, after} = {}) {
 }
 
 // ── Consola SQL ────────────────────────────────────────────────────
-const histKey = () => `dbx-hist:${S.engine}:${S.db}`;
+const histKey = () => `dbx-hist:${S.srv}:${S.engine}:${S.db}`;
 function history_() {
   try { return JSON.parse(localStorage.getItem(histKey()) || '[]').filter(x => typeof x === 'string'); } catch (e) { return []; }
 }
@@ -938,7 +963,7 @@ function histOptions() {
 function viewConsole(v) {
   const scope = `${S.db}${S.engine === 'pg' ? ' · ' + S.schema : ''}`;
   const ro = S.meta ? S.meta.readonly_reason : dbReadonly();
-  const draftKey = `${S.engine}|${S.db}|${S.schema}|${S.table || ''}`;
+  const draftKey = `${S.srv}|${S.engine}|${S.db}|${S.schema}|${S.table || ''}`;
   const prefill = S.table ? `SELECT * FROM ${qid(S.table)} LIMIT 100` : '';
   v.innerHTML = `<div class="card">
     <div class="toolbar dbx-toolbar">
