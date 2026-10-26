@@ -1214,3 +1214,14 @@ table.dbx-create .center-cell { text-align: center; }
   background: var(--term-bg); color: var(--term-fg); font: 12.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word;
 }
 .jt-foot { padding: 8px 16px; color: var(--text-faint); border-top: 1px solid var(--border); }
+
+/* ── Docker: contenedores agrupados por proyecto ── */
+.dk-group { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; margin-top: 12px; }
+.dk-ghead { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface-2); }
+.dk-gtitle { flex: 1; min-width: 0; }
+.dk-gname { font-weight: 600; font-size: 15px; }
+.dk-gact { display: flex; gap: 6px; flex-wrap: wrap; }
+.dk-group table.lx { margin: 0; }
+.dk-cname { display: flex; align-items: center; gap: 4px; }
+.dk-edit { width: 22px; height: 22px; font-size: 12px; opacity: .55; }
+tr:hover .dk-edit, .dk-edit:focus-visible { opacity: 1; }

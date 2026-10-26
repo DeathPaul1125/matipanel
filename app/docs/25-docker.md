@@ -35,16 +35,28 @@ El resumen y la tabla de contenedores se actualizan solos cada 10 segundos.
 
 ## Revisar los contenedores
 
-La tabla **Containers** muestra todos los contenedores, también los detenidos:
+La sección **Contenedores** muestra todos los contenedores, también los detenidos, **agrupados por proyecto**:
+
+- **Aplicaciones desplegadas** (módulo [Despliegues](56-despliegues.md)): un grupo por aplicación con el nombre de la app, por ejemplo **quetzal**, y dentro su **Aplicación** (con el slot *blue* o *green*), **Base de datos**, **Redis**, **Worker** o **Programador**. El botón **Ver despliegue** abre la aplicación.
+- **Otros proyectos de Docker Compose**: un grupo por proyecto, con el nombre del servicio en cada contenedor.
+- **Contenedores sueltos**: los creados con `docker run`, sin proyecto.
+
+La cabecera de cada grupo tiene un LED: verde si todos sus contenedores están en ejecución, ámbar si solo algunos y gris si ninguno.
 
 | Columna | Significado |
 |---|---|
-| **ID** | Identificador corto (12 caracteres). |
-| **Nombre** | Nombre del contenedor. |
+| **Nombre** | El nombre que le pusiste (o su función, por ejemplo *Base de datos*) y debajo el nombre real del contenedor. Pasa el ratón para ver el ID. |
 | **Imagen** | Imagen desde la que se creó. |
 | **Estado** | `running` (verde), `paused` (ámbar) u otro estado (gris), con el detalle de Docker, por ejemplo `Up 3 hours`. |
 | **Puertos** | Puertos publicados, por ejemplo `0.0.0.0:8080->80/tcp`. |
 | **Acciones** | Botones para iniciar, detener, reiniciar y ver logs. |
+
+### Ponerles nombre
+
+- **Grupo:** botón **Renombrar** en su cabecera.
+- **Contenedor:** el lápiz (✎) junto a su nombre.
+
+Escribe un nombre de hasta 60 caracteres, o déjalo vacío para volver al nombre automático. Son etiquetas del panel (se guardan en `/var/lib/matipanel/docker_names.json`): el contenedor en Docker no cambia de nombre, porque Docker Compose lo volvería a crear con el original en el siguiente despliegue.
 
 > **Importante:** Docker abre los puertos publicados (`0.0.0.0:…`) con sus propias reglas de red, por delante de UFW. Un puerto publicado puede quedar accesible aunque el [Firewall](20-firewall.md) no lo permita. Si un servicio debe ser solo local, publícalo en `127.0.0.1`.
 

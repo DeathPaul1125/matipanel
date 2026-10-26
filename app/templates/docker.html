@@ -18,11 +18,9 @@
 </div>
 
 <div class="card" style="margin-bottom:12px;">
-  <h3>Containers</h3>
-  <table class="lx" id="cont-table">
-    <thead><tr><th>ID</th><th>Nombre</th><th>Imagen</th><th>Estado</th><th>Puertos</th><th>Acciones</th></tr></thead>
-    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
-  </table>
+  <h3>Contenedores</h3>
+  <p class="small muted">Agrupados por proyecto (cada aplicación desplegada con sus servicios). Los nombres que pongas aquí son solo para identificarlos en el panel; Docker no cambia.</p>
+  <div id="cont-groups"><p class="muted center">Cargando…</p></div>
 </div>
 
 <div class="card" style="margin-bottom:12px;">
@@ -68,28 +66,78 @@ async function loadInfo() {
   document.getElementById('d-os').textContent = d.os;
 }
 
+const DEPLOY_URL = {{ url_for('deploy.index')|tojson }};
+let CONT = {containers: [], groups: []};
+
+function containerRow(c) {
+  const cls = c.state === 'running' ? 'ok' : c.state === 'paused' ? 'warn' : 'mute';
+  const title = c.alias || c.role_label || c.name;
+  return `<tr>
+    <td>
+      <div class="dk-cname"><b>${escapeHtml(title)}</b>
+        <button class="icon-btn dk-edit" title="Ponerle nombre" onclick="renameItem('containers', ${jsArg(c.name)}, ${jsArg(c.alias)}, ${jsArg(c.role_label || c.name)})">✎</button></div>
+      <div class="small muted mono" title="ID ${escapeHtml(c.id)}">${escapeHtml(c.name)}</div>
+    </td>
+    <td class="mono small truncate">${escapeHtml(c.image)}</td>
+    <td><span class="pill ${cls}">${escapeHtml(c.state)}</span> <span class="small muted">${escapeHtml(c.status)}</span></td>
+    <td class="small mono">${escapeHtml(c.ports || '—')}</td>
+    <td class="nowrap">
+      <button class="btn btn-sm" title="Iniciar" onclick="dockerAction(${jsArg(c.id)},'start',${jsArg(title)})">▶</button>
+      <button class="btn btn-sm" title="Detener" onclick="dockerAction(${jsArg(c.id)},'stop',${jsArg(title)})">■</button>
+      <button class="btn btn-sm" title="Reiniciar" onclick="dockerAction(${jsArg(c.id)},'restart',${jsArg(title)})">↻</button>
+      <button class="btn btn-sm" onclick="viewLogs(${jsArg(c.id)},${jsArg(c.name)})">logs</button>
+    </td>
+  </tr>`;
+}
+
+function groupHtml(g, list) {
+  const running = list.filter(c => c.state === 'running').length;
+  const led = running === list.length ? '' : running ? 'warn' : 'mute';
+  const name = g ? (g.alias || g.default) : 'Contenedores sueltos';
+  const sub = g ? `${g.project} · ` : 'sin proyecto de Compose · ';
+  const deploy = g && g.app ? `<a class="btn btn-sm" href="${escapeHtml(DEPLOY_URL + 'app/' + encodeURIComponent(g.app))}">Ver despliegue</a>` : '';
+  const rename = g ? `<button class="btn btn-sm" onclick="renameItem('groups', ${jsArg(g.project)}, ${jsArg(g.alias)}, ${jsArg(g.default)})">Renombrar</button>` : '';
+  return `<section class="dk-group">
+    <header class="dk-ghead">
+      <span class="led ${led}"></span>
+      <div class="dk-gtitle"><div class="dk-gname">${escapeHtml(name)}</div>
+        <div class="small muted"><span class="mono">${escapeHtml(sub)}</span>${list.length} contenedor${list.length === 1 ? '' : 'es'} · ${running} en ejecución</div></div>
+      <div class="dk-gact">${deploy}${rename}</div>
+    </header>
+    <table class="lx"><thead><tr><th>Nombre</th><th>Imagen</th><th>Estado</th><th>Puertos</th><th>Acciones</th></tr></thead>
+      <tbody>${list.map(containerRow).join('')}</tbody></table>
+  </section>`;
+}
+
 async function loadContainers() {
   const r = await fetch("{{ url_for('docker.containers') }}");
   const d = await r.json();
-  const tbody = document.querySelector('#cont-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
-  if (!d.containers.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin containers</td></tr>'; return; }
-  tbody.innerHTML = d.containers.map(c => {
-    const cls = c.state === 'running' ? 'ok' : c.state === 'paused' ? 'warn' : 'mute';
-    return `<tr>
-      <td class="mono">${escapeHtml(c.id)}</td>
-      <td class="mono">${escapeHtml(c.name)}</td>
-      <td class="mono small truncate">${escapeHtml(c.image)}</td>
-      <td><span class="pill ${cls}">${escapeHtml(c.state)}</span> <span class="small muted">${escapeHtml(c.status)}</span></td>
-      <td class="small mono">${escapeHtml(c.ports || '—')}</td>
-      <td>
-        <button class="btn btn-sm" title="Iniciar" onclick="dockerAction(${jsArg(c.id)},'start',${jsArg(c.name)})">▶</button>
-        <button class="btn btn-sm" title="Detener" onclick="dockerAction(${jsArg(c.id)},'stop',${jsArg(c.name)})">■</button>
-        <button class="btn btn-sm" title="Reiniciar" onclick="dockerAction(${jsArg(c.id)},'restart',${jsArg(c.name)})">↻</button>
-        <button class="btn btn-sm" onclick="viewLogs(${jsArg(c.id)},${jsArg(c.name)})">logs</button>
-      </td>
-    </tr>`;
-  }).join('');
+  const box = document.getElementById('cont-groups');
+  if (d.error) { box.innerHTML = '<p class="muted center">' + escapeHtml(d.error) + '</p>'; return; }
+  if (!d.containers.length) { box.innerHTML = '<p class="muted center">Sin contenedores</p>'; return; }
+  CONT = d;
+  // Orden dentro del grupo: aplicación, worker, programador, base de datos, redis, el resto
+  const ord = {app: 0, worker: 1, scheduler: 2, db: 3, redis: 4};
+  const byKey = c => [ord[c.role] ?? 9, c.name];
+  const sortC = (a, b) => { const x = byKey(a), y = byKey(b); return x[0] - y[0] || x[1].localeCompare(y[1]); };
+  const groups = [...d.groups].sort((a, b) => (a.alias || a.default).localeCompare(b.alias || b.default));
+  const html = groups.map(g => groupHtml(g, d.containers.filter(c => c.project === g.project).sort(sortC)));
+  const loose = d.containers.filter(c => !c.project).sort(sortC);
+  if (loose.length) html.push(groupHtml(null, loose));
+  box.innerHTML = html.join('');
+}
+
+async function renameItem(kind, key, current, fallback) {
+  const label = await ui.prompt(kind === 'groups'
+      ? `Nombre para el grupo «${key}». Déjalo vacío para volver a «${fallback}».`
+      : `Nombre para el contenedor «${key}». Déjalo vacío para volver a «${fallback}».`,
+    {title: kind === 'groups' ? 'Renombrar grupo' : 'Nombrar contenedor', value: current || '', placeholder: fallback,
+     confirmText: 'Guardar'});
+  if (label === null) return;
+  const d = await postJSON("{{ url_for('docker.set_name') }}", {kind, key, label});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  ui.toast(label.trim() ? 'Nombre guardado' : 'Nombre quitado');
+  loadContainers();
 }
 
 async function loadImages() {

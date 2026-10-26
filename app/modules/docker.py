@@ -1,14 +1,73 @@
 """Gestión de Docker: containers, images, volumes."""
 import subprocess
 import json
+import os
+import re
 import shutil
 import threading
+from pathlib import Path
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from ..util import valid_name
 
 docker_bp = Blueprint("docker", __name__)
 LOGS_MAX = 1024 * 1024
+# Nombres que el admin les da a grupos y contenedores. Son solo etiquetas del panel: renombrar el
+# contenedor en Docker no sirve con Compose (lo recrea con su nombre en el siguiente despliegue).
+NAMES_PATH = Path(os.environ.get("MATIPANEL_DOCKER_NAMES", "/var/lib/matipanel/docker_names.json"))
+KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+ROLE_LABEL = {"app": "Aplicación", "db": "Base de datos", "redis": "Redis", "worker": "Worker de colas",
+              "scheduler": "Programador"}
+
+
+def load_names():
+    try:
+        data = json.loads(NAMES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    out = {"groups": {}, "containers": {}}
+    for kind in out:
+        src = data.get(kind) if isinstance(data, dict) else None
+        if isinstance(src, dict):
+            out[kind] = {k: v for k, v in src.items() if KEY_RE.fullmatch(str(k)) and isinstance(v, str)}
+    return out
+
+
+def save_names(data):
+    NAMES_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = NAMES_PATH.with_suffix(".tmp")
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, NAMES_PATH)
+
+
+def parse_labels(text):
+    """«a=1,b=2» de docker ps → dict. ponytail: un valor con coma se corta; los que usamos no la llevan."""
+    out = {}
+    for part in (text or "").split(","):
+        k, sep, v = part.partition("=")
+        if sep:
+            out[k.strip()] = v
+    return out
+
+
+def describe(c, labels):
+    """Grupo (proyecto de Compose) y rol legible de un contenedor."""
+    project = labels.get("com.docker.compose.project", "")
+    service = labels.get("com.docker.compose.service", "")
+    app, role = labels.get("matipanel.app", ""), labels.get("matipanel.role", "")
+    if role:
+        label = ROLE_LABEL.get(role, role.capitalize())
+        if role == "app" and service.startswith("app_"):
+            label += f" ({service[4:]})"  # slot blue/green
+    else:
+        label = service or c.get("Names", "")
+    return {"project": project, "service": service, "app": app, "role": role, "role_label": label}
 
 def _available():
     # Por request (no al importar): instalar Docker no obliga a reiniciar el panel.
@@ -82,10 +141,42 @@ def containers():
                 "state": c.get("State", ""),
                 "ports": c.get("Ports", ""),
                 "created": c.get("CreatedAt", ""),
+                **describe(c, parse_labels(c.get("Labels", ""))),
             })
         except json.JSONDecodeError:
             continue
-    return jsonify({"containers": items})
+    names = load_names()
+    for it in items:
+        it["alias"] = names["containers"].get(it["name"], "")
+    groups = {}
+    for it in items:
+        key = it["project"]
+        if key and key not in groups:
+            groups[key] = {"project": key, "app": it["app"], "alias": names["groups"].get(key, ""),
+                           "default": it["app"] or key}
+    return jsonify({"containers": items, "groups": list(groups.values())})
+
+
+@docker_bp.route("/api/name", methods=["POST"])
+@login_required
+def set_name():
+    """Nombre propio para un grupo (proyecto de Compose) o un contenedor. Vacío = quitarlo."""
+    data = request.get_json(silent=True) or {}
+    kind, key, label = data.get("kind"), str(data.get("key", "")), " ".join(str(data.get("label", "")).split())
+    if kind not in ("groups", "containers") or not KEY_RE.fullmatch(key):
+        return jsonify({"ok": False, "error": "Datos inválidos"}), 400
+    if len(label) > 60 or not all(ch.isprintable() for ch in label):
+        return jsonify({"ok": False, "error": "El nombre admite hasta 60 caracteres imprimibles"}), 400
+    names = load_names()
+    if label:
+        names[kind][key] = label
+    else:
+        names[kind].pop(key, None)
+    try:
+        save_names(names)
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"No se pudo guardar: {e}"}), 500
+    return jsonify({"ok": True})
 
 
 @docker_bp.route("/api/images")
