@@ -178,9 +178,17 @@ def _make_dir(path, spec):
         p = posixpath.dirname(p)
     try:
         os.makedirs(path)
-        shutil.chown(path, owner, group)
-        os.chmod(path, int(mode, 8))
-    except (OSError, LookupError) as e:
+        # chown/chmod por descriptor, no por ruta: si la carpeta está dentro de la de un usuario,
+        # este podría cambiarla por un enlace a /etc/shadow justo después de crearla.
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            if os.readlink(f"/proc/self/fd/{fd}") != path:
+                raise OSError("la ruta cambió mientras se creaba (¿un enlace simbólico?)")
+            os.fchown(fd, pwd.getpwnam(owner).pw_uid, grp.getgrnam(group).gr_gid)
+            os.fchmod(fd, int(mode, 8))
+        finally:
+            os.close(fd)
+    except (OSError, LookupError, KeyError) as e:
         _undo_dir(created)
         return None, f"No se pudo crear la carpeta: {e}"
     return created, None

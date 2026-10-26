@@ -1,4 +1,5 @@
 """Administrador de archivos: navegar, editar, crear, mover, permisos, subir/bajar."""
+import contextlib
 import os
 import re
 import stat
@@ -47,6 +48,33 @@ def _path(p):
     if p.startswith("//"):  # POSIX conserva un '//' inicial: '//etc' es /etc y debe contar como protegida
         p = "/" + p.lstrip("/")
     return p
+
+
+@contextlib.contextmanager
+def _pinned(path):
+    """(destino, stat) para pasar a chmod/chown sin carreras de enlaces simbólicos.
+
+    Comprobar la ruta y luego pasársela al comando deja una ventana: un usuario puede cambiar el
+    archivo, o una carpeta intermedia suya, por un enlace a /etc/shadow entre medio. Aquí se abre
+    el objeto sin seguir el último enlace, se confirma que está exactamente en `path` y se entrega
+    /proc/<pid>/fd/<n>, que sigue apuntando a lo ya abierto aunque la ruta cambie después.
+    Si algo falla, el destino es la excepción."""
+    if not hasattr(os, "O_PATH"):  # Windows (pruebas)
+        yield path, os.lstat(path)
+        return
+    try:
+        fd = os.open(path, os.O_PATH | O_NOFOLLOW)
+    except OSError as e:
+        yield e, None
+        return
+    try:
+        st = os.fstat(fd)
+        if os.readlink(f"/proc/self/fd/{fd}") != path:
+            yield ValueError("La ruta pasa por un enlace simbólico; ábrela desde su ubicación real"), st
+        else:
+            yield f"/proc/{os.getpid()}/fd/{fd}" + ("/." if stat.S_ISDIR(st.st_mode) else ""), st
+    finally:
+        os.close(fd)
 
 
 def _open_regular(path):
@@ -396,8 +424,13 @@ def chmod():
         return _bad("Es un enlace simbólico: cambia los permisos del archivo al que apunta, no del enlace")
     if recursive and path in PROTECTED:
         return _bad("No se permite chmod recursivo en una ruta del sistema")
-    code, _, err = run(["chmod", *(["-R"] if recursive else []), mode, "--", path])
-    return jsonify({"ok": code == 0, "error": err.strip()}), (200 if code == 0 else 500)
+    with _pinned(path) as (target, st):
+        if isinstance(target, Exception):
+            return _bad(str(target))
+        if stat.S_ISLNK(st.st_mode):
+            return _bad("Es un enlace simbólico: cambia los permisos del archivo al que apunta, no del enlace")
+        code, _, err = run(["chmod", *(["-R"] if recursive else []), mode, "--", target])
+    return jsonify({"ok": code == 0, "error": err.replace(target, path).strip()}), (200 if code == 0 else 500)
 
 
 @files_bp.route("/api/chown", methods=["POST"])
@@ -420,9 +453,13 @@ def chown():
         return _bad("Usuario o grupo inexistente")
     if recursive and path in PROTECTED:
         return _bad("No se permite chown recursivo en una ruta del sistema")
-    code, _, err = run(["chown", "-h", *(["-R"] if recursive else []),
-                        f"{owner}:{group}", "--", path])
-    return jsonify({"ok": code == 0, "error": err.strip()}), (200 if code == 0 else 500)
+    with _pinned(path) as (target, st):
+        if isinstance(target, Exception):
+            return _bad(str(target))
+        if stat.S_ISLNK(st.st_mode):  # el enlace mismo (-h); no se recorre nada
+            target = path
+        code, _, err = run(["chown", "-h", *(["-R"] if recursive else []), f"{owner}:{group}", "--", target])
+    return jsonify({"ok": code == 0, "error": err.replace(target, path).strip()}), (200 if code == 0 else 500)
 
 
 @files_bp.route("/api/upload", methods=["POST"])

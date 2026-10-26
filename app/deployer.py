@@ -493,8 +493,12 @@ def sign_body(secret, body):
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
+SIG_RE = re.compile(r"sha256=[0-9a-f]{64}")
+
+
 def verify_signature(secret, body, header):
-    if not secret or not isinstance(header, str) or not header.startswith("sha256="):
+    # El formato se valida antes: compare_digest lanza TypeError con caracteres no ASCII (500)
+    if not secret or not isinstance(header, str) or not SIG_RE.fullmatch(header.strip()):
         return False
     return hmac.compare_digest(sign_body(secret, body), header.strip())
 
@@ -867,7 +871,15 @@ def generate_key(name):
         raise OSError((err or out).strip() or "ssh-keygen falló")
     for f in ("deploy_key", "deploy_key.pub"):
         os.chmod(d / f, 0o600)
-    write_file(d / "known_hosts", "")
+    write_file(d / "known_hosts", GITHUB_KNOWN_HOSTS)
+
+
+# Claves de host publicadas por GitHub (https://api.github.com/meta, "ssh_keys"): el primer clone
+# no confía a ciegas en quien responda como github.com. Otros hosts siguen con accept-new.
+GITHUB_KNOWN_HOSTS = (
+    "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n"
+    "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=\n"
+    "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=\n")
 
 
 # ── Nginx ───────────────────────────────────────────────────────────────────
@@ -1642,6 +1654,7 @@ if __name__ == "__main__":
     assert not verify_signature("s3cret", body + b" ", sig) and not verify_signature("otro", body, sig)
     assert not verify_signature("s3cret", body, None) and not verify_signature("", body, sig)
     assert not verify_signature("s3cret", body, sig.replace("sha256=", "sha1="))
+    assert not verify_signature("s3cret", body, "sha256=é" + sig[8:])  # no ASCII: False, no TypeError
     # .env por defecto con servicios
     sec = {"db_password": "P" * 32, "db_root_password": "R" * 32}
     env = dict(parse_env(default_env({"name": "miapp", "port": 8081, "hostname": "", "database": "postgres",

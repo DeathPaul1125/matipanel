@@ -520,6 +520,11 @@ def restore(engine, db):
     if _exec(engine, "SELECT 1;", db=db, timeout=10)[0] != 0:
         return _bad("La base de datos no existe o el servidor no responde")
 
+    if engine == "mysql" and not _my_sandbox_opt():
+        # Sin --sandbox (cliente de Oracle MySQL o MariaDB antiguo) un \! del volcado ejecutaría
+        # comandos del sistema como root.
+        return _bad("El cliente mysql de este servidor no soporta --sandbox; por seguridad, restaura "
+                    "el volcado desde la terminal revisándolo antes.")
     src = gzip.GzipFile(fileobj=f.stream) if f.filename.lower().endswith(".gz") else f.stream
     if engine == "mysql":
         # se detiene en el primer error; --sandbox (si el cliente lo soporta) bloquea \! y similares

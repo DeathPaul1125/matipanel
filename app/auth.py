@@ -114,6 +114,10 @@ def login():
     if request.method == "POST":
         if _too_many_attempts():
             return render_template("login.html"), 429
+        # El intento se cuenta justo tras comprobar el límite, antes de leer el formulario o llamar
+        # a PAM (que tarda ~2 s en el threadpool): así N peticiones en paralelo no pasan todas la
+        # comprobación con el contador en cero. Un login correcto lo reinicia.
+        limiter.fail(request.remote_addr)
 
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -122,9 +126,6 @@ def login():
             flash("Ingresa usuario y contraseña.", "error")
             return render_template("login.html"), 400
 
-        # El intento se cuenta ANTES de PAM: PAM tarda ~2 s y corre en el threadpool, así que
-        # sin esto un atacante podría lanzar muchos intentos en paralelo antes del primer fail().
-        limiter.fail(request.remote_addr)
         # PAM se consulta siempre (también para usuarios que no existen o no tienen permiso):
         # así el tiempo de respuesta no revela qué cuentas son administradoras.
         ok = _valid_credentials_format(username, password)
@@ -164,6 +165,8 @@ def login_2fa():
         ukey = "2fa:" + username
         if _too_many_attempts((user_limiter, ukey)):
             return render_template("login_2fa.html"), 429
+        limiter.fail(request.remote_addr)  # contado antes de leer y verificar (ver login)
+        user_limiter.fail(ukey)
 
         code = request.form.get("code", "").strip().replace(" ", "")[:64]
         ok, is_recovery = _check_second_factor(username, code)
@@ -178,8 +181,6 @@ def login_2fa():
                       "Para obtener códigos nuevos, desactiva y vuelve a activar 2FA en Seguridad.",
                       "info" if left > 2 else "error")
             return redirect(url_for("dashboard.index"))
-        limiter.fail(request.remote_addr)
-        user_limiter.fail(ukey)
         flash("Código inválido.", "error")
         return render_template("login_2fa.html"), 401
 
@@ -257,13 +258,13 @@ def tfa_disable():
     ukey = "2fa:" + current_user.username
     if _too_many_attempts((user_limiter, ukey)):
         return redirect(url_for("auth.security"))
-    code = request.form.get("code", "").strip().replace(" ", "")[:64]
     if not totp.is_enabled(current_user.username):
         return redirect(url_for("auth.security"))
+    limiter.fail(request.remote_addr)  # contado antes de leer y verificar (ver login)
+    user_limiter.fail(ukey)
+    code = request.form.get("code", "").strip().replace(" ", "")[:64]
     ok, _ = _check_second_factor(current_user.username, code) if code else (False, False)
     if not ok:
-        limiter.fail(request.remote_addr)
-        user_limiter.fail(ukey)
         flash("Código inválido: para desactivar 2FA ingresa el código actual de tu app "
               "o un código de recuperación.", "error")
         return redirect(url_for("auth.security"))

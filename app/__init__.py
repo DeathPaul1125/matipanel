@@ -15,6 +15,19 @@ import os
 from urllib.parse import urlparse
 import secrets
 
+try:
+    from gevent import Timeout as _Timeout
+except ImportError:  # desarrollo sin gevent: sin tiempo máximo
+    class _Timeout(Exception):
+        def __init__(self, seconds=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
 
 def create_app():
     app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -60,9 +73,21 @@ def create_app():
     @app.before_request
     def _limit_anonymous_body():
         # El límite de 1 GB es para subidas de usuarios ya autenticados; sin sesión
-        # (login, 2FA, API remota) basta con 64 KB.
-        if request.content_length and request.content_length > 64 * 1024                 and not current_user.is_authenticated and not request.path.startswith(WEBHOOK_PREFIX):
+        # (login, 2FA, API remota) basta con 64 KB. El webhook lee su cuerpo con su propio tope.
+        if current_user.is_authenticated or request.path.startswith(WEBHOOK_PREFIX):
+            return
+        if request.headers.get("Transfer-Encoding"):
+            abort(411)  # sin Content-Length (chunked) el tope de 64 KB no se podría aplicar
+        if (request.content_length or 0) > 64 * 1024:
             abort(413)
+        if request.content_length:
+            # Leer el cuerpo aquí, con tiempo máximo: un cliente que lo envía byte a byte no puede
+            # retener el único worker, y las vistas (login/2FA) ya no ceden el control al leerlo.
+            try:
+                with _Timeout(15):
+                    request.get_data(cache=True)
+            except _Timeout:
+                abort(408)
 
     @app.before_request
     def _csrf_origin_check():

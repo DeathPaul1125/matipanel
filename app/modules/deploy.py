@@ -513,6 +513,7 @@ def container_logs(name):
     except D.Fail as e:
         return _err(str(e), 503)
     code, out = D._run_capped(cmd, 1024 * 1024, 20)
+    out = D.redactor_for(name)(out)  # igual que artisan: los secretos del .env no llegan al navegador
     return jsonify({"ok": code == 0 or bool(out), "logs": out, "error": "" if code == 0 else out.strip()[-500:]})
 
 

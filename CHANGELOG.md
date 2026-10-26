@@ -1,5 +1,17 @@
 # Changelog
 
+## [Sin publicar]
+
+### Seguridad (auditoría con security-review)
+- Archivos: chmod y chown ya no siguen un enlace simbólico puesto entre la comprobación y el cambio (se opera sobre el descriptor abierto).
+- Compartidos: la carpeta nueva de Samba/NFS se ajusta por descriptor; un enlace puesto justo tras crearla ya no desvía el chown/chmod.
+- Sin sesión: se rechaza el cuerpo chunked (saltaba el tope de 64 KB) y el cuerpo se lee con tiempo máximo de 15 s; gunicorn admite 1000 conexiones.
+- Login y 2FA: el intento se cuenta antes de leer el formulario (peticiones en paralelo ya no esquivan el límite).
+- Webhook: una firma con caracteres no ASCII da 403 en vez de 500 (revelaba qué apps existen).
+- Despliegues: claves de host de GitHub precargadas en `known_hosts`; los logs de contenedores ocultan los secretos del `.env`.
+- Bases de datos: la restauración MySQL se niega si el cliente no soporta `--sandbox`.
+- Despliegues: si Nginx no arranca al instalarlo, se muestra la causa (puerto 80 ocupado, `nginx -t`, journal).
+
 ## [0.4.0] - 2026-10-26
 
 ### Añadido
