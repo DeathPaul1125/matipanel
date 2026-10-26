@@ -759,8 +759,9 @@ def _checkconf():
 
 
 def _checkzone(zone, path):
-    # -i local: como named, solo comprueba integridad de nombres dentro de la zona (sin consultas externas)
-    code, out, err = run(["named-checkzone", "-i", "local", zone, path], timeout=30)
+    # Igual que named con una zona primaria: -k fail (check-names) e -i local (integridad solo de nombres
+    # dentro de la zona, sin consultas externas que fallarían si el servidor aún no resuelve).
+    code, out, err = run(["named-checkzone", "-k", "fail", "-i", "local", zone, path], timeout=30)
     return code == 0, _out(code, out, err)
 
 

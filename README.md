@@ -35,6 +35,12 @@ Administra tu servidor Linux desde el navegador: sistema, usuarios, servicios, a
 | **Terminal** | Shell real en el navegador como tu usuario |
 | **Seguridad** | 2FA TOTP (Google Authenticator, Aegis…) con códigos de recuperación |
 | **Apariencia** | Tema claro/oscuro, color de acento, color de la barra lateral, tamaño, densidad, bordes, tipografía y secciones del dashboard (se guarda por usuario) |
+| **Correo** | Postfix y Dovecot: configuración, cola de correo, alias, SSL, registro y correo de prueba |
+| **DNS** | BIND 9: zonas primarias, inversas y secundarias, registros (A, AAAA, CNAME, MX, TXT, NS, SRV, CAA, PTR), SOA, reenviadores y pruebas con `dig` |
+| **Compartidos** | Samba (recursos, configuración global, usuarios, sesiones) y NFS (exports) |
+| **Almacenamiento** | LVM (PV, VG, LV, snapshots), RAID con mdadm y cuotas de disco |
+| **Multi-servidor** | Monitorea otros MatiPanel desde uno solo, con tokens de solo lectura y huella de certificado |
+| **Ayuda** | Documentación completa dentro del panel, con índice y buscador (también en `app/docs/`) |
 
 ## 🔐 Seguridad
 
@@ -166,13 +172,19 @@ matipanel/
 └── requirements.txt
 ```
 
+## 📖 Documentación
+
+La guía de usuario completa está en [`app/docs/`](app/docs/) y también dentro del panel en **Menú → Cuenta → Ayuda** (o con el botón **?** de cada pantalla).
+
 ## 🗺️ Roadmap
 
-- [ ] Gestión de correo (Postfix/Dovecot)
-- [ ] DNS (BIND)
-- [ ] Samba / NFS
-- [ ] Cuotas de disco y RAID/LVM
-- [ ] Multi-servidor
+- [x] Gestión de correo (Postfix/Dovecot)
+- [x] DNS (BIND)
+- [x] Samba / NFS
+- [x] Cuotas de disco y RAID/LVM
+- [x] Multi-servidor
+- [ ] Gestión de DNSSEC y zonas inversas IPv6
+- [ ] Buzones virtuales de correo
 
 ## 📜 Licencia
 

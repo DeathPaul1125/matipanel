@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.0] - 2026-10-26
+
+### Añadido
+- 📧 **Correo** — Postfix y Dovecot: instalación, configuración de `main.cf`, cola, alias, SSL y correo de prueba.
+- 🌐 **DNS** — BIND 9: zonas primarias/inversas/secundarias, registros, SOA, reenviadores, `dig`.
+- 📂 **Compartidos** — Samba (recursos, usuarios, sesiones) y NFS (exports).
+- 🧱 **Almacenamiento** — LVM, RAID (mdadm) y cuotas de disco.
+- 🛰️ **Multi-servidor** — monitorea otros MatiPanel con tokens de solo lectura y certificado anclado.
+- 📖 **Ayuda** — 30 capítulos de documentación de usuario con índice, buscador y ayuda contextual (botón ?).
+- 🎨 **Apariencia** — acento, barra lateral (azul oscuro por defecto), tamaño, densidad, bordes, tipografía y secciones del dashboard, por usuario.
+- 📈 **Historial persistente** — métricas en SQLite durante 7 días, rangos de 5 min a 7 días, cortes visibles cuando el servidor estuvo apagado.
+- 🧱 **Firewall** — instalar UFW con un clic, accesos rápidos para servicios comunes, reglas visibles con UFW inactivo.
+- 📤 **Subida de archivos** estilo Webmin: arrastrar y soltar, carpetas, sobrescribir, extraer al finalizar.
+- 💙 Dedicatoria a Matías Aceituno.
+
+### Corregido
+- 2FA falla cerrado si su archivo está dañado o falta `pyotp`; desactivarlo pide el código.
+- La sesión caduca tras 1 hora sin actividad.
+- Editor: avisa antes de descartar cambios y abre en solo lectura archivos que no son UTF-8.
+- Cron ya no muestra comentarios de ejemplo como tareas; la retención de respaldos solo borra los automáticos.
+- Varios detalles en Docker, Nginx, SSL, Logs, Terminal, Servicios, Procesos y Usuarios.
+
 ## [0.3.0] - 2026-10-26
 
 ### Añadido (módulos estilo Webmin)
