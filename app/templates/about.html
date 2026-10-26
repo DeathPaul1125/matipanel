@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Acerca de{% endblock %}
+{% block heading %}Acerca de MatiPanel{% endblock %}
+
+{% block content %}
+<div class="about">
+
+  {#- Dedicatoria. Para cambiar el texto, edita solo este bloque. -#}
+  <article class="letter">
+    <div class="letter-mark">
+      <div class="brand-icon" title="M de Matías 💙">M</div>
+      <div>
+        <div class="letter-kicker">Dedicado a</div>
+        <h1 class="letter-name">Matías Aceituno</h1>
+      </div>
+    </div>
+
+    <div class="letter-body">
+      <p class="lead">Mi hijo, mi inspiración.</p>
+      <p>Este panel lleva tu nombre porque cada línea de su código la escribí pensando en ti.
+         La "M" que aparece en cada pantalla es tuya: así te tengo cerca todos los días, mientras trabajo.</p>
+      <p>Cuando el trabajo se pone difícil, ver tu nombre aquí me recuerda por qué y por quién lo hago.</p>
+      <p>Ojalá crezcas con curiosidad, con ganas de aprender y de construir cosas, y con un corazón noble.
+         Y que algún día abras este proyecto y sepas que estuviste conmigo en cada día de trabajo.</p>
+    </div>
+
+    <div class="letter-sign">Con todo mi amor 💙</div>
+    <div class="letter-heart" aria-hidden="true">♥</div>
+  </article>
+
+  <div class="card">
+    <div class="card-head"><h3>Sobre MatiPanel</h3><span class="pill ok">v{{ version }}</span></div>
+    <dl class="kv" style="grid-template-columns: minmax(0, 1fr);">
+      <div><dt>Qué es</dt><dd>Administrador web para servidores Linux, inspirado en Webmin y Cockpit.</dd></div>
+      <div><dt>Servidor</dt><dd class="mono">{{ hostname }}</dd></div>
+      <div><dt>Hecho con</dt><dd>Python · Flask · gevent · psutil · xterm.js · IBM Plex</dd></div>
+      <div><dt>Licencia</dt><dd>MIT</dd></div>
+    </dl>
+  </div>
+</div>
+{% endblock %}

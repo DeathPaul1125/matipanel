@@ -1,4 +1,9 @@
-"""MatiPanel - Administrador de servidores Linux."""
+"""MatiPanel - Administrador de servidores Linux.
+
+Dedicado a Matías Aceituno, la inspiración de este proyecto. 💙
+"""
+__version__ = "0.3.0"
+
 from flask import Flask, request, abort
 from flask_login import LoginManager
 from flask_sock import Sock

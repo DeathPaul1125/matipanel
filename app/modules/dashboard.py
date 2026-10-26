@@ -96,6 +96,13 @@ def index():
     )
 
 
+@dashboard_bp.route("/acerca")
+@login_required
+def about():
+    from .. import __version__
+    return render_template("about.html", version=__version__, hostname=socket.gethostname())
+
+
 @dashboard_bp.route("/api/stats")
 @login_required
 def stats():

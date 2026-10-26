@@ -467,6 +467,36 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); width: 15
 .login-foot { font-size: 12px; color: var(--text-faint); text-align: center; margin: 20px 0 0; line-height: 1.6; text-wrap: pretty; }
 .login-theme { position: fixed; top: 16px; right: 16px; }
 
+/* ── Dedicatoria a Matías ── */
+.dedication-link {
+  display: block; margin: 0 10px 8px; padding: 8px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text-muted); text-decoration: none;
+}
+.dedication-link:hover { background: var(--accent-bg); color: var(--accent-text); text-decoration: none; }
+.login-love { text-align: center; font-size: 12.5px; color: var(--text-muted); margin: 18px 0 0; }
+.login-love b { color: var(--accent-text); font-weight: 600; }
+.health-greet { font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 2px; }
+
+.about { max-width: 720px; margin: 8px auto 0; }
+.letter {
+  position: relative; overflow: hidden;
+  padding: 40px 44px 36px; margin-bottom: 16px;
+  border-radius: 18px; border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at 100% 0%, var(--accent-bg), transparent 55%),
+    var(--surface);
+}
+.letter-mark { display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+.letter-mark .brand-icon { width: 52px; height: 52px; font-size: 26px; border-radius: 14px; }
+.letter-kicker { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); font-weight: 500; }
+.letter-name { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.15; margin: 2px 0 0; }
+.letter-body { font-size: 16px; line-height: 1.75; color: var(--text); text-wrap: pretty; }
+.letter-body p { margin: 0 0 16px; }
+.letter-body .lead { font-size: 18px; color: var(--accent-text); font-weight: 500; }
+.letter-sign { margin-top: 26px; color: var(--text-muted); font-size: 14px; }
+.letter-heart { position: absolute; right: -18px; bottom: -28px; font-size: 140px; opacity: 0.06; pointer-events: none; user-select: none; }
+@media (max-width: 600px) { .letter { padding: 28px 22px; } .letter-name { font-size: 23px; } }
+
 /* ── Modales, formularios, pestañas ── */
 .modal {
   display: none; position: fixed; inset: 0; z-index: 100;

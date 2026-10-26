@@ -7,6 +7,7 @@
 <section class="health" id="health" data-level="ok">
   <span class="led lg live" id="health-led"></span>
   <div class="health-main">
+    <div class="health-greet" id="greet">Hola, {{ user }}</div>
     <h1 class="health-verdict" id="health-verdict">Revisando el servidor…</h1>
     <div class="health-sub">
       <span class="mono">{{ user }}@{{ hostname }}</span> · {{ distro }} · encendido hace <span id="uptime">{{ uptime }}</span>
@@ -237,6 +238,12 @@ function renderHealth() {
   $('health-led').className = 'led lg live ' + (lvl === 'ok' ? '' : lvl);
   $('health-verdict').textContent = lvl === 'ok' ? 'Todo en orden'
     : 'Atención: ' + issues.map(i => i.msg).join(' · ');
+}
+
+// Saludo según la hora del navegador
+{
+  const h = new Date().getHours();
+  $('greet').textContent = (h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches') + ', {{ user }}';
 }
 
 tick(); loadHistory(); loadOverview();
