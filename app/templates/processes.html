@@ -21,6 +21,7 @@
 {% block scripts %}
 <script>
 let allProcs = [];
+const KILL_URL = "{{ url_for('processes.kill', pid=999999999) }}";
 
 async function loadProcesses() {
   const r = await fetch("{{ url_for('processes.list_processes') }}");
@@ -41,21 +42,28 @@ function render() {
   }
   tbody.innerHTML = filtered.map(p => `
     <tr>
-      <td class="mono">${p.pid}</td>
+      <td class="mono">${escapeHtml(p.pid)}</td>
       <td>${escapeHtml(p.user)}</td>
       <td class="mono truncate" title="${escapeHtml(p.cmd)}">${escapeHtml(p.cmd)}</td>
-      <td>${p.cpu}</td>
-      <td>${p.mem}</td>
+      <td>${escapeHtml(p.cpu)}</td>
+      <td>${escapeHtml(p.mem)}</td>
       <td><span class="pill mute">${escapeHtml(p.status)}</span></td>
-      <td class="mono">${p.running}</td>
-      <td><button class="btn btn-sm btn-danger" onclick="killProc(${p.pid})">Kill</button></td>
+      <td class="mono">${escapeHtml(p.running)}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="killProc(${jsArg(p.pid)}, ${jsArg(p.cmd)})">Kill</button></td>
     </tr>
   `).join('');
 }
 
-async function killProc(pid) {
-  if (!await ui.confirm('¿Enviar SIGTERM al proceso ' + pid + '?', { title: 'Terminar proceso', danger: true, confirmText: 'Terminar' })) return;
-  const r = await fetch("/processes/api/kill/" + pid, { method: 'POST' });
+async function killProc(pid, cmd) {
+  const v = await ui.form({
+    title: 'Terminar proceso ' + pid, danger: true, confirmText: 'Terminar',
+    text: '¿Enviar SIGTERM al proceso ' + pid + '? Se le pide que cierre de forma ordenada.\n\n' + (cmd || ''),
+    fields: [{ name: 'force', type: 'checkbox', label: 'Forzar (SIGKILL)',
+               help: 'Lo mata al instante, sin dejarle guardar ni cerrar nada. Úsalo si no responde a SIGTERM.' }],
+  });
+  if (!v) return;
+  const url = KILL_URL.replace('999999999', encodeURIComponent(pid)) + (v.force ? '?force=1' : '');
+  const r = await fetch(url, { method: 'POST' });
   const d = await r.json();
   if (!d.ok) ui.alert(d.error, { title: 'No se pudo terminar el proceso', icon: 'error' });
   setTimeout(loadProcesses, 500);
