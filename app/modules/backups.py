@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import sys
 from datetime import datetime
 from flask import Blueprint, render_template, jsonify, request, send_file
@@ -207,6 +208,31 @@ def _check_dir(p):
     return p if os.path.isdir(p) else None
 
 
+def _target_problem(target):
+    """Un destino distinto de / debe ser de root y no escribible por otros usuarios, igual que sus
+    carpetas superiores (salvo las de sticky bit, como /tmp, donde nadie puede renombrar lo ajeno).
+
+    tar extrae como root: si un usuario puede crear o renombrar cosas en el destino, puede dejar
+    o colar a mitad de la extracción un symlink (p. ej. etc -> /etc) y tar escribiría a través de él.
+    """
+    if os.path.realpath(target) != os.path.abspath(target):
+        return "Destino inválido: no puede pasar por enlaces simbólicos"
+    cur, first = os.path.abspath(target), True
+    while True:
+        st = os.lstat(cur)
+        if st.st_uid != 0:
+            return (f"Destino inseguro: {cur} pertenece a otro usuario. "
+                    "Crea una carpeta de root (p. ej. /root/restaurado) y restaura ahí.")
+        writable = st.st_mode & 0o002 or (st.st_mode & 0o020 and st.st_gid != 0)
+        if writable and (first or not st.st_mode & stat.S_ISVTX):
+            return (f"Destino inseguro: otros usuarios pueden escribir en {cur}. "
+                    "Crea una carpeta de root (p. ej. /root/restaurado) y restaura ahí.")
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur, first = parent, False
+
+
 @backups_bp.route("/")
 @login_required
 def index():
@@ -265,6 +291,8 @@ def restore():
         return _err("Destino inválido: debe ser un directorio absoluto existente")
     if target == "/" and d.get("confirm") != "RESTAURAR":
         return _err("Restaurar sobre / requiere escribir RESTAURAR")
+    if target != "/" and (problem := _target_problem(target)):
+        return _err(problem)
     code, out, err = run(["tar", "-xzf", p, "-C", target], timeout=3600)
     if code != 0:
         return _err(err.strip() or "tar falló", 500)

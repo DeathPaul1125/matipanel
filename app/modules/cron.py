@@ -13,7 +13,7 @@ _TOK = (r"(?:\*|\d+|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
         r"|sun|mon|tue|wed|thu|fri|sat)")
 FIELD_RE = re.compile(rf"^{_TOK}(?:[-/,]{_TOK})*$", re.I)
 ENV_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*=")
-USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
+USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}\Z")
 SPOOL_DIRS = ("/var/spool/cron/crontabs", "/var/spool/cron")  # Debian, RHEL
 # Marca de las tareas desactivadas por el panel. Un "# 0 5 * * 1 tar …" cualquiera (como la
 # plantilla de ejemplo de Debian) es solo un comentario: no se lista ni se puede "activar".
@@ -36,10 +36,22 @@ def parse_job(line):
     return None
 
 
+def split_lines(text):
+    """Líneas como las ve cron: separadas solo por salto de línea (LF).
+
+    str.splitlines() también corta en VT, FF, FS/GS/RS, NEL, U+2028…: una crontab con esos
+    caracteres dentro de un comentario mostraría (y al guardar convertiría en real) una tarea oculta.
+    """
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [l[:-1] if l.endswith("\r") else l for l in lines]
+
+
 def parse_crontab(text):
     """Texto -> lista de entradas; cada una conserva su línea original en 'raw'."""
     entries = []
-    for i, raw in enumerate(text.splitlines()):
+    for i, raw in enumerate(split_lines(text)):
         e = {"i": i, "raw": raw, "type": "other"}
         s = raw.strip()
         if s.startswith(OFF_MARK):
@@ -138,7 +150,7 @@ def _load_for_edit(data):
     text, err = _read(user)
     if text is None:
         return None, None, None, _err(err, 500)
-    lines = text.splitlines()
+    lines = split_lines(text)
     idx = data.get("index")
     if idx is None:
         return user, lines, None, None
@@ -272,4 +284,8 @@ if __name__ == "__main__":
     assert build_schedule(dict(minute="0", hour="*/2", day="1-15", month="jan,jun", weekday="*")) == "0 */2 1-15 jan,jun *"
     assert build_schedule(dict(minute="0;rm", hour="*", day="*", month="*", weekday="*")) is None
     assert serialize([]) == ""
+    # FF / U+2028 no parten la línea (cron solo separa por LF)
+    es = parse_crontab("# nota\x0c* * * * * oculto\n#x\u2028@reboot y\n")
+    assert [e["type"] for e in es] == ["other", "other"] and len(split_lines("a\nb\n")) == 2
+    assert not USER_RE.match("root\n")
     print("ok")

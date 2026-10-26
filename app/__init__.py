@@ -53,6 +53,13 @@ def create_app():
         return load_user(user_id)
 
     @app.before_request
+    def _limit_anonymous_body():
+        # El límite de 1 GB es para subidas de usuarios ya autenticados; sin sesión
+        # (login, 2FA, API remota) basta con 64 KB.
+        if request.content_length and request.content_length > 64 * 1024                 and not current_user.is_authenticated:
+            abort(413)
+
+    @app.before_request
     def _csrf_origin_check():
         # Los navegadores mandan Origin en todo POST; si no coincide con el host, es CSRF.
         if request.method in ("POST", "PUT", "DELETE") and request.headers.get("Origin")                 and not same_origin():
