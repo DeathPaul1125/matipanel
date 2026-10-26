@@ -25,3 +25,12 @@ window.postJSON = async function(url, data) {
     return { ok: false, error: String(e) };
   }
 };
+
+// Menú móvil: cerrar al tocar el fondo, al elegir una sección o con Escape
+document.addEventListener('click', e => {
+  if (!document.body.classList.contains('nav-open')) return;
+  if (e.target === document.body || e.target.closest('.nav-item')) document.body.classList.remove('nav-open');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.body.classList.remove('nav-open');
+});

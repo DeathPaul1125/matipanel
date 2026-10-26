@@ -4,9 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Iniciar sesión · MatiPanel</title>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body class="login-body">
+  <div class="login-theme">{% include "_theme_toggle.html" %}</div>
   <div class="login-card">
     <div class="login-brand">
       <div class="brand-icon big">M</div>

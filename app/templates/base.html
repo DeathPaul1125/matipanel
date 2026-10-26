@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}MatiPanel{% endblock %} · MatiPanel</title>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text x='2' y='20' font-size='20'>🐧</text></svg>">
 </head>
@@ -67,17 +68,22 @@
         {% endfor %}
       </nav>
       <div class="sidebar-foot">
-        <span>{{ current_user.username if current_user.is_authenticated else '' }}</span>
-        <a href="{{ url_for('auth.logout') }}">Salir</a>
+        <span class="mono">{{ current_user.username if current_user.is_authenticated else '' }}</span>
+        <a href="{{ url_for('auth.logout') }}">Cerrar sesión</a>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <div class="topbar-title">{% block heading %}{% endblock %}</div>
+        <div class="topbar-title">
+          <button class="icon-btn menu-btn" onclick="document.body.classList.toggle('nav-open')" aria-label="Menú">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <span>{% block heading %}{% endblock %}</span>
+        </div>
         <div class="topbar-meta">
-          <span class="badge badge-ok"><span class="dot"></span> Online</span>
-          <span class="muted">Uptime <span id="topbar-uptime">—</span></span>
+          <span class="hide-sm mono">{{ request.host.split(':')[0] }}</span>
+          {% include "_theme_toggle.html" %}
         </div>
       </header>
       <section class="content">

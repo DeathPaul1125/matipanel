@@ -1,100 +1,240 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
-{% block heading %}Dashboard · {{ user }}@{{ hostname }}{% endblock %}
+{% block heading %}Dashboard{% endblock %}
 
 {% block content %}
+{# Veredicto de salud: lo primero que quiere saber quien administra el servidor #}
+<section class="health" id="health" data-level="ok">
+  <span class="led lg live" id="health-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="health-verdict">Revisando el servidor…</h1>
+    <div class="health-sub">
+      <span class="mono">{{ user }}@{{ hostname }}</span> · {{ distro }} · kernel {{ kernel }} ({{ arch }}) · encendido hace <span id="uptime">{{ uptime }}</span>
+    </div>
+  </div>
+  <div class="health-chips">
+    <a class="chip" href="{{ url_for('services.index') }}"><span class="led sm mute" id="chip-failed-led"></span><b id="chip-failed">—</b> servicios con fallo</a>
+    <a class="chip" href="{{ url_for('packages.index') }}"><b id="chip-updates">—</b> actualizaciones</a>
+    <a class="chip" href="{{ url_for('system.index') }}"><b id="chip-sessions">—</b> sesiones</a>
+  </div>
+</section>
+
 <div class="grid grid-4">
-  <div class="stat">
-    <div class="stat-lbl">CPU</div>
-    <div class="stat-val" id="stat-cpu">—</div>
-    <div class="bar"><span id="bar-cpu"></span></div>
-    <div class="stat-sub" id="stat-cpu-sub">cargando…</div>
+  <div class="vital">
+    <div class="vital-head"><span class="vital-lbl">CPU</span><span class="vital-meta">{{ cores }} núcleos</span></div>
+    <div class="vital-val" id="cpu-val">—</div>
+    <svg class="trace" id="cpu-trace" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="vital-meta" id="cpu-meta">últimos 3 minutos</div>
   </div>
-  <div class="stat">
-    <div class="stat-lbl">Memoria</div>
-    <div class="stat-val" id="stat-mem">—</div>
-    <div class="bar"><span id="bar-mem"></span></div>
-    <div class="stat-sub" id="stat-mem-sub">cargando…</div>
+  <div class="vital">
+    <div class="vital-head"><span class="vital-lbl">Memoria</span><span class="vital-meta" id="mem-total"></span></div>
+    <div class="vital-val" id="mem-val">—</div>
+    <svg class="trace" id="mem-trace" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="vital-meta" id="mem-meta">—</div>
   </div>
-  <div class="stat">
-    <div class="stat-lbl">Disco /</div>
-    <div class="stat-val" id="stat-disk">—</div>
-    <div class="bar"><span id="bar-disk"></span></div>
-    <div class="stat-sub" id="stat-disk-sub">cargando…</div>
+  <div class="vital">
+    <div class="vital-head"><span class="vital-lbl">Disco /</span><span class="vital-meta" id="disk-total"></span></div>
+    <div class="vital-val" id="disk-val">—</div>
+    <div class="bar" style="margin:22px 0 14px;"><span id="disk-bar" style="width:0"></span></div>
+    <div class="vital-meta" id="disk-meta">—</div>
   </div>
-  <div class="stat">
-    <div class="stat-lbl">Red</div>
-    <div class="stat-val" id="stat-net">—</div>
-    <div class="stat-sub" id="stat-net-sub">cargando…</div>
+  <div class="vital">
+    <div class="vital-head"><span class="vital-lbl">Red</span>
+      <span class="vital-meta"><span class="legend"><i></i>bajada</span> &nbsp;<span class="legend"><i class="alt"></i>subida</span></span></div>
+    <div class="vital-val" id="net-val">—</div>
+    <svg class="trace" id="net-trace" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="vital-meta" id="net-meta">—</div>
   </div>
 </div>
 
-<div class="grid grid-2">
+<div class="dash-cols">
   <div class="card">
-    <h3>Información del sistema</h3>
-    <table class="lx">
-      <tr><td class="muted">Hostname</td><td class="mono right">{{ hostname }}</td></tr>
-      <tr><td class="muted">Distro</td><td class="right">{{ distro }}</td></tr>
-      <tr><td class="muted">Kernel</td><td class="mono right">{{ kernel }}</td></tr>
-      <tr><td class="muted">Arquitectura</td><td class="mono right">{{ arch }}</td></tr>
-      <tr><td class="muted">Uptime</td><td class="right" id="info-uptime">{{ uptime }}</td></tr>
-      <tr><td class="muted">Usuario</td><td class="mono right">{{ user }}</td></tr>
-    </table>
+    <div class="card-head"><h3>Procesos con más CPU</h3><a href="{{ url_for('processes.index') }}">Ver todos →</a></div>
+    <div class="table-wrap">
+      <table class="lx" id="top-table">
+        <thead><tr><th>Proceso</th><th>Usuario</th><th class="right">PID</th><th class="right">CPU</th><th class="right">Memoria</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card-head"><h3>Carga del sistema</h3><span class="muted small">relativa a {{ cores }} núcleos</span></div>
+      <div id="load-rows"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Almacenamiento</h3><a href="{{ url_for('disk.index') }}">Detalle →</a></div>
+      <div id="parts"><div class="empty">Cargando…</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="dash-cols">
+  <div class="card">
+    <div class="card-head"><h3>Accesos rápidos</h3></div>
+    <div class="quick">
+      <a href="{{ url_for('terminal.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Terminal</a>
+      <a href="{{ url_for('files.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Archivos</a>
+      <a href="{{ url_for('services.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4"/></svg>Servicios</a>
+      <a href="{{ url_for('packages.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.3 7 12 12 20.7 7"/></svg>Paquetes</a>
+      <a href="{{ url_for('logs.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Logs</a>
+      <a href="{{ url_for('backups.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><rect x="1" y="3" width="22" height="5"/></svg>Respaldos</a>
+    </div>
   </div>
   <div class="card">
-    <h3>Carga (loadavg)</h3>
-    <table class="lx">
-      <tr><td class="muted">Última 1 min</td><td class="mono right" id="load-1">—</td></tr>
-      <tr><td class="muted">Últimos 5 min</td><td class="mono right" id="load-5">—</td></tr>
-      <tr><td class="muted">Últimos 15 min</td><td class="mono right" id="load-15">—</td></tr>
-      <tr><td class="muted">Núcleos</td><td class="mono right" id="cpu-count">—</td></tr>
-    </table>
+    <div class="card-head"><h3>Servicios con fallo</h3><a href="{{ url_for('services.index') }}">Servicios →</a></div>
+    <div id="failed-list"><div class="empty">Cargando…</div></div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-async function refreshStats() {
-  try {
-    const r = await fetch("{{ url_for('dashboard.stats') }}");
-    if (!r.ok) return;
-    const d = await r.json();
-    document.getElementById('stat-cpu').textContent = d.cpu.percent + '%';
-    document.getElementById('stat-cpu-sub').textContent = d.cpu.count + ' núcleos · load ' + d.cpu.load[0];
-    document.getElementById('bar-cpu').style.width = d.cpu.percent + '%';
+const N = 60;                                   // 60 muestras × 3 s = 3 minutos de historia
+const hist = { cpu: [], mem: [], rx: [], tx: [] };
+let lastNet = null, latest = null, overview = null;
+const $ = id => document.getElementById(id);
 
-    document.getElementById('stat-mem').textContent = d.memory.used_h + ' / ' + d.memory.total_h;
-    document.getElementById('stat-mem-sub').textContent = d.memory.percent + '% en uso';
-    document.getElementById('bar-mem').style.width = d.memory.percent + '%';
+function push(arr, v) { arr.push(v); if (arr.length > N) arr.shift(); }
+function level(pct, warn, err) { return pct >= err ? 'err' : pct >= warn ? 'warn' : ''; }
 
-    document.getElementById('stat-disk').textContent = d.disk.used_h + ' / ' + d.disk.total_h;
-    document.getElementById('stat-disk-sub').textContent = d.disk.percent + '% en uso';
-    document.getElementById('bar-disk').style.width = d.disk.percent + '%';
-
-    document.getElementById('stat-net').textContent = '↓ ' + d.network.rx_h;
-    document.getElementById('stat-net-sub').textContent = '↑ ' + d.network.tx_h;
-
-    document.getElementById('load-1').textContent = d.cpu.load[0];
-    document.getElementById('load-5').textContent = d.cpu.load[1];
-    document.getElementById('load-15').textContent = d.cpu.load[2];
-    document.getElementById('cpu-count').textContent = d.cpu.count;
-
-    const upt = document.getElementById('topbar-uptime');
-    if (upt) upt.textContent = d.uptime;
-    document.getElementById('info-uptime').textContent = d.uptime;
-
-    // Tonos de las barras según uso
-    ['cpu','mem','disk'].forEach(k => {
-      const pct = d[k === 'mem' ? 'memory' : k].percent;
-      const bar = document.getElementById('bar-' + k).parentElement;
-      bar.classList.remove('warn','err');
-      if (pct >= 85) bar.classList.add('err');
-      else if (pct >= 65) bar.classList.add('warn');
-    });
-  } catch(e) {}
+function rate(bps) {
+  const u = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  let i = 0;
+  while (bps >= 1024 && i < u.length - 1) { bps /= 1024; i++; }
+  return (bps < 10 && i ? bps.toFixed(1) : Math.round(bps)) + ' ' + u[i];
 }
-refreshStats();
-setInterval(refreshStats, 3000);
+
+// Traza: área + línea escalada a `max`, alineada a la derecha (lo más reciente)
+function path(values, max) {
+  const step = 100 / (N - 1), off = (N - values.length) * step;
+  return values.map((v, i) => `${(off + i * step).toFixed(2)},${(40 - Math.min(v / max, 1) * 38).toFixed(2)}`);
+}
+function trace(svg, series, max) {
+  let html = '<line class="base" x1="0" y1="39.5" x2="100" y2="39.5"/>';
+  series.forEach((s, idx) => {
+    if (s.length < 2) return;
+    const pts = path(s, max);
+    if (idx === 0 && s.length > 4) html += `<polygon class="area" points="${pts[0].split(',')[0]},40 ${pts.join(' ')} 100,40"/>`;
+    html += `<polyline class="line${idx ? ' alt' : ''}" points="${pts.join(' ')}"/>`;
+  });
+  svg.innerHTML = html;
+}
+
+async function tick() {
+  let d;
+  try { d = await (await fetch("{{ url_for('dashboard.stats') }}")).json(); } catch (e) { return; }
+  latest = d;
+  push(hist.cpu, d.cpu.percent);
+  push(hist.mem, d.memory.percent);
+  if (lastNet) {
+    const dt = Math.max(d.ts - lastNet.ts, 0.5);
+    push(hist.rx, Math.max(0, (d.network.rx - lastNet.rx) / dt));
+    push(hist.tx, Math.max(0, (d.network.tx - lastNet.tx) / dt));
+  }
+  lastNet = { ts: d.ts, rx: d.network.rx, tx: d.network.tx };
+
+  $('cpu-val').innerHTML = `${Math.round(d.cpu.percent)}<small>%</small>`;
+  $('cpu-trace').setAttribute('class', 'trace ' + level(d.cpu.percent, 75, 90));
+  trace($('cpu-trace'), [hist.cpu], 100);
+  const avg = hist.cpu.reduce((a, b) => a + b, 0) / hist.cpu.length;
+  $('cpu-meta').textContent = `promedio ${avg.toFixed(0)}% · máx ${Math.max(...hist.cpu).toFixed(0)}% (3 min)`;
+
+  $('mem-val').innerHTML = `${Math.round(d.memory.percent)}<small>%</small>`;
+  $('mem-total').textContent = d.memory.total_h;
+  $('mem-trace').setAttribute('class', 'trace ' + level(d.memory.percent, 85, 95));
+  trace($('mem-trace'), [hist.mem], 100);
+  $('mem-meta').textContent = `${d.memory.used_h} en uso · ${d.memory.available_h} libre`
+    + (d.swap.total_h !== '0.0 B' ? ` · swap ${Math.round(d.swap.percent)}%` : '');
+
+  $('disk-val').innerHTML = `${Math.round(d.disk.percent)}<small>%</small>`;
+  $('disk-total').textContent = d.disk.total_h;
+  $('disk-bar').style.width = d.disk.percent + '%';
+  $('disk-bar').parentElement.className = 'bar ' + level(d.disk.percent, 80, 90);
+  $('disk-meta').textContent = `${d.disk.used_h} usados · ${d.disk.free_h} libres`;
+
+  if (hist.rx.length) {
+    const rx = hist.rx.at(-1), tx = hist.tx.at(-1);
+    $('net-val').innerHTML = rate(rx).replace(/ (\S+)$/, '<small>$1</small>');
+    $('net-meta').textContent = `↓ ${rate(rx)} · ↑ ${rate(tx)}`;
+    trace($('net-trace'), [hist.rx, hist.tx], Math.max(...hist.rx, ...hist.tx, 1024));
+  }
+
+  $('uptime').textContent = d.uptime;
+  renderLoad(d);
+  renderHealth();
+}
+
+function renderLoad(d) {
+  const names = ['1 minuto', '5 minutos', '15 minutos'];
+  $('load-rows').innerHTML = d.cpu.load.map((l, i) => {
+    const pct = Math.min(100, l / d.cpu.count * 100);
+    return `<div class="meter-row"><span class="meter-name">${names[i]}</span>
+      <span class="meter-val">${l.toFixed(2)} · ${Math.round(pct)}%</span>
+      <div class="bar ${level(pct, 70, 100)}"><span style="width:${pct}%"></span></div></div>`;
+  }).join('');
+}
+
+async function loadOverview() {
+  try { overview = await (await fetch("{{ url_for('dashboard.overview') }}")).json(); } catch (e) { return; }
+  const o = overview;
+  $('chip-failed').textContent = o.failed.length;
+  $('chip-failed-led').className = 'led sm ' + (o.failed.length ? 'err' : '');
+  $('chip-updates').textContent = o.updates ?? '—';
+  $('chip-sessions').textContent = o.sessions;
+
+  $('failed-list').innerHTML = o.failed.length
+    ? o.failed.map(u => `<div class="meter-row"><span class="meter-name mono"><span class="led sm err" style="display:inline-block;margin-right:10px;"></span>${escapeHtml(u)}</span>
+        <a class="meter-val" href="{{ url_for('services.index') }}">revisar</a></div>`).join('')
+    : '<div class="empty"><span class="led sm"></span>Ningún servicio con fallo.</div>';
+
+  $('parts').innerHTML = o.partitions.map(p => `<div class="meter-row">
+      <span class="meter-name mono">${escapeHtml(p.mount)}</span>
+      <span class="meter-val">${escapeHtml(p.used_h)} / ${escapeHtml(p.total_h)} · ${Math.round(p.percent)}%</span>
+      <div class="bar ${level(p.percent, 80, 90)}"><span style="width:${p.percent}%"></span></div></div>`).join('')
+    || '<div class="empty">Sin particiones</div>';
+
+  $('top-table').querySelector('tbody').innerHTML = o.top.map(p => `<tr>
+      <td class="mono">${escapeHtml(p.name)}</td><td class="muted">${escapeHtml(p.user)}</td>
+      <td class="right mono muted">${p.pid}</td><td class="right mono">${p.cpu.toFixed(1)}%</td>
+      <td class="right mono">${p.mem.toFixed(1)}%</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted center">Sin datos</td></tr>';
+  renderHealth();
+}
+
+// Veredicto: el problema más grave manda; si no hay ninguno, "Todo en orden"
+function renderHealth() {
+  if (!latest) return;
+  const d = latest, issues = [];
+  const add = (lvl, msg) => issues.push({ lvl, msg });
+  if (overview) {
+    if (overview.failed.length) add('err', overview.failed.length === 1
+      ? `El servicio ${overview.failed[0]} falló` : `${overview.failed.length} servicios fallaron`);
+    for (const p of overview.partitions) {
+      if (p.percent >= 90) add('err', `Disco ${p.mount} al ${Math.round(p.percent)}%`);
+      else if (p.percent >= 80) add('warn', `Disco ${p.mount} al ${Math.round(p.percent)}%`);
+    }
+  } else if (d.disk.percent >= 80) {
+    add(d.disk.percent >= 90 ? 'err' : 'warn', `Disco / al ${Math.round(d.disk.percent)}%`);
+  }
+  if (d.memory.percent >= 95) add('err', `Memoria al ${Math.round(d.memory.percent)}%`);
+  else if (d.memory.percent >= 85) add('warn', `Memoria al ${Math.round(d.memory.percent)}%`);
+  const recent = hist.cpu.slice(-5), cpuAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  if (recent.length >= 5 && cpuAvg >= 90) add('warn', `CPU sostenida al ${Math.round(cpuAvg)}%`);
+  if (d.cpu.load[0] / d.cpu.count >= 1.5) add('warn', `Carga alta (${d.cpu.load[0]})`);
+
+  const lvl = issues.some(i => i.lvl === 'err') ? 'err' : issues.length ? 'warn' : 'ok';
+  issues.sort((a, b) => (a.lvl === 'err' ? -1 : 1) - (b.lvl === 'err' ? -1 : 1));
+  $('health').dataset.level = lvl;
+  $('health-led').className = 'led lg live ' + (lvl === 'ok' ? '' : lvl);
+  $('health-verdict').textContent = lvl === 'ok' ? 'Todo en orden'
+    : 'Atención: ' + issues.map(i => i.msg).join(' · ');
+}
+
+tick();
+loadOverview();
+setInterval(tick, 3000);
+setInterval(loadOverview, 15000);
 </script>
 {% endblock %}
