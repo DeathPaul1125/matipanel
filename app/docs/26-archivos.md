@@ -4,57 +4,128 @@ El administrador de archivos te permite navegar, editar, crear, mover, copiar, b
 
 > **Importante:** El administrador de archivos trabaja como `root`. Puedes leer y modificar cualquier archivo del sistema, incluidos los críticos. Un error aquí puede dejar el servidor sin arrancar. Trabaja con calma y verifica la ruta antes de cada acción.
 
+## Conocer la pantalla
+
+La pantalla tiene tres zonas:
+
+| Zona | Qué contiene |
+|---|---|
+| **Panel izquierdo** | **Accesos** a carpetas habituales (Raíz, Configuración `/etc`, Sitios web `/var/www`, Registros `/var/log`, Usuarios `/home`, `root`, Aplicaciones `/opt`, Temporales `/tmp`), tus **Favoritos** y el espacio libre del **disco** de la carpeta actual. |
+| **Barra superior** | Botones **← → ↑ ⟳**, la ruta actual, el filtro, la casilla **Ocultos** y los botones **+ Carpeta**, **+ Archivo** y **Subir…**. |
+| **Lista** | El contenido de la carpeta. Al pie: cuántas carpetas y archivos hay y cuánto ocupan. |
+
+En pantallas angostas el panel izquierdo se oculta.
+
 ## Navegar por las carpetas
 
-- Escribe una ruta en el campo superior y pulsa **Ir** o `Enter`.
-- Pulsa **↑** (Subir un nivel) o la fila `..` para ir a la carpeta superior.
-- Pulsa el nombre de una carpeta para entrar.
-- Debajo de la barra verás la ruta actual y la cantidad de elementos.
+- **Entrar a una carpeta:** haz clic en su nombre o doble clic en la fila.
+- **Ruta en migas:** la barra muestra la ruta como `/ › var › www › html`. Haz clic en cualquier tramo para saltar a esa carpeta.
+- **Escribir una ruta:** haz clic en un espacio libre de la barra de ruta, escribe la ruta y pulsa `Enter` (`Esc` cancela).
+- **← / →:** atrás y adelante por las carpetas que visitaste.
+- **↑:** carpeta superior (también con la tecla `Retroceso`).
+- **⟳:** vuelve a leer la carpeta (también `F5`).
 
-La dirección del navegador cambia a `?path=/ruta/actual`. Puedes guardarla como marcador para volver directo a esa carpeta.
+La dirección del navegador cambia a `?path=/ruta/actual`. Puedes guardarla como marcador.
 
-La tabla muestra primero las carpetas y luego los archivos, en orden alfabético. Incluye los archivos ocultos (los que empiezan con `.`).
+## Guardar carpetas en Favoritos
 
-| Columna | Significado |
+1. Entra en la carpeta.
+2. Pulsa **☆** junto a **Favoritos** en el panel izquierdo. Cambia a **★**.
+3. Para quitarla, entra en ella y pulsa **★**.
+
+También puedes agregar una carpeta desde su menú (clic derecho → **Agregar a favoritos**). Los favoritos se guardan en tu navegador.
+
+## Ordenar, filtrar y mostrar ocultos
+
+- **Ordenar:** haz clic en el título de una columna (**Nombre**, **Tamaño**, **Modificado**, **Permisos**, **Propietario**). Un segundo clic invierte el orden. Las carpetas siempre van primero. El panel recuerda tu orden.
+- **Filtrar:** escribe en **Filtrar…** y la lista muestra solo lo que contiene ese texto. `Esc` borra el filtro.
+- **Ocultos:** los archivos que empiezan con `.` (por ejemplo `.htaccess` o `.env`) están ocultos. Marca **Ocultos** para verlos. El pie de la lista dice cuántos elementos están ocultos o filtrados.
+
+## Buscar en subcarpetas
+
+1. Escribe al menos 2 caracteres en **Filtrar…**.
+2. Pulsa `Enter`. El panel busca por **nombre** en la carpeta actual y todas sus subcarpetas, sin distinguir mayúsculas.
+3. La lista muestra los resultados con su ruta relativa. Haz clic en uno para abrirlo, o pulsa **Volver a la carpeta**.
+
+> **Nota:** la búsqueda se detiene en 300 resultados o 15 segundos y no entra en `/proc`, `/sys`, `/dev` ni `/run`. Si ves **límite alcanzado**, empieza desde una carpeta más concreta o escribe un nombre más preciso. Para buscar **dentro** del contenido de los archivos usa la [Terminal](29-terminal.md): `grep -rn "texto" /ruta`.
+
+## Seleccionar varios elementos
+
+| Cómo | Resultado |
 |---|---|
-| **Nombre** | Nombre del elemento. Los enlaces simbólicos muestran `→ destino`. |
-| **Tamaño** | Tamaño del archivo. Las carpetas muestran `—`. |
-| **Propietario** | Usuario y grupo dueños, en formato `usuario:grupo`. |
-| **Permisos** | Permisos en formato `rwx`. Pasa el mouse para ver el valor octal (por ejemplo `644`). |
-| **Modificado** | Fecha y hora de la última modificación. |
-| **Acciones** | Botones de acción (ver la siguiente sección). |
+| Clic en una fila | Selecciona solo esa fila. |
+| `Ctrl` + clic | Agrega o quita una fila de la selección. |
+| `Shift` + clic | Selecciona un rango de filas. |
+| Casilla de la fila | Agrega o quita esa fila. |
+| Casilla del título o `Ctrl+A` | Selecciona todo lo visible. |
+| `Esc` o **✕** | Quita la selección. |
 
-## Identificar los botones de acción
+Con algo seleccionado aparece una barra con la cantidad, el tamaño y las acciones: **Copiar**, **Cortar**, **Comprimir**, **Descargar**, **Permisos** y **Borrar**. Todas funcionan con uno o con varios elementos.
 
-Cada fila tiene botones pequeños con iconos. Pasa el mouse sobre cada uno para ver su nombre.
+## Usar el menú de acciones
 
-| Icono | Nombre | Qué hace |
-|---|---|---|
-| ⬇ | **Descargar** | Descarga el archivo, o la carpeta como `.tar.gz`. |
-| ✎ | **Renombrar / mover** | Cambia el nombre o mueve a otra carpeta. |
-| ⧉ | **Copiar** | Copia a otra ruta. |
-| 🔑 | **Permisos** | Cambia modo, propietario y grupo. |
-| 🗜 | **Comprimir** | Crea un `.tar.gz` al lado del elemento. |
-| 📦 | **Extraer** | Solo en comprimidos: extrae en la misma carpeta. |
-| 🗑 | **Borrar** | Borra el archivo o la carpeta completa. |
+Haz **clic derecho** sobre una fila (o pulsa **⋯** al final de la fila) para ver todas las acciones disponibles para ese elemento o la selección:
 
-En modo solo lectura solo aparece **Descargar**.
+| Acción | Qué hace |
+|---|---|
+| **Abrir** / **Abrir en el editor** / **Ver imagen** | Entra en la carpeta, abre el archivo en el editor o muestra la imagen. |
+| **Descargar** | Descarga el archivo, o la carpeta/selección como `.tar.gz`. |
+| **Renombrar / mover** | Cambia el nombre o lo mueve a otra ruta (`F2`). |
+| **Copiar** / **Cortar** | Lo deja listo para pegar en otra carpeta (`Ctrl+C` / `Ctrl+X`). |
+| **Duplicar** | Crea una copia en la misma carpeta con el nombre `… (copia)`. |
+| **Comprimir…** | Crea un `.tar.gz` o `.zip`. |
+| **Extraer aquí** | Solo en comprimidos. |
+| **Permisos y propietario…** | Cambia modo, dueño y grupo. |
+| **Calcular tamaño** | Solo en carpetas: calcula cuánto ocupan con todo su contenido. |
+| **Copiar ruta** | Copia la ruta completa al portapapeles. |
+| **Agregar a favoritos** | Solo en carpetas. |
+| **Borrar** | Borra lo seleccionado (`Supr`). |
 
-## Abrir y editar un archivo
+Haz clic derecho en un espacio vacío de la lista para **Nueva carpeta**, **Nuevo archivo**, **Subir archivos…**, **Pegar aquí**, **Seleccionar todo**, **Copiar ruta de la carpeta** y **Actualizar**.
 
-1. Pulsa el nombre del archivo. Se abre el editor.
-2. Arriba verás la ruta, el tamaño y el tipo de archivo detectado.
-3. Haz tus cambios.
-4. Pulsa **Guardar** o `Ctrl+S`.
-5. Confirma en **Guardar archivo**.
-6. Verás **Guardado ✓ · Backup:** con la ruta de la copia de respaldo. El editor se cierra.
+En modo solo lectura solo aparecen las acciones que no modifican nada.
 
-Atajos del editor:
+### Atajos de teclado
+
+Funcionan cuando no estás escribiendo en un campo:
 
 | Tecla | Acción |
 |---|---|
+| `Enter` | Abrir el elemento seleccionado |
+| `Retroceso` | Carpeta superior |
+| `Alt+←` / `Alt+→` | Atrás / adelante |
+| `Ctrl+A` | Seleccionar todo |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copiar / cortar / pegar |
+| `F2` | Renombrar |
+| `Supr` | Borrar |
+| `F5` | Actualizar |
+| `Esc` | Quitar la selección |
+
+## Ver una imagen
+
+Haz clic en una imagen PNG, JPG, GIF, WebP, BMP o ICO para verla en grande, con un botón **Descargar**. El máximo para la vista previa es 20 MB.
+
+> **Nota:** los archivos SVG no se muestran en vista previa por seguridad (pueden contener código que se ejecutaría en el panel). Descárgalos para verlos.
+
+## Abrir y editar un archivo
+
+1. Haz clic en el nombre del archivo. Se abre el editor.
+2. Arriba verás la ruta, el tamaño y el tipo de archivo detectado. A la izquierda, los **números de línea**.
+3. Haz tus cambios. Junto al nombre aparece un **●** mientras haya cambios sin guardar.
+4. Pulsa **Guardar** o `Ctrl+S`. Verás **Guardado ✓** y el editor sigue abierto para que continúes.
+5. Pulsa **Cerrar** (o `Esc`) para salir.
+
+La barra inferior muestra la línea y columna del cursor (`Ln 12, Col 5`) y el total de líneas.
+
+| Tecla o botón | Acción |
+|---|---|
+| `Ctrl+S` | Guardar. |
 | `Tab` | Inserta un tabulador (no salta a otro campo). |
-| `Ctrl+S` | Guarda (pide confirmación). |
+| `Ctrl+G` o **Ir a línea** | Salta a un número de línea. |
+| **Ajuste de línea** | Parte las líneas largas para verlas completas. Con el ajuste activo se ocultan los números de línea (dejarían de coincidir). El panel recuerda tu elección. |
+| `Esc` o **Cerrar** | Salir del editor. |
+
+Si un archivo no se puede abrir en el editor (muy grande o binario), el panel te ofrece **Descargarlo**.
 
 ### Límites del editor
 
@@ -88,8 +159,8 @@ Para abrir solo una carpeta usa `?path=`, por ejemplo `https://SERVIDOR:8443/fil
 
 Si un cambio rompió algo, vuelve a la versión anterior:
 
-1. Entra en la carpeta del archivo.
-2. Pulsa **Renombrar / mover** en el archivo dañado y cámbiale el nombre, por ejemplo a `archivo.conf.roto`.
+1. Entra en la carpeta del archivo y marca **Ocultos** si no ves la copia.
+2. Pulsa **Renombrar / mover** (clic derecho o `F2`) en el archivo dañado y cámbiale el nombre, por ejemplo a `archivo.conf.roto`.
 3. Pulsa **Renombrar / mover** en `archivo.conf.matipanel.bak` y ponle el nombre original, `archivo.conf`.
 4. Revisa el **Propietario**: la copia de respaldo pertenece a `root`. Si el original era de otro usuario, corrígelo con **Permisos**.
 5. Aplica el cambio en el servicio correspondiente (por ejemplo **Probar config** y **Recargar** en Servidor web).
@@ -106,31 +177,38 @@ Si un cambio rompió algo, vuelve a la versión anterior:
 
 ## Renombrar o mover
 
-1. Pulsa **Renombrar / mover** en la fila.
-2. En **Renombrar / mover** escribe:
+### Un elemento
+
+1. Clic derecho → **Renombrar / mover** (o selecciónalo y pulsa `F2`).
+2. Escribe:
     - Un nombre nuevo, para renombrar en la misma carpeta.
     - Una ruta absoluta, para mover. Por ejemplo `/var/www/archivo/viejo`.
 3. Pulsa **Renombrar**.
 
-- Si el destino es una carpeta existente, el elemento se mueve dentro de ella.
-- Si el destino ya existe, verás **El destino ya existe**. Nunca se sobrescribe.
+### Varios elementos (cortar y pegar)
+
+1. Selecciónalos y pulsa **Cortar** (o `Ctrl+X`). Las filas se ven atenuadas.
+2. Ve a la carpeta de destino. Aparece una barra amarilla: **N elemento(s) para mover desde …**.
+3. Pulsa **Pegar aquí** (o `Ctrl+V`).
+
+- Si el destino ya existe, verás **El destino ya existe** para ese elemento. Nunca se sobrescribe.
+- **Cancelar** en la barra amarilla descarta lo cortado sin mover nada.
 
 ## Copiar
 
-1. Pulsa **Copiar** en la fila.
-2. En **Copiar a (ruta absoluta de archivo o directorio)** escribe el destino. Por defecto propone `<ruta>.copia`.
-3. Pulsa **Copiar**.
+1. Selecciona uno o varios elementos y pulsa **Copiar** (o `Ctrl+C`).
+2. Ve a la carpeta de destino y pulsa **Pegar aquí** (o `Ctrl+V`).
 
+- Si pegas en la **misma** carpeta, la copia se llama `nombre (copia).ext` (o `(copia 2)`, etc.).
+- Para una copia rápida en la misma carpeta usa clic derecho → **Duplicar**.
 - Las carpetas se copian completas. Los enlaces simbólicos se copian como enlaces.
-- Si el destino es una carpeta existente, la copia se crea dentro.
 - Nunca se sobrescribe: si el destino existe, verás **El destino ya existe**.
-- Igual que al renombrar, una ruta relativa (sin `/` al inicio) se toma desde la carpeta del elemento que copias. Por ejemplo, copiar `/etc/nginx/nginx.conf` a `nginx.conf.orig` crea `/etc/nginx/nginx.conf.orig`.
 
 ## Borrar
 
-1. Pulsa **Borrar** en la fila.
-2. Lee el diálogo **Borrar archivo** o **Borrar carpeta**. Para carpetas dice **¿Borrar la carpeta y TODO su contenido?**
-3. Si es una **carpeta**, o cualquier cosa dentro de `/etc`, `/boot`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/var/lib` o `/root`, escribe el nombre exacto del elemento en **Escribe … para confirmar**. El botón no se habilita hasta que coincide.
+1. Selecciona uno o varios elementos y pulsa **Borrar** (o `Supr`, o clic derecho → **Borrar**).
+2. El diálogo lista lo que se va a borrar. Si hay carpetas, avisa que se borran **con todo su contenido**.
+3. Si hay una **carpeta**, o algo dentro de `/etc`, `/boot`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/var/lib` o `/root`, tienes que escribir para confirmar: el **nombre** del elemento si es uno solo, o la palabra `BORRAR` si son varios.
 4. Pulsa **Borrar**.
 
 > **Importante:** No hay papelera. Lo borrado no se puede recuperar. Si borras un enlace simbólico, se borra solo el enlace, no su destino.
@@ -147,17 +225,17 @@ Si lo intentas, verás **Ruta inválida o protegida** u **Origen inválido o pro
 
 ## Cambiar permisos y propietario
 
-1. Pulsa **Permisos** en la fila. Se abre **Permisos y propietario**.
-2. Cambia lo necesario:
+1. Selecciona uno o varios elementos y pulsa **Permisos** (o clic derecho → **Permisos y propietario…**).
+2. Marca o desmarca **Leer**, **Escribir** y **Ejecutar** para **Propietario**, **Grupo** y **Otros**. El campo **Modo** se actualiza solo (y al revés: si escribes `750`, las casillas cambian).
+3. Cambia **Propietario** y **Grupo** si hace falta.
+4. Marca **Aplicar recursivamente (carpetas)** para aplicar también a todo el contenido de las carpetas seleccionadas.
+5. Pulsa **Aplicar**. Con varios elementos, se aplica a cada uno.
 
 | Campo | Qué poner |
 |---|---|
 | **Modo** | 3 o 4 dígitos octales, por ejemplo `644` o `0755`. |
 | **Propietario** | Un usuario existente, por ejemplo `www-data`. |
 | **Grupo** | Un grupo existente, por ejemplo `www-data`. |
-| **Aplicar recursivamente** | Aplica a la carpeta y a todo su contenido. |
-
-3. Pulsa **Aplicar**. No hay confirmación adicional.
 
 Si el usuario o el grupo no existen, verás **Usuario o grupo inexistente**.
 
@@ -206,11 +284,11 @@ Al extraer sin sobrescribir, los archivos que ya existen en el destino se conser
 
 ## Descargar archivos y carpetas
 
-1. Pulsa **Descargar** en la fila.
-2. Un archivo se descarga tal cual.
-3. Una carpeta se descarga como `<nombre>.tar.gz`, generado en el momento.
+1. Selecciona lo que quieres y pulsa **Descargar** (o clic derecho → **Descargar**).
+2. Un solo archivo se descarga tal cual.
+3. Una carpeta, o **varios elementos**, se descargan juntos en un `.tar.gz` generado en el momento.
 
-Las carpetas grandes tardan en empezar y el navegador no puede mostrar el porcentaje, porque el tamaño final no se conoce. La descarga funciona también en modo solo lectura.
+Las descargas grandes tardan en empezar y el navegador no puede mostrar el porcentaje, porque el tamaño final no se conoce. La descarga funciona también en modo solo lectura.
 
 No se puede descargar la raíz `/` completa: verás **No se puede descargar la raíz del sistema**. Descarga carpetas concretas, o usa [Respaldos](16-respaldos.md).
 
@@ -218,19 +296,32 @@ No se puede descargar la raíz `/` completa: verás **No se puede descargar la r
 
 ### Comprimir
 
-1. Pulsa **Comprimir** en la fila.
-2. Confirma en **Comprimir**.
-3. Se crea `<nombre>.tar.gz` en la misma carpeta.
+1. Selecciona uno o varios elementos de la misma carpeta y pulsa **Comprimir**.
+2. Escribe el **Nombre del archivo** y elige el **Formato**:
+    - **.tar.gz (Linux)**: el habitual en servidores; conserva permisos y propietarios.
+    - **.zip (Windows)**: para enviar a alguien que usa Windows.
+3. Pulsa **Comprimir**. El comprimido se crea en la misma carpeta.
 
-Si ya existe un archivo con ese nombre, verás **Ya existe** con la ruta. La página espera hasta que termine (máximo 1 hora). Con carpetas grandes puede tardar varios minutos.
+Si ya existe un archivo con ese nombre, verás **Ya existe**. La página espera hasta que termine (máximo 1 hora).
 
 ### Extraer
 
-1. Pulsa **Extraer** en la fila del comprimido.
-2. Lee el aviso (**¿Extraer aquí? Los archivos existentes con el mismo nombre se sobrescribirán.**) y pulsa **Extraer y sobrescribir**.
+1. Clic derecho en el comprimido → **Extraer aquí**.
+2. Lee el aviso y pulsa **Extraer y sobrescribir**.
 3. El contenido se extrae en la misma carpeta del comprimido.
 
-> **Importante:** **Extraer** desde la fila **sobrescribe** los archivos existentes con el mismo nombre. Si no quieres eso, extrae en una carpeta vacía: crea una carpeta, mueve el comprimido dentro y extrae allí.
+Formatos: `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz` y `.txz`.
+
+> **Importante:** **Extraer aquí** **sobrescribe** los archivos existentes con el mismo nombre. Si no quieres eso, extrae en una carpeta vacía: crea una carpeta, mueve el comprimido dentro y extrae allí.
+
+## Ver cuánto ocupa una carpeta
+
+La columna **Tamaño** de las carpetas muestra `—` porque calcularlo puede tardar. Para saberlo:
+
+1. Clic derecho en la carpeta → **Calcular tamaño**.
+2. Al terminar, el tamaño aparece en la fila.
+
+Para ver el espacio libre del disco donde está la carpeta actual, mira **Disco de esta carpeta** en el panel izquierdo.
 
 ## Activar el modo solo lectura (MATIPANEL_FILE_WRITE=0)
 
@@ -250,7 +341,7 @@ Con el modo activo:
 
 - Aparece la etiqueta **solo lectura** en la barra.
 - Desaparecen **+ Archivo**, **+ Carpeta** y **Subir…**.
-- En las filas solo queda **Descargar**.
+- El menú y la barra de selección solo ofrecen acciones que no modifican nada (abrir, descargar, calcular tamaño, copiar ruta).
 - El editor abre los archivos sin permitir cambios y no muestra **Guardar**.
 
 Para volver al modo normal, quita esa línea con `sudo systemctl edit matipanel` y reinicia el panel.
@@ -259,9 +350,17 @@ Para volver al modo normal, quita esa línea con `sudo systemctl edit matipanel`
 
 ## Preguntas frecuentes
 
+### ¿Cómo copio varios archivos a otra carpeta?
+
+Selecciónalos (con `Ctrl` + clic o las casillas), pulsa **Copiar**, ve a la otra carpeta y pulsa **Pegar aquí**.
+
+### ¿Por qué no veo el archivo .htaccess?
+
+Los archivos que empiezan con punto están ocultos. Marca **Ocultos** en la barra superior.
+
 ### Subí mi sitio y la aplicación no puede escribir en sus carpetas.
 
-Los archivos subidos pertenecen a `root`. Abre **Permisos** en la carpeta del sitio, pon **Propietario** y **Grupo** `www-data`, marca **Aplicar recursivamente** y pulsa **Aplicar**.
+Los archivos subidos pertenecen a `root`. Abre **Permisos** en la carpeta del sitio (clic derecho → **Permisos y propietario…**), pon **Propietario** y **Grupo** `www-data`, marca **Aplicar recursivamente** y pulsa **Aplicar**.
 
 ### No puedo abrir un archivo: dice "Archivo > 2048 KB (descárgalo)".
 

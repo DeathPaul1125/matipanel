@@ -6,6 +6,7 @@ import pwd
 import grp
 import shutil
 import tempfile
+import time
 import subprocess
 from datetime import datetime
 from flask import Blueprint, render_template, jsonify, request, send_file, Response
@@ -93,7 +94,12 @@ def ls():
     items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
 
     parent = os.path.dirname(path) if path != "/" else None
-    return jsonify({"path": path, "parent": parent, "items": items,
+    try:
+        du = shutil.disk_usage(path)
+        disk = {"total": du.total, "free": du.free}
+    except OSError:
+        disk = None
+    return jsonify({"path": path, "parent": parent, "items": items, "disk": disk,
                     "write_enabled": WRITE_ENABLED})
 
 
@@ -355,16 +361,20 @@ def _safe_relpath(name):
 @files_bp.route("/api/download")
 @login_required
 def download():
-    """Archivo: descarga directa. Directorio: tar.gz generado al vuelo."""
-    path = _path(request.args.get("path", ""))
-    if not path or not os.path.exists(path):
+    """Un archivo: descarga directa. Una carpeta o varios elementos: tar.gz generado al vuelo."""
+    paths = [_path(p) for p in request.args.getlist("path")]
+    if not paths or not all(p and os.path.lexists(p) for p in paths):
         return jsonify({"error": "No existe"}), 404
-    name = os.path.basename(path)
-    if not name:  # "/": empaquetaría todo el sistema (incluidos /proc y /sys)
+    names = [os.path.basename(p) for p in paths]
+    if not all(names):  # "/": empaquetaría todo el sistema (incluidos /proc y /sys)
         return jsonify({"error": "No se puede descargar la raíz del sistema"}), 400
-    if os.path.isfile(path):
-        return send_file(path, as_attachment=True)
-    proc = subprocess.Popen(["tar", "-czf", "-", "-C", os.path.dirname(path), "--", name],
+    parent = os.path.dirname(paths[0])
+    if any(os.path.dirname(p) != parent for p in paths):
+        return jsonify({"error": "Los elementos deben estar en la misma carpeta"}), 400
+    if len(paths) == 1 and os.path.isfile(paths[0]):
+        return send_file(paths[0], as_attachment=True)
+    name = names[0] if len(names) == 1 else (os.path.basename(parent) or "seleccion")
+    proc = subprocess.Popen(["tar", "-czf", "-", "-C", parent, "--", *names],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     def stream():
@@ -382,18 +392,95 @@ def download():
 @files_bp.route("/api/compress", methods=["POST"])
 @login_required
 def compress():
-    """Comprime un archivo/directorio a <nombre>.tar.gz en el mismo directorio."""
+    """Comprime uno o varios elementos de una carpeta en .tar.gz o .zip dentro de esa carpeta."""
     if (g := _write_guard()):
         return g
-    path = _path((request.get_json(silent=True) or {}).get("path", ""))
-    if not path or not os.path.lexists(path) or path == "/":
+    d = request.get_json(silent=True) or {}
+    paths = [_path(p) for p in (d.get("paths") or [d.get("path", "")])]
+    if not paths or not all(p and p != "/" and os.path.lexists(p) for p in paths):
         return _bad("Ruta inválida")
-    dest = path + ".tar.gz"
+    parent = os.path.dirname(paths[0])
+    if any(os.path.dirname(p) != parent for p in paths):
+        return _bad("Los elementos deben estar en la misma carpeta")
+    fmt = d.get("format", "tar.gz")
+    if fmt not in ("tar.gz", "zip"):
+        return _bad("Formato inválido")
+    base = d.get("name") or (os.path.basename(paths[0]) if len(paths) == 1 else "archivos")
+    if not _valid_basename(base):
+        return _bad("Nombre inválido")
+    dest = os.path.join(parent, base if base.endswith("." + fmt) else f"{base}.{fmt}")
     if os.path.lexists(dest):
-        return _bad(f"Ya existe {dest}")
-    code, _, err = run(["tar", "-czf", dest, "-C", os.path.dirname(path), "--",
-                        os.path.basename(path)], timeout=3600)
+        return _bad(f"Ya existe {os.path.basename(dest)}")
+    names = [os.path.basename(p) for p in paths]
+    if fmt == "zip":
+        code, _, err = run(["zip", "-r", "-q", "-y", dest, "--", *names], timeout=3600, cwd=parent)
+    else:
+        # --force-local: sin esto GNU tar toma "host:archivo" como un servidor remoto
+        code, _, err = run(["tar", "--force-local", "-czf", dest, "-C", parent, "--", *names], timeout=3600)
     return jsonify({"ok": code == 0, "error": err.strip(), "path": dest}), (200 if code == 0 else 500)
+
+
+@files_bp.route("/api/search")
+@login_required
+def search():
+    """Busca por nombre (sin distinguir mayúsculas) bajo `path`.
+
+    ponytail: recorrido en Python con límites (300 resultados, 200 000 entradas, 15 s);
+    para búsquedas por contenido usar la terminal (grep -r).
+    """
+    path = _path(request.args.get("path", "/"))
+    q = request.args.get("q", "").strip().lower()
+    if not path or not os.path.isdir(path) or len(q) < 2:
+        return _bad("Escribe al menos 2 caracteres")
+    results, seen, deadline, truncated = [], 0, time.time() + 15, False
+    for root, dirs, files in os.walk(path, onerror=lambda e: None):
+        dirs[:] = [x for x in dirs if os.path.join(root, x) not in SKIP_SEARCH]
+        for name in dirs + files:
+            seen += 1
+            if q in name.lower():
+                full = os.path.join(root, name)
+                results.append({"path": full, "name": name, "dir": root, "is_dir": name in dirs})
+        if len(results) >= 300 or seen >= 200_000 or time.time() > deadline:
+            truncated = True
+            break
+    return jsonify({"results": results[:300], "truncated": truncated})
+
+
+SKIP_SEARCH = {"/proc", "/sys", "/dev", "/run"}
+
+
+@files_bp.route("/api/du")
+@login_required
+def du():
+    """Tamaño real de una carpeta (du)."""
+    path = _path(request.args.get("path", ""))
+    if not path or not os.path.isdir(path):
+        return _bad("No es una carpeta")
+    code, out, err = run(["du", "-sb", "-x", "--", path], timeout=120)
+    if code not in (0, 1) or not out.strip():  # 1 = algunos subdirectorios sin permiso
+        return _bad(err.strip() or "du falló", 500)
+    return jsonify({"ok": True, "bytes": int(out.split()[0])})
+
+
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+               ".webp": "image/webp", ".bmp": "image/bmp", ".ico": "image/x-icon"}
+
+
+@files_bp.route("/api/raw")
+@login_required
+def raw():
+    """Vista previa de imágenes. Solo formatos raster: un SVG o HTML servido en línea
+    ejecutaría scripts con la sesión del panel."""
+    path = _path(request.args.get("path", ""))
+    mime = IMAGE_TYPES.get(os.path.splitext(path or "")[1].lower())
+    if not path or not mime or not os.path.isfile(path):
+        return _bad("Solo se pueden previsualizar imágenes PNG, JPG, GIF, WebP, BMP o ICO")
+    if os.path.getsize(path) > 20 * 1024 * 1024:
+        return _bad("Imagen demasiado grande para previsualizar (máx. 20 MB)", 413)
+    resp = send_file(path, mimetype=mime)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'"
+    return resp
 
 
 @files_bp.route("/api/extract", methods=["POST"])
@@ -419,7 +506,7 @@ def _extract(path, dest, overwrite):
     if path.lower().endswith(".zip"):
         cmd = ["unzip", "-o" if overwrite else "-n", "-q", path, "-d", dest]
     else:
-        cmd = ["tar", "-xf", path, "-C", dest] + ([] if overwrite else ["--skip-old-files"])
+        cmd = ["tar", "--force-local", "-xf", path, "-C", dest] + ([] if overwrite else ["--skip-old-files"])
     code, _, err = run(cmd, timeout=3600)
     return code, err.strip()
 

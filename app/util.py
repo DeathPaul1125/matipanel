@@ -7,11 +7,11 @@ from flask import request
 _NAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@.-_")
 
 
-def run(cmd, timeout=30, input=None, env=None):
+def run(cmd, timeout=30, input=None, env=None, cwd=None):
     """Ejecuta un comando SIN shell. Retorna (returncode, stdout, stderr)."""
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                           input=input, env=env)
+                           input=input, env=env, cwd=cwd)
         return r.returncode, r.stdout, r.stderr
     except FileNotFoundError:
         return 127, "", f"{cmd[0]} no está instalado"

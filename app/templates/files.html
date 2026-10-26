@@ -3,41 +3,126 @@
 {% block heading %}Administrador de archivos{% endblock %}
 
 {% block content %}
-<div class="toolbar">
-  <button class="btn" onclick="goUp()" title="Subir un nivel">↑</button>
-  <input type="text" id="path-input" class="input" value="/" style="flex:1;">
-  <button class="btn" onclick="go()">Ir</button>
-  {% if write_enabled %}
-    <button class="btn" onclick="newItem('file')">+ Archivo</button>
-    <button class="btn" onclick="newItem('dir')">+ Carpeta</button>
-    <button class="btn btn-primary" onclick="openUpload()">Subir…</button>
-  {% else %}
-    <span class="pill mute">solo lectura</span>
-  {% endif %}
+<div class="fm" id="fm">
+  {# Accesos, favoritos y disco #}
+  <aside class="fm-side">
+    <div class="card">
+      <div class="fm-side-title">Accesos</div>
+      <div id="places"></div>
+      <div class="fm-side-title" style="display:flex; justify-content:space-between; align-items:center;">
+        Favoritos <button class="btn btn-sm" id="fav-btn" onclick="toggleFav()" title="Agregar o quitar la carpeta actual">☆</button>
+      </div>
+      <div id="favs"></div>
+      <div class="fm-side-title">Disco de esta carpeta</div>
+      <div id="disk" class="small muted">—</div>
+    </div>
+  </aside>
+
+  <section class="fm-main">
+    {# Barra de navegación #}
+    <div class="card fm-bar">
+      <div class="fm-nav">
+        <button class="icon-btn" onclick="goBack()" id="b-back" title="Atrás (Alt+←)">←</button>
+        <button class="icon-btn" onclick="goFwd()" id="b-fwd" title="Adelante (Alt+→)">→</button>
+        <button class="icon-btn" onclick="goUp()" title="Carpeta superior (Retroceso)">↑</button>
+        <button class="icon-btn" onclick="reload()" title="Actualizar (F5)">⟳</button>
+        <div class="fm-crumbs" id="crumbs" title="Haz clic en un espacio libre para escribir la ruta"></div>
+        <input class="input mono fm-pathinput" id="path-input" hidden>
+      </div>
+      <div class="fm-tools">
+        <div class="docs-search fm-filter">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="search" id="filter" placeholder="Filtrar… (Enter = buscar en subcarpetas)" autocomplete="off">
+        </div>
+        <label class="small fm-check"><input type="checkbox" id="show-hidden"> Ocultos</label>
+        {% if write_enabled %}
+          <button class="btn" onclick="newItem('dir')">+ Carpeta</button>
+          <button class="btn" onclick="newItem('file')">+ Archivo</button>
+          <button class="btn btn-primary" onclick="openUpload()">Subir…</button>
+        {% else %}
+          <span class="pill mute">solo lectura</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Barra de selección y portapapeles #}
+    <div class="fm-selbar" id="selbar" hidden>
+      <b id="sel-count"></b><span class="muted small" id="sel-size"></span>
+      <span class="fm-selbar-actions">
+        {% if write_enabled %}
+        <button class="btn btn-sm" onclick="clip('copy')">Copiar</button>
+        <button class="btn btn-sm" onclick="clip('cut')">Cortar</button>
+        <button class="btn btn-sm" onclick="compressSel()">Comprimir</button>
+        {% endif %}
+        <button class="btn btn-sm" onclick="downloadSel()">Descargar</button>
+        {% if write_enabled %}
+        <button class="btn btn-sm" onclick="permDialog(selectedItems())">Permisos</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteSel()">Borrar</button>
+        {% endif %}
+        <button class="btn btn-sm" onclick="clearSel()" title="Quitar selección (Esc)">✕</button>
+      </span>
+    </div>
+    <div class="fm-clipbar" id="clipbar" hidden>
+      <span id="clip-text"></span>
+      <span class="fm-selbar-actions">
+        <button class="btn btn-sm btn-primary" onclick="paste()">Pegar aquí</button>
+        <button class="btn btn-sm" onclick="clipboard = null; renderBars()">Cancelar</button>
+      </span>
+    </div>
+
+    {# Lista #}
+    <div class="card fm-list">
+      <div class="fm-search-head" id="search-head" hidden></div>
+      <div class="table-wrap">
+        <table class="lx fm-table" id="files-table">
+          <thead><tr>
+            <th class="fm-cb"><input type="checkbox" id="cb-all" title="Seleccionar todo (Ctrl+A)"></th>
+            <th data-sort="name">Nombre</th>
+            <th data-sort="size" class="right">Tamaño</th>
+            <th data-sort="mtime">Modificado</th>
+            <th data-sort="perms">Permisos</th>
+            <th data-sort="owner">Propietario</th>
+            <th class="fm-cb"></th>
+          </tr></thead>
+          <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="fm-status" id="status"></div>
+    </div>
+  </section>
 </div>
 
-<div class="card">
-  <div id="crumbs" class="crumbs muted small"></div>
-  <table class="lx" id="files-table">
-    <thead><tr><th></th><th>Nombre</th><th>Tamaño</th><th>Propietario</th><th>Permisos</th><th>Modificado</th><th class="right">Acciones</th></tr></thead>
-    <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
-  </table>
-</div>
+<div class="ctx" id="ctx" hidden></div>
 
 <!-- Editor -->
 <div id="editor-modal" class="modal">
-  <div class="modal-box wide" style="height:85vh; display:flex; flex-direction:column; padding:0;">
-    <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-      <div>
-        <div style="font-weight:500;" class="mono" id="ed-filename">archivo</div>
+  <div class="modal-box wide fm-editor">
+    <div class="fm-ed-head">
+      <div style="min-width:0;">
+        <div class="mono fm-ed-name"><span id="ed-dirty" class="fm-dirty" hidden title="Cambios sin guardar">●</span> <span id="ed-filename">archivo</span></div>
         <div class="muted small" id="ed-info"></div>
       </div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-shrink:0;">
+        <button class="btn btn-sm" onclick="toggleWrap()" id="ed-wrap" title="Ajustar líneas largas">Ajuste de línea</button>
+        <button class="btn btn-sm" onclick="gotoLine()" title="Ir a línea (Ctrl+G)">Ir a línea</button>
         {% if write_enabled %}<button class="btn btn-primary" id="ed-save" onclick="saveFile()">Guardar</button>{% endif %}
         <button class="btn" onclick="closeEditor()">Cerrar</button>
       </div>
     </div>
-    <textarea id="editor" spellcheck="false" style="flex:1; width:100%; font-family:var(--mono); font-size:13px; padding:14px; border:none; resize:none; background:var(--surface); color:var(--text); outline:none; tab-size:4;"></textarea>
+    <div class="fm-ed-body">
+      <pre class="fm-gutter" id="gutter" aria-hidden="true">1</pre>
+      <textarea id="editor" spellcheck="false" wrap="off"></textarea>
+    </div>
+    <div class="fm-ed-status small muted"><span id="ed-pos">Ln 1, Col 1</span><span id="ed-lines"></span><span>UTF-8 · Ctrl+S guarda · Tab inserta tabulación</span></div>
+  </div>
+</div>
+
+<!-- Vista previa de imagen -->
+<div id="img-modal" class="modal" onclick="if (event.target === this) closeModal('img-modal')">
+  <div class="modal-box wide" style="text-align:center;">
+    <div class="card-head"><h3 class="mono" id="img-name" style="margin:0;"></h3>
+      <span><a class="btn btn-sm" id="img-dl" href="#">Descargar</a> <button class="btn btn-sm" onclick="closeModal('img-modal')">Cerrar</button></span></div>
+    <img id="img-view" alt="" style="max-width:100%; max-height:72vh; border-radius:var(--radius); background:repeating-conic-gradient(var(--surface-2) 0% 25%, transparent 0% 50%) 50% / 20px 20px;">
   </div>
 </div>
 
@@ -87,10 +172,13 @@
   <div class="modal-box">
     <h3>Permisos y propietario</h3>
     <div class="mono small muted" id="perm-path" style="margin-bottom:12px;"></div>
-    <label class="form-row"><span>Modo (octal, ej. 644 o 0755)</span><input class="input" id="perm-mode"></label>
-    <label class="form-row"><span>Propietario</span><input class="input" id="perm-owner"></label>
-    <label class="form-row"><span>Grupo</span><input class="input" id="perm-group"></label>
-    <label class="small"><input type="checkbox" id="perm-rec"> Aplicar recursivamente</label>
+    <div class="fm-perm-grid" id="perm-grid"></div>
+    <label class="form-row"><span>Modo (octal, ej. 644 o 0755)</span><input class="input mono" id="perm-mode"></label>
+    <div class="grid grid-2" style="margin:0;">
+      <label class="form-row"><span>Propietario</span><input class="input" id="perm-owner"></label>
+      <label class="form-row"><span>Grupo</span><input class="input" id="perm-group"></label>
+    </div>
+    <label class="small"><input type="checkbox" id="perm-rec"> Aplicar recursivamente (carpetas)</label>
     <div class="form-actions">
       <button class="btn" onclick="closeModal('perm-modal')">Cancelar</button>
       <button class="btn btn-primary" onclick="savePerms()">Aplicar</button>
@@ -103,206 +191,542 @@
 <script>
 const WRITE = {{ 'true' if write_enabled else 'false' }};
 const API = "{{ url_for('files.index') }}api/";
-let currentPath = '/';
-let editingPath = '';
-let editorOriginal = '';   // contenido al abrir/guardar, para avisar de cambios sin guardar
-let editorLocked = true;   // solo lectura (sin permiso de escritura o archivo no UTF-8)
-let permItem = null;
+const PLACES = [['/', 'Raíz'], ['/etc', 'Configuración'], ['/var/www', 'Sitios web'], ['/var/log', 'Registros'],
+                ['/home', 'Usuarios'], ['/root', 'root'], ['/opt', 'Aplicaciones'], ['/tmp', 'Temporales']];
+const ARCHIVE = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i;
+const IMAGE = /\.(png|jpe?g|gif|webp|bmp|ico)$/i;
+const $ = id => document.getElementById(id);
+
+let currentPath = '/', items = [], shown = [], selected = new Set(), lastClicked = -1;
+let sort = JSON.parse(localStorage.getItem('mp-fm-sort') || '{"key":"name","dir":1}');
+let backStack = [], fwdStack = [], clipboard = null, searchMode = false, disk = null;
+let editingPath = '', editorOriginal = '', editorLocked = true, permTargets = [];
 
 function join(dir, name) { return dir === '/' ? '/' + name : dir + '/' + name; }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeModal(id) { $(id).classList.remove('open'); }
+function humanSize(n) {
+  if (n < 1024) return n + ' B';
+  for (const u of ['KB', 'MB', 'GB', 'TB']) { n /= 1024; if (n < 1024) return n.toFixed(1) + ' ' + u; }
+  return n.toFixed(1) + ' PB';
+}
+const err = (d, title) => ui.alert(d.error || 'Error desconocido', { title, icon: 'error' });
 
+// ── Iconos por tipo ──
+const ICONS = {
+  dir: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+  archive: '<path d="M21 8v13H3V8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>',
+  code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  config: '<circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8"/>',
+  text: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+};
+function kind(it) {
+  if (it.is_dir) return 'dir';
+  if (it.is_link) return 'link';
+  const n = it.name.toLowerCase();
+  if (IMAGE.test(n) || /\.svg$/.test(n)) return 'image';
+  if (ARCHIVE.test(n) || /\.(gz|bz2|xz|7z|rar|deb|rpm)$/.test(n)) return 'archive';
+  if (/\.(py|js|ts|php|sh|bash|rb|go|rs|c|h|cpp|java|html?|css|sql|pl|lua)$/.test(n)) return 'code';
+  if (/\.(conf|cfg|ini|ya?ml|toml|json|xml|env|service|socket|timer)$/.test(n) || n.startsWith('.')) return 'config';
+  if (/\.(txt|md|log|csv|rst)$/.test(n) || /^(readme|license|changelog)/.test(n)) return 'text';
+  return 'file';
+}
+const icon = it => `<svg class="fi fi-${kind(it)}" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8">${ICONS[kind(it)]}</svg>`;
+
+// ── Accesos y favoritos ──
+const favs = () => JSON.parse(localStorage.getItem('mp-fav') || '[]');
+function renderSide() {
+  const link = (p, label) => `<a href="#" class="fm-place ${p === currentPath ? 'active' : ''}" data-go="${escapeHtml(p)}" title="${escapeHtml(p)}">${escapeHtml(label)}</a>`;
+  $('places').innerHTML = PLACES.map(([p, l]) => link(p, l)).join('');
+  const f = favs();
+  $('favs').innerHTML = f.length ? f.map(p => link(p, p)).join('') : '<div class="small muted" style="padding:4px 10px;">Pulsa ☆ para guardar esta carpeta.</div>';
+  $('fav-btn').textContent = f.includes(currentPath) ? '★' : '☆';
+  $('disk').innerHTML = disk ? `<div class="bar ${disk.free / disk.total < 0.1 ? 'err' : disk.free / disk.total < 0.2 ? 'warn' : ''}"><span style="width:${(100 - disk.free / disk.total * 100).toFixed(1)}%"></span></div>
+    <div style="margin-top:6px;">${humanSize(disk.free)} libres de ${humanSize(disk.total)}</div>` : '—';
+}
+function toggleFav() {
+  let f = favs();
+  f = f.includes(currentPath) ? f.filter(p => p !== currentPath) : [...f, currentPath];
+  localStorage.setItem('mp-fav', JSON.stringify(f));
+  renderSide();
+}
+document.querySelector('.fm-side').addEventListener('click', e => {
+  const a = e.target.closest('[data-go]');
+  if (a) { e.preventDefault(); goTo(a.dataset.go); }
+});
+
+// ── Navegación ──
 async function load(path) {
-  const r = await fetch(API + "ls?path=" + encodeURIComponent(path));
-  const d = await r.json();
-  const tbody = document.querySelector('#files-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="7" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
-  currentPath = d.path;
-  document.getElementById('path-input').value = d.path;
-  document.getElementById('crumbs').textContent = d.path + ' · ' + d.items.length + ' elementos';
+  let d;
+  try { d = await (await fetch(API + 'ls?path=' + encodeURIComponent(path))).json(); }
+  catch (e) { d = { error: String(e) }; }
+  if (d.error) { err(d, 'No se pudo abrir la carpeta'); return false; }
+  const prev = currentPath;
+  currentPath = d.path; items = d.items.map(it => ({ ...it, full: join(d.path, it.name) })); disk = d.disk;
+  if (prev !== currentPath) { selected.clear(); lastClicked = -1; $('filter').value = ''; }
+  searchMode = false; $('search-head').hidden = true;
   history.replaceState(null, '', '?path=' + encodeURIComponent(d.path));
+  renderCrumbs(); renderSide(); render();
+  return true;
+}
+async function goTo(path) {
+  const from = currentPath;
+  if (await load(path) && currentPath !== from) { backStack.push(from); fwdStack = []; renderCrumbs(); }
+}
+async function goBack() { if (!backStack.length) return; const to = backStack.pop(); fwdStack.push(currentPath); await load(to); renderCrumbs(); }
+async function goFwd() { if (!fwdStack.length) return; const to = fwdStack.pop(); backStack.push(currentPath); await load(to); renderCrumbs(); }
+function goUp() { if (currentPath !== '/') goTo(currentPath.replace(/\/[^\/]+$/, '') || '/'); }
+function reload() { load(currentPath); }
 
-  let rows = '';
-  if (d.parent) {
-    rows += `<tr><td>📁</td><td><a href="#" onclick="load(${jsArg(d.parent)}); return false;">..</a></td><td colspan="5"></td></tr>`;
+function renderCrumbs() {
+  const parts = currentPath.split('/').filter(Boolean);
+  let acc = '';
+  $('crumbs').innerHTML = `<button data-go="/">/</button>` + parts.map(p => {
+    acc += '/' + p;
+    return `<span class="sep">›</span><button data-go="${escapeHtml(acc)}">${escapeHtml(p)}</button>`;
+  }).join('');
+  $('b-back').disabled = !backStack.length; $('b-fwd').disabled = !fwdStack.length;
+}
+$('crumbs').addEventListener('click', e => {
+  const b = e.target.closest('[data-go]');
+  if (b) return goTo(b.dataset.go);
+  $('crumbs').hidden = true; const i = $('path-input'); i.hidden = false; i.value = currentPath; i.focus(); i.select();
+});
+$('path-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { goTo(e.target.value.trim() || '/'); e.target.blur(); }
+  if (e.key === 'Escape') e.target.blur();
+});
+$('path-input').addEventListener('blur', () => { $('path-input').hidden = true; $('crumbs').hidden = false; });
+
+// ── Lista ──
+function render() {
+  const showHidden = $('show-hidden').checked, q = $('filter').value.trim().toLowerCase();
+  shown = items.filter(it => (showHidden || !it.name.startsWith('.')) && (!q || searchMode || it.name.toLowerCase().includes(q)));
+  const k = sort.key;
+  shown.sort((a, b) => (b.is_dir - a.is_dir) || sort.dir * (k === 'size' ? a.size - b.size
+    : String(a[k]).localeCompare(String(b[k]), 'es', { numeric: true, sensitivity: 'base' })));
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.classList.toggle('sorted', th.dataset.sort === k);
+    th.dataset.dir = th.dataset.sort === k ? (sort.dir > 0 ? '▲' : '▼') : '';
+  });
+  const tbody = document.querySelector('#files-table tbody');
+  tbody.innerHTML = shown.length ? shown.map((it, i) => `
+    <tr data-i="${i}" class="${selected.has(it.full) ? 'sel' : ''} ${clipboard?.mode === 'cut' && clipboard.paths.includes(it.full) ? 'cut' : ''}" draggable="false">
+      <td class="fm-cb"><input type="checkbox" data-cb ${selected.has(it.full) ? 'checked' : ''}></td>
+      <td><div class="fm-name">${icon(it)}<a href="#" data-open>${escapeHtml(searchMode ? it.rel : it.name)}</a>${it.is_link ? ` <span class="muted small">→ ${escapeHtml(it.target)}</span>` : ''}</div></td>
+      <td class="right mono small">${it.is_dir ? (it.du != null ? humanSize(it.du) : '—') : humanSize(it.size)}</td>
+      <td class="small">${escapeHtml(it.mtime || '')}</td>
+      <td class="mono small" title="${escapeHtml(it.mode_oct || '')}">${escapeHtml(it.perms || '')}</td>
+      <td class="mono small">${it.owner ? escapeHtml(it.owner + ':' + it.group) : ''}</td>
+      <td class="fm-cb"><button class="btn btn-sm fm-more" data-menu title="Acciones">⋯</button></td>
+    </tr>`).join('')
+    : `<tr><td colspan="7" class="muted center">${searchMode ? 'Sin resultados' : items.length ? 'Nada coincide con el filtro' : 'Carpeta vacía'}</td></tr>`;
+  const files = shown.filter(i => !i.is_dir), dirs = shown.length - files.length;
+  $('status').textContent = searchMode ? `${shown.length} resultado(s)` :
+    `${dirs} carpeta(s) · ${files.length} archivo(s) · ${humanSize(files.reduce((a, f) => a + f.size, 0))}`
+    + (items.length !== shown.length ? ` · ${items.length - shown.length} oculto(s) o filtrado(s)` : '');
+  $('cb-all').checked = shown.length > 0 && shown.every(it => selected.has(it.full));
+  renderBars();
+}
+function selectedItems() { return items.filter(it => selected.has(it.full)); }
+function renderBars() {
+  const sel = selectedItems();
+  $('selbar').hidden = !sel.length;
+  if (sel.length) {
+    $('sel-count').textContent = sel.length === 1 ? '1 seleccionado' : `${sel.length} seleccionados`;
+    const size = sel.filter(i => !i.is_dir).reduce((a, i) => a + i.size, 0);
+    $('sel-size').textContent = size ? ' · ' + humanSize(size) : '';
   }
-  for (const it of d.items) {
-    const full = join(d.path, it.name);
-    const icon = it.is_dir ? '📁' : (it.is_link ? '🔗' : '📄');
-    const p = jsArg(full);
-    const name = it.is_dir
-      ? `<a href="#" onclick="load(${p}); return false;">${escapeHtml(it.name)}</a>`
-      : `<a href="#" onclick="editFile(${p}); return false;">${escapeHtml(it.name)}</a>`;
-    const link = it.is_link ? ` <span class="muted small">→ ${escapeHtml(it.target)}</span>` : '';
-    const isArchive = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(it.name);
-    let acts = `<a class="btn btn-sm" href="${API}download?path=${encodeURIComponent(full)}" title="Descargar">⬇</a>`;
-    if (WRITE) {
-      acts += ` <button class="btn btn-sm" onclick="renameItem(${p})" title="Renombrar / mover">✎</button>`
-        + ` <button class="btn btn-sm" onclick="copyItem(${p})" title="Copiar">⧉</button>`
-        + ` <button class="btn btn-sm" onclick="permDialog(${jsArg(Object.assign({path: full}, it))})" title="Permisos">🔑</button>`
-        + (isArchive ? ` <button class="btn btn-sm" onclick="simple('extract', ${p}, '¿Extraer aquí? Los archivos existentes con el mismo nombre se sobrescribirán.')" title="Extraer">📦</button>`
-                     : ` <button class="btn btn-sm" onclick="simple('compress', ${p}, '¿Comprimir a .tar.gz?')" title="Comprimir">🗜</button>`)
-        + ` <button class="btn btn-sm btn-danger" onclick="deleteItem(${p}, ${it.is_dir})" title="Borrar">🗑</button>`;
-    }
-    rows += `<tr><td>${icon}</td><td class="mono">${name}${link}</td><td>${it.is_dir ? '—' : humanSize(it.size)}</td>`
-      + `<td class="mono small">${escapeHtml(it.owner + ':' + it.group)}</td>`
-      + `<td class="mono small" title="${escapeHtml(it.mode_oct)}">${escapeHtml(it.perms)}</td>`
-      + `<td class="small">${escapeHtml(it.mtime)}</td><td class="right" style="white-space:nowrap;">${acts}</td></tr>`;
+  $('clipbar').hidden = !clipboard;
+  if (clipboard) $('clip-text').textContent = `${clipboard.paths.length} elemento(s) para ${clipboard.mode === 'cut' ? 'mover' : 'copiar'} desde ${clipboard.from}`;
+  document.querySelectorAll('#files-table tbody tr[data-i]').forEach(tr => {
+    const on = selected.has(shown[tr.dataset.i].full);
+    tr.classList.toggle('sel', on); tr.querySelector('[data-cb]').checked = on;
+  });
+}
+function clearSel() { selected.clear(); render(); }
+
+// Ordenar
+document.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {
+  sort = { key: th.dataset.sort, dir: sort.key === th.dataset.sort ? -sort.dir : 1 };
+  localStorage.setItem('mp-fm-sort', JSON.stringify(sort)); render();
+}));
+$('show-hidden').checked = localStorage.getItem('mp-fm-hidden') === '1';
+$('show-hidden').addEventListener('change', e => { localStorage.setItem('mp-fm-hidden', e.target.checked ? '1' : '0'); render(); });
+$('filter').addEventListener('input', () => { if (!searchMode) render(); });
+$('filter').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchDeep();
+  if (e.key === 'Escape') { e.target.value = ''; if (searchMode) load(currentPath); else render(); }
+});
+$('cb-all').addEventListener('change', e => { shown.forEach(it => e.target.checked ? selected.add(it.full) : selected.delete(it.full)); render(); });
+
+// Búsqueda en subcarpetas
+async function searchDeep() {
+  const q = $('filter').value.trim();
+  if (q.length < 2) return ui.toast('Escribe al menos 2 caracteres', 'info');
+  $('status').textContent = 'Buscando…';
+  const d = await (await fetch(API + `search?path=${encodeURIComponent(currentPath)}&q=${encodeURIComponent(q)}`)).json();
+  if (d.error) return err(d, 'Búsqueda');
+  searchMode = true; selected.clear();
+  items = d.results.map(r => ({ name: r.name, full: r.path, is_dir: r.is_dir, size: 0, rel: r.path.slice(currentPath === '/' ? 1 : currentPath.length + 1) }));
+  $('search-head').hidden = false;
+  $('search-head').innerHTML = `Resultados para <b>${escapeHtml(q)}</b> en <span class="mono">${escapeHtml(currentPath)}</span>`
+    + (d.truncated ? ' <span class="pill warn">límite alcanzado: refina la búsqueda</span>' : '')
+    + ` <button class="btn btn-sm" onclick="$('search-head').hidden = true; $('filter').value=''; load(currentPath)">Volver a la carpeta</button>`;
+  render();
+}
+
+// ── Clics, selección y menú contextual ──
+const tbody = document.querySelector('#files-table tbody');
+function rowItem(e) { const tr = e.target.closest('tr[data-i]'); return tr ? [shown[tr.dataset.i], Number(tr.dataset.i)] : [null, -1]; }
+tbody.addEventListener('click', e => {
+  const [it, i] = rowItem(e);
+  if (!it) return;
+  if (e.target.closest('[data-open]')) { e.preventDefault(); return openItem(it); }
+  if (e.target.closest('[data-menu]')) { e.stopPropagation(); if (!selected.has(it.full)) { selected.clear(); selected.add(it.full); renderBars(); } return showMenu(e, it); }
+  if (e.target.closest('[data-cb]')) { e.target.checked ? selected.add(it.full) : selected.delete(it.full); lastClicked = i; return renderBars(); }
+  if (e.shiftKey && lastClicked >= 0) {
+    const [a, b] = [Math.min(lastClicked, i), Math.max(lastClicked, i)];
+    for (let k = a; k <= b; k++) selected.add(shown[k].full);
+  } else if (e.ctrlKey || e.metaKey) {
+    selected.has(it.full) ? selected.delete(it.full) : selected.add(it.full);
+  } else { selected.clear(); selected.add(it.full); }
+  lastClicked = i; renderBars();
+});
+tbody.addEventListener('dblclick', e => { const [it] = rowItem(e); if (it && !e.target.closest('input,button')) openItem(it); });
+document.querySelector('.fm-list').addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const [it] = rowItem(e);
+  if (it && !selected.has(it.full)) { selected.clear(); selected.add(it.full); renderBars(); }
+  showMenu(e, it);
+});
+
+function showMenu(e, it) {
+  const sel = selectedItems(), multi = sel.length > 1;
+  const entry = (label, fn, opts = {}) => opts.hide ? '' : `<button data-act="${fn}" class="${opts.danger ? 'danger' : ''}">${label}${opts.key ? `<kbd>${opts.key}</kbd>` : ''}</button>`;
+  let html;
+  if (!it) {
+    html = (WRITE ? entry('Nueva carpeta', 'newdir') + entry('Nuevo archivo', 'newfile') + entry('Subir archivos…', 'upload') : '')
+      + entry('Pegar aquí', 'paste', { hide: !clipboard, key: 'Ctrl+V' }) + '<hr>'
+      + entry('Seleccionar todo', 'selall', { key: 'Ctrl+A' }) + entry('Copiar ruta de la carpeta', 'copypathdir') + entry('Actualizar', 'reload', { key: 'F5' });
+  } else {
+    html = (multi ? '' : entry(it.is_dir ? 'Abrir' : IMAGE.test(it.name) ? 'Ver imagen' : 'Abrir en el editor', 'open', { key: 'Enter' }))
+      + entry(multi ? `Descargar ${sel.length} como .tar.gz` : it.is_dir ? 'Descargar como .tar.gz' : 'Descargar', 'download')
+      + (WRITE ? '<hr>' + entry('Renombrar / mover', 'rename', { hide: multi, key: 'F2' })
+        + entry('Copiar', 'copy', { key: 'Ctrl+C' }) + entry('Cortar', 'cut', { key: 'Ctrl+X' })
+        + entry('Duplicar', 'dup', { hide: multi }) + entry('Comprimir…', 'compress')
+        + entry('Extraer aquí', 'extract', { hide: multi || !ARCHIVE.test(it.name) })
+        + entry('Permisos y propietario…', 'perms') : '')
+      + '<hr>' + entry('Calcular tamaño', 'du', { hide: multi || !it.is_dir })
+      + entry('Copiar ruta', 'copypath', { hide: multi })
+      + entry('Agregar a favoritos', 'fav', { hide: multi || !it.is_dir })
+      + (WRITE ? '<hr>' + entry(multi ? `Borrar ${sel.length} elementos` : 'Borrar', 'delete', { danger: true, key: 'Supr' }) : '');
   }
-  tbody.innerHTML = rows || '<tr><td colspan="7" class="muted center">Directorio vacío</td></tr>';
+  const m = $('ctx');
+  m.innerHTML = html.replace(/^(<hr>)+|(<hr>)+$/g, '').replace(/(<hr>){2,}/g, '<hr>');
+  m.hidden = false;
+  const x = Math.min(e.clientX, innerWidth - m.offsetWidth - 8), y = Math.min(e.clientY, innerHeight - m.offsetHeight - 8);
+  m.style.left = x + 'px'; m.style.top = y + 'px';
+  m.onclick = ev => {
+    const b = ev.target.closest('[data-act]'); if (!b) return;
+    m.hidden = true; runAction(b.dataset.act, it);
+  };
+}
+document.addEventListener('click', e => { if (!e.target.closest('#ctx')) $('ctx').hidden = true; });
+document.addEventListener('scroll', () => { $('ctx').hidden = true; }, true);
+
+function runAction(act, it) {
+  const A = {
+    open: () => openItem(it), download: downloadSel, rename: () => renameItem(it), copy: () => clip('copy'),
+    cut: () => clip('cut'), dup: () => duplicate(it), compress: compressSel, extract: () => extract(it),
+    perms: () => permDialog(selectedItems()), du: () => calcSize(it), delete: deleteSel,
+    copypath: () => copyText(it.full), copypathdir: () => copyText(currentPath), fav: () => { const f = favs(); if (!f.includes(it.full)) localStorage.setItem('mp-fav', JSON.stringify([...f, it.full])); renderSide(); },
+    newdir: () => newItem('dir'), newfile: () => newItem('file'), upload: () => openUpload(), paste, selall: () => { shown.forEach(i => selected.add(i.full)); renderBars(); },
+    reload,
+  };
+  A[act]?.();
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); ui.toast('Ruta copiada: ' + t, 'info', 2000); }
+  catch (e) { ui.prompt('Copia la ruta:', { title: 'Ruta', value: t }); }
 }
 
-async function editFile(path) {
-  const r = await fetch(API + "read?path=" + encodeURIComponent(path));
-  const d = await r.json();
-  if (d.error) { ui.alert(d.error, { title: 'No se pudo abrir el archivo', icon: 'error' }); return; }
-  editingPath = d.path;
-  editorLocked = !WRITE || !!d.lossy;
-  document.getElementById('ed-filename').textContent = d.path;
-  document.getElementById('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '')
-    + (d.lossy ? ' · solo lectura: no es UTF-8 (p. ej. Latin-1); guardarlo aquí dañaría los caracteres especiales. Descárgalo para editarlo.'
-       : (WRITE ? '' : ' · solo lectura'));
-  const ed = document.getElementById('editor');
-  ed.value = d.content;
-  editorOriginal = ed.value;
-  ed.readOnly = editorLocked;
-  const saveBtn = document.getElementById('ed-save');
-  if (saveBtn) saveBtn.hidden = editorLocked;
-  document.getElementById('editor-modal').classList.add('open');
-  ed.focus();
+// Teclado (fuera de campos de texto y ventanas)
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea, select, dialog') || document.querySelector('.modal.open')) return;
+  const sel = selectedItems(), ctrl = e.ctrlKey || e.metaKey;
+  if (ctrl && e.key.toLowerCase() === 'a') { e.preventDefault(); shown.forEach(i => selected.add(i.full)); renderBars(); }
+  else if (ctrl && e.key.toLowerCase() === 'c' && sel.length && WRITE) clip('copy');
+  else if (ctrl && e.key.toLowerCase() === 'x' && sel.length && WRITE) clip('cut');
+  else if (ctrl && e.key.toLowerCase() === 'v' && clipboard && WRITE) paste();
+  else if (e.key === 'Delete' && sel.length && WRITE) deleteSel();
+  else if (e.key === 'F2' && sel.length === 1 && WRITE) { e.preventDefault(); renameItem(sel[0]); }
+  else if (e.key === 'Enter' && sel.length === 1) openItem(sel[0]);
+  else if (e.key === 'Backspace') { e.preventDefault(); goUp(); }
+  else if (e.key === 'Escape') clearSel();
+  else if (e.key === 'F5') { e.preventDefault(); reload(); }
+  else if (e.altKey && e.key === 'ArrowLeft') goBack();
+  else if (e.altKey && e.key === 'ArrowRight') goFwd();
+});
+
+// ── Acciones ──
+async function openItem(it) {
+  if (it.is_dir) return goTo(it.full);
+  if (IMAGE.test(it.name)) {
+    $('img-name').textContent = it.full;
+    $('img-view').src = API + 'raw?path=' + encodeURIComponent(it.full);
+    $('img-dl').href = API + 'download?path=' + encodeURIComponent(it.full);
+    return $('img-modal').classList.add('open');
+  }
+  editFile(it.full);
 }
 
-async function closeEditor() {
-  const changed = !editorLocked && document.getElementById('editor').value !== editorOriginal;
-  if (changed && !await ui.confirm('Hay cambios sin guardar en ' + editingPath + '. ¿Cerrar y descartarlos?',
-    { title: 'Cambios sin guardar', danger: true, confirmText: 'Descartar cambios', cancelText: 'Seguir editando' })) return;
-  closeModal('editor-modal');
+function downloadSel() {
+  const sel = selectedItems();
+  if (!sel.length) return;
+  const qs = sel.map(i => 'path=' + encodeURIComponent(i.full)).join('&');
+  location.href = API + 'download?' + qs;
 }
 
-async function saveFile() {
-  if (editorLocked) return;
-  if (!await ui.confirm('¿Guardar ' + editingPath + '? Se crea un backup .matipanel.bak', { title: 'Guardar archivo', confirmText: 'Guardar' })) return;
-  const d = await postJSON(API + "write", { path: editingPath, content: document.getElementById('editor').value });
-  if (!d.ok) { ui.alert(d.error, { title: 'No se pudo guardar', icon: 'error' }); return; }
-  ui.toast('Guardado ✓ · Backup: ' + d.backup);
-  editorOriginal = document.getElementById('editor').value;
-  closeModal('editor-modal');
+function clip(mode) {
+  const sel = selectedItems(); if (!sel.length) return;
+  clipboard = { mode, paths: sel.map(i => i.full), from: currentPath };
+  ui.toast(`${sel.length} elemento(s) ${mode === 'cut' ? 'cortado(s)' : 'copiado(s)'}. Ve a otra carpeta y pulsa «Pegar aquí».`, 'info', 2500);
+  render();
+}
+function dupName(name) {
+  const m = name.match(/^(.*?)(\.[^.\/]{1,8}(\.gz|\.bz2|\.xz)?)?$/), base = m[1] || name, ext = m[2] || '';
+  for (let n = 1; n < 100; n++) {
+    const cand = `${base} (copia${n > 1 ? ' ' + n : ''})${ext}`;
+    if (!items.some(i => i.name === cand)) return cand;
+  }
+  return name + '.copia';
+}
+async function paste() {
+  if (!clipboard) return;
+  const { mode, paths, from } = clipboard;
+  if (mode === 'cut' && from === currentPath) return ui.toast('Ya está en esta carpeta', 'info');
+  let ok = 0;
+  for (const p of paths) {
+    const name = p.split('/').pop();
+    const dest = mode === 'copy' && from === currentPath ? join(currentPath, dupName(name)) : currentPath;
+    const d = await postJSON(API + (mode === 'cut' ? 'rename' : 'copy'), { path: p, dest });
+    if (d.ok) ok++; else { await err(d, `No se pudo ${mode === 'cut' ? 'mover' : 'copiar'} ${name}`); }
+  }
+  if (mode === 'cut') clipboard = null;
+  if (ok) ui.toast(`${ok} elemento(s) ${mode === 'cut' ? 'movido(s)' : 'copiado(s)'}`);
+  load(currentPath);
+}
+async function duplicate(it) {
+  const d = await postJSON(API + 'copy', { path: it.full, dest: join(currentPath, dupName(it.name)) });
+  if (!d.ok) err(d, 'No se pudo duplicar'); else ui.toast('Duplicado');
   load(currentPath);
 }
 
-// Tab inserta tabulación en el editor; Ctrl+S guarda
-document.getElementById('editor').addEventListener('keydown', e => {
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const t = e.target, s = t.selectionStart;
-    t.setRangeText('\t', s, t.selectionEnd, 'end');
-  } else if ((e.ctrlKey || e.metaKey) && e.key === 's' && !editorLocked) {
-    e.preventDefault(); saveFile();
-  }
-});
+async function compressSel() {
+  const sel = selectedItems(); if (!sel.length) return;
+  const v = await ui.form({ title: 'Comprimir', text: sel.length === 1 ? sel[0].full : `${sel.length} elementos de ${currentPath}`, confirmText: 'Comprimir',
+    fields: [{ name: 'name', label: 'Nombre del archivo', value: sel.length === 1 ? sel[0].name : 'archivos', required: true },
+             { name: 'format', label: 'Formato', type: 'select', value: 'tar.gz', options: [['tar.gz', '.tar.gz (Linux)'], ['zip', '.zip (Windows)']] }] });
+  if (!v) return;
+  const d = await postJSON(API + 'compress', { paths: sel.map(i => i.full), name: v.name, format: v.format });
+  if (!d.ok) return err(d, 'No se pudo comprimir');
+  ui.toast('Creado ' + d.path.split('/').pop()); load(currentPath);
+}
+async function extract(it) {
+  if (!await ui.confirm('¿Extraer aquí? Los archivos existentes con el mismo nombre se sobrescribirán.\n' + it.full,
+    { title: 'Extraer', danger: true, confirmText: 'Extraer y sobrescribir' })) return;
+  const d = await postJSON(API + 'extract', { path: it.full });
+  if (!d.ok) err(d, 'No se pudo extraer'); else ui.toast('Extraído');
+  load(currentPath);
+}
+async function calcSize(it) {
+  ui.toast('Calculando tamaño de ' + it.name + '…', 'info', 1500);
+  const d = await (await fetch(API + 'du?path=' + encodeURIComponent(it.full))).json();
+  if (!d.ok) return err(d, 'No se pudo calcular');
+  it.du = d.bytes; render();
+}
 
 async function newItem(type) {
   const name = await ui.prompt(type === 'dir' ? 'Nombre de la carpeta:' : 'Nombre del archivo:',
     { title: type === 'dir' ? 'Nueva carpeta' : 'Nuevo archivo', confirmText: 'Crear' });
   if (!name) return;
-  const d = await postJSON(API + "create", { dir: currentPath, name, type });
-  if (!d.ok) { ui.alert(d.error, { title: 'No se pudo crear', icon: 'error' }); return; }
-  load(currentPath);
+  const d = await postJSON(API + 'create', { dir: currentPath, name, type });
+  if (!d.ok) return err(d, 'No se pudo crear');
+  await load(currentPath);
   if (type === 'file') editFile(d.path);
 }
-
-async function renameItem(path) {
-  const dest = await ui.prompt('Nuevo nombre, o ruta absoluta para mover:', { title: 'Renombrar / mover', value: path.split('/').pop(), confirmText: 'Renombrar' });
-  if (!dest) return;
-  const d = await postJSON(API + "rename", { path, dest });
-  if (!d.ok) ui.alert(d.error, { title: 'No se pudo renombrar', icon: 'error' });
-  load(currentPath);
-}
-
-async function copyItem(path) {
-  const dest = await ui.prompt('Copiar a (ruta absoluta de archivo o directorio):', { title: 'Copiar', value: path + '.copia', confirmText: 'Copiar' });
-  if (!dest) return;
-  const d = await postJSON(API + "copy", { path, dest });
-  if (!d.ok) ui.alert(d.error, { title: 'No se pudo copiar', icon: 'error' });
+async function renameItem(it) {
+  const dest = await ui.prompt('Nuevo nombre, o ruta absoluta para moverlo:', { title: 'Renombrar / mover', value: it.name, confirmText: 'Renombrar' });
+  if (!dest || dest === it.name) return;
+  const d = await postJSON(API + 'rename', { path: it.full, dest });
+  if (!d.ok) err(d, 'No se pudo renombrar');
   load(currentPath);
 }
 
 // Rutas del sistema donde un borrado por error rompe el servidor: piden escribir el nombre.
 const CRITICAL_DIRS = ['/etc', '/boot', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/var/lib', '/root'];
-async function deleteItem(path, isDir) {
-  const name = path.split('/').pop();
-  const critical = isDir || CRITICAL_DIRS.some(d => path === d || path.startsWith(d + '/'));
-  if (!await ui.confirm((isDir ? '¿Borrar la carpeta y TODO su contenido?\n' : '¿Borrar el archivo?\n') + path,
-    { title: isDir ? 'Borrar carpeta' : 'Borrar archivo', danger: true, confirmText: 'Borrar',
-      typed: critical ? name : undefined })) return;
-  const d = await postJSON(API + "delete", { path });
-  if (!d.ok) ui.alert(d.error, { title: 'No se pudo borrar', icon: 'error' });
-  load(currentPath);
+const isCritical = it => it.is_dir || CRITICAL_DIRS.some(d => it.full === d || it.full.startsWith(d + '/'));
+async function deleteSel() {
+  const sel = selectedItems(); if (!sel.length) return;
+  const one = sel.length === 1, critical = sel.some(isCritical);
+  const list = sel.slice(0, 12).map(i => (i.is_dir ? '📁 ' : '') + i.full).join('\n') + (sel.length > 12 ? `\n… y ${sel.length - 12} más` : '');
+  if (!await ui.confirm((sel.some(i => i.is_dir) ? 'Las carpetas se borran con TODO su contenido.\n\n' : '') + list,
+    { title: one ? (sel[0].is_dir ? 'Borrar carpeta' : 'Borrar archivo') : `Borrar ${sel.length} elementos`, danger: true,
+      confirmText: 'Borrar', typed: critical ? (one ? sel[0].name : 'BORRAR') : undefined })) return;
+  let ok = 0;
+  for (const it of sel) {
+    const d = await postJSON(API + 'delete', { path: it.full });
+    if (d.ok) ok++; else await err(d, 'No se pudo borrar ' + it.name);
+  }
+  if (ok) ui.toast(`${ok} elemento(s) borrado(s)`);
+  selected.clear(); load(currentPath);
 }
 
-async function simple(action, path, msg) {
-  if (!await ui.confirm(msg + '\n' + path, { title: action === 'extract' ? 'Extraer' : 'Comprimir', danger: action === 'extract', confirmText: action === 'extract' ? 'Extraer y sobrescribir' : 'Comprimir' })) return;
-  const d = await postJSON(API + action, { path });
-  if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' });
-  load(currentPath);
+// ── Permisos (uno o varios) ──
+const BITS = [['Propietario', 6], ['Grupo', 3], ['Otros', 0]], RWX = [['Leer', 4], ['Escribir', 2], ['Ejecutar', 1]];
+function permDialog(list) {
+  if (!list.length) return;
+  permTargets = list;
+  const it = list[0];
+  $('perm-path').textContent = list.length === 1 ? it.full : `${list.length} elementos en ${currentPath}`;
+  $('perm-mode').value = it.mode_oct || '644';
+  $('perm-owner').value = it.owner || ''; $('perm-group').value = it.group || '';
+  $('perm-rec').checked = false;
+  $('perm-grid').innerHTML = '<span></span>' + RWX.map(([l]) => `<b>${l}</b>`).join('')
+    + BITS.map(([who, sh]) => `<b>${who}</b>` + RWX.map(([, v]) => `<input type="checkbox" data-bit="${v << sh}">`).join('')).join('');
+  syncBits();
+  $('perm-modal').classList.add('open');
 }
-
-function permDialog(it) {
-  permItem = it;
-  document.getElementById('perm-path').textContent = it.path;
-  document.getElementById('perm-mode').value = it.mode_oct;
-  document.getElementById('perm-owner').value = it.owner;
-  document.getElementById('perm-group').value = it.group;
-  document.getElementById('perm-rec').checked = false;
-  document.getElementById('perm-modal').classList.add('open');
+function syncBits() {
+  const m = parseInt($('perm-mode').value, 8) || 0;
+  document.querySelectorAll('[data-bit]').forEach(cb => cb.checked = !!(m & Number(cb.dataset.bit)));
 }
-
+$('perm-mode').addEventListener('input', syncBits);
+$('perm-grid').addEventListener('change', () => {
+  const special = (parseInt($('perm-mode').value, 8) || 0) & 0o7000;
+  let m = special;
+  document.querySelectorAll('[data-bit]').forEach(cb => { if (cb.checked) m |= Number(cb.dataset.bit); });
+  $('perm-mode').value = m.toString(8).padStart(3, '0');
+});
 async function savePerms() {
-  const it = permItem, rec = document.getElementById('perm-rec').checked;
-  const mode = document.getElementById('perm-mode').value.trim();
-  const owner = document.getElementById('perm-owner').value.trim();
-  const group = document.getElementById('perm-group').value.trim();
-  if (mode !== it.mode_oct || rec) {
-    const d = await postJSON(API + "chmod", { path: it.path, mode, recursive: rec });
-    if (!d.ok) { ui.alert(d.error, { title: 'chmod falló', icon: 'error' }); return; }
+  const rec = $('perm-rec').checked, mode = $('perm-mode').value.trim();
+  const owner = $('perm-owner').value.trim(), group = $('perm-group').value.trim();
+  for (const it of permTargets) {
+    if (mode !== it.mode_oct || rec) {
+      const d = await postJSON(API + 'chmod', { path: it.full, mode, recursive: rec && it.is_dir });
+      if (!d.ok) return err(d, 'chmod falló en ' + it.name);
+    }
+    if (owner && group && (owner !== it.owner || group !== it.group || rec)) {
+      const d = await postJSON(API + 'chown', { path: it.full, owner, group, recursive: rec && it.is_dir });
+      if (!d.ok) return err(d, 'chown falló en ' + it.name);
+    }
   }
-  if (owner !== it.owner || group !== it.group || rec) {
-    const d = await postJSON(API + "chown", { path: it.path, owner, group, recursive: rec });
-    if (!d.ok) { ui.alert(d.error, { title: 'chown falló', icon: 'error' }); return; }
+  closeModal('perm-modal'); ui.toast('Permisos aplicados'); load(currentPath);
+}
+
+// ── Editor ──
+const ed = $('editor'), gutter = $('gutter');
+function updateGutter() {
+  const n = ed.value.split('\n').length;
+  if (gutter.dataset.n !== String(n)) {
+    gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n');
+    gutter.dataset.n = n;
   }
-  closeModal('perm-modal');
+  $('ed-lines').textContent = n + ' líneas';
+  $('ed-dirty').hidden = editorLocked || ed.value === editorOriginal;
+}
+function updatePos() {
+  const before = ed.value.slice(0, ed.selectionStart).split('\n');
+  $('ed-pos').textContent = `Ln ${before.length}, Col ${before.at(-1).length + 1}`;
+}
+ed.addEventListener('input', updateGutter);
+ed.addEventListener('scroll', () => { gutter.scrollTop = ed.scrollTop; });
+['keyup', 'click', 'select'].forEach(ev => ed.addEventListener(ev, updatePos));
+function toggleWrap() {
+  const on = ed.getAttribute('wrap') !== 'soft';
+  ed.setAttribute('wrap', on ? 'soft' : 'off');
+  gutter.hidden = on;  // con ajuste de línea los números dejarían de coincidir
+  $('ed-wrap').classList.toggle('btn-primary', on);
+  localStorage.setItem('mp-fm-wrap', on ? '1' : '0');
+}
+async function gotoLine() {
+  const v = await ui.prompt('Número de línea:', { title: 'Ir a línea', type: 'number', validate: v => Number(v) >= 1 ? '' : 'Escribe un número válido' });
+  if (!v) return;
+  const lines = ed.value.split('\n'), n = Math.min(Number(v), lines.length);
+  const pos = lines.slice(0, n - 1).reduce((a, l) => a + l.length + 1, 0);
+  ed.focus(); ed.setSelectionRange(pos, pos + lines[n - 1].length);
+  ed.scrollTop = (n - 5) * parseFloat(getComputedStyle(ed).lineHeight);
+  updatePos();
+}
+async function editFile(path) {
+  const d = await (await fetch(API + 'read?path=' + encodeURIComponent(path))).json();
+  if (d.error) {
+    if (await ui.confirm(d.error + '\n\n¿Quieres descargarlo?', { title: 'No se puede abrir en el editor', confirmText: 'Descargar' }))
+      location.href = API + 'download?path=' + encodeURIComponent(path);
+    return;
+  }
+  editingPath = d.path;
+  editorLocked = !WRITE || !!d.lossy;
+  $('ed-filename').textContent = d.path;
+  $('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '')
+    + (d.lossy ? ' · solo lectura: no es UTF-8 (p. ej. Latin-1); guardarlo aquí dañaría los caracteres especiales. Descárgalo para editarlo.'
+       : (WRITE ? '' : ' · solo lectura'));
+  ed.value = d.content; editorOriginal = ed.value; ed.readOnly = editorLocked;
+  const saveBtn = $('ed-save'); if (saveBtn) saveBtn.hidden = editorLocked;
+  $('editor-modal').classList.add('open');
+  ed.scrollTop = 0; ed.setSelectionRange(0, 0); ed.focus();
+  updateGutter(); updatePos();
+}
+async function closeEditor() {
+  const changed = !editorLocked && ed.value !== editorOriginal;
+  if (changed && !await ui.confirm('Hay cambios sin guardar en ' + editingPath + '. ¿Cerrar y descartarlos?',
+    { title: 'Cambios sin guardar', danger: true, confirmText: 'Descartar cambios', cancelText: 'Seguir editando' })) return;
+  closeModal('editor-modal');
+}
+async function saveFile() {
+  if (editorLocked) return;
+  const d = await postJSON(API + 'write', { path: editingPath, content: ed.value });
+  if (!d.ok) return err(d, 'No se pudo guardar');
+  ui.toast('Guardado ✓ · respaldo en ' + d.backup.split('/').pop());
+  editorOriginal = ed.value; updateGutter();
   load(currentPath);
 }
+ed.addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); ed.setRangeText('\t', ed.selectionStart, ed.selectionEnd, 'end'); updateGutter(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (!editorLocked) saveFile(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); gotoLine(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeEditor(); }
+});
+if (localStorage.getItem('mp-fm-wrap') === '1') toggleWrap();
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('img-modal').classList.contains('open')) closeModal('img-modal'); });
 
 // ── Subida ──
 let upQueue = [];   // [{file, rel}]
 let upXhr = null;
 
 function openUpload() {
-  document.getElementById('up-dest').textContent = currentPath;
-  document.getElementById('upload-modal').classList.add('open');
+  $('up-dest').textContent = currentPath;
+  $('upload-modal').classList.add('open');
   renderQueue();
 }
-function addToQueue(items) {
-  for (const it of items) {
-    if (!upQueue.some(q => q.rel === it.rel)) upQueue.push(it);
-  }
+function addToQueue(list) {
+  for (const it of list) if (!upQueue.some(q => q.rel === it.rel)) upQueue.push(it);
   renderQueue();
 }
 function clearUpload() { if (!upXhr) { upQueue = []; renderQueue(); } }
-function cancelUpload() {
-  if (upXhr) { upXhr.abort(); return; }
-  closeModal('upload-modal');
-}
+function cancelUpload() { if (upXhr) { upXhr.abort(); return; } closeModal('upload-modal'); }
 function renderQueue() {
   const total = upQueue.reduce((a, q) => a + q.file.size, 0);
-  document.getElementById('up-list').innerHTML = upQueue.length
+  $('up-list').innerHTML = upQueue.length
     ? upQueue.map((q, i) => `<div class="up-item"><span class="mono truncate">${escapeHtml(q.rel)}</span>
         <span class="muted small">${humanSize(q.file.size)}</span>
         <button class="btn btn-sm" onclick="upQueue.splice(${i},1); renderQueue();" title="Quitar">✕</button></div>`).join('')
       + `<div class="up-total small muted">${upQueue.length} archivo(s) · ${humanSize(total)}</div>`
     : '';
-  document.getElementById('up-go').disabled = !upQueue.length || !!upXhr;
+  $('up-go').disabled = !upQueue.length || !!upXhr;
 }
 
 // Recorre carpetas soltadas (API de entradas del navegador)
@@ -331,12 +755,12 @@ function startUpload(overwriteForced) {
   if (!upQueue.length || upXhr) return;
   const fd = new FormData();
   fd.append('dir', currentPath);
-  fd.append('overwrite', (overwriteForced === true || document.getElementById('up-overwrite').checked) ? '1' : '0');
-  fd.append('extract', document.getElementById('up-extract').value);
+  fd.append('overwrite', (overwriteForced === true || $('up-overwrite').checked) ? '1' : '0');
+  fd.append('extract', $('up-extract').value);
   for (const q of upQueue) fd.append('files', q.file, q.rel);
 
-  const bar = document.getElementById('up-bar'), status = document.getElementById('up-status');
-  document.getElementById('up-progress').style.display = '';
+  const bar = $('up-bar'), status = $('up-status');
+  $('up-progress').style.display = '';
   bar.parentElement.className = 'bar';
   bar.style.width = '0';
   upXhr = new XMLHttpRequest();
@@ -378,13 +802,13 @@ function startUpload(overwriteForced) {
 }
 
 if (WRITE) {
-  document.getElementById('up-files').addEventListener('change', e => {
+  $('up-files').addEventListener('change', e => {
     addToQueue([...e.target.files].map(f => ({ file: f, rel: f.name }))); e.target.value = '';
   });
-  document.getElementById('up-dir').addEventListener('change', e => {
+  $('up-dir').addEventListener('change', e => {
     addToQueue([...e.target.files].map(f => ({ file: f, rel: f.webkitRelativePath || f.name }))); e.target.value = '';
   });
-  const dz = document.getElementById('dropzone');
+  const dz = $('dropzone');
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('over'));
   dz.addEventListener('drop', async e => {
@@ -393,13 +817,13 @@ if (WRITE) {
   });
 
   // Soltar archivos en cualquier parte del explorador abre la subida
-  const overlay = document.getElementById('drop-overlay');
-  const modalOpen = () => document.getElementById('upload-modal').classList.contains('open');
+  const overlay = $('drop-overlay');
+  const modalOpen = () => $('upload-modal').classList.contains('open');
   const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
   let depth = 0;
   window.addEventListener('dragenter', e => {
     if (!hasFiles(e) || modalOpen()) return;
-    depth++; document.getElementById('drop-dest').textContent = currentPath; overlay.classList.add('on');
+    depth++; $('drop-dest').textContent = currentPath; overlay.classList.add('on');
   });
   window.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; overlay.classList.remove('on'); } });
   window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
@@ -407,20 +831,10 @@ if (WRITE) {
     if (!hasFiles(e)) return;
     e.preventDefault(); depth = 0; overlay.classList.remove('on');
     if (modalOpen()) return;
-    const items = await itemsFromDrop(e.dataTransfer);
-    openUpload(); addToQueue(items);
+    const list = await itemsFromDrop(e.dataTransfer);
+    openUpload(); addToQueue(list);
   });
 }
-
-function humanSize(n) {
-  if (n < 1024) return n + ' B';
-  for (const u of ['KB','MB','GB','TB']) { n /= 1024; if (n < 1024) return n.toFixed(1) + ' ' + u; }
-  return n.toFixed(1) + ' PB';
-}
-
-function go() { load(document.getElementById('path-input').value); }
-function goUp() { if (currentPath !== '/') load(currentPath.replace(/\/[^\/]+$/, '') || '/'); }
-document.getElementById('path-input').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 
 // ?edit=/ruta/archivo abre el editor (usado por otros módulos); ?path=/dir navega
 const qs = new URLSearchParams(location.search);
