@@ -21,7 +21,7 @@
 </section>
 
 {# Tacómetros #}
-<div class="gauges">
+<div class="gauges" {% if not prefs.dash.gauges %}hidden{% endif %}>
   <div class="gauge" id="g-cpu"></div>
   <div class="gauge" id="g-mem"></div>
   <div class="gauge" id="g-swap"></div>
@@ -29,11 +29,11 @@
 </div>
 
 {# Historial #}
-<div class="card">
+<div class="card" {% if not prefs.dash.history %}hidden{% endif %}>
   <div class="card-head">
     <h3>Historial</h3>
     <div class="seg" id="range">
-      <button data-r="300">5 min</button><button data-r="900" class="active">15 min</button><button data-r="3600">1 hora</button>
+      {% for r, l in [("300", "5 min"), ("900", "15 min"), ("3600", "1 hora")] %}<button data-r="{{ r }}" {% if prefs.range == r %}class="active"{% endif %}>{{ l }}</button>{% endfor %}
     </div>
   </div>
   <div class="charts">
@@ -47,7 +47,7 @@
 </div>
 
 {# Información del sistema #}
-<div class="card">
+<div class="card" {% if not prefs.dash.info %}hidden{% endif %}>
   <div class="card-head"><h3>Información del sistema</h3><span class="muted small" id="server-time"></span></div>
   <dl class="kv">
     <div><dt>Nombre del host</dt><dd class="mono">{{ hostname }}</dd></div>
@@ -65,7 +65,7 @@
   </dl>
 </div>
 
-<div class="dash-cols">
+<div class="dash-cols" {% if not prefs.dash.procs %}hidden{% endif %}>
   <div class="card">
     <div class="card-head"><h3>Procesos con más CPU</h3><a href="{{ url_for('processes.index') }}">Ver todos →</a></div>
     <div class="table-wrap">
@@ -87,8 +87,8 @@
   </div>
 </div>
 
-<div class="card">
-  <div class="card-head"><h3>Accesos rápidos</h3></div>
+<div class="card" {% if not prefs.dash.quick %}hidden{% endif %}>
+  <div class="card-head"><h3>Accesos rápidos</h3><a href="{{ url_for('appearance.index') }}">Personalizar →</a></div>
   <div class="quick">
     <a href="{{ url_for('terminal.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Terminal</a>
     <a href="{{ url_for('files.index') }}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Archivos</a>
@@ -125,7 +125,7 @@ const C = {
   procs: lineChart($('ch-procs'), { series: [{ key: 'procs', label: 'Procesos' }], max: 'auto', min: 10, fmt: v => String(Math.round(v)) }),
 };
 
-let points = [], range = 900, latest = null, overview = null;
+let points = [], range = {{ prefs.range }}, latest = null, overview = null;
 
 // ── Rango del historial ──
 $('range').addEventListener('click', e => {

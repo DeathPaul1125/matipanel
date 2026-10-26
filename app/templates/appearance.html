@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Apariencia{% endblock %}
+{% block heading %}Apariencia{% endblock %}
+
+{% block content %}
+<div style="max-width: 920px;">
+
+<div class="card">
+  <div class="card-head"><h3>Tema</h3><span class="muted small">Se guarda en este navegador</span></div>
+  <div class="opts" id="theme-opts">
+    <button class="opt" data-theme-opt="auto"><span class="opt-preview"><i style="background:#0F1E3A"></i><b style="background:linear-gradient(90deg,#F6F5F0 50%,#161614 50%)"></b></span>Según el sistema</button>
+    <button class="opt" data-theme-opt="light"><span class="opt-preview"><i style="background:#0F1E3A"></i><b style="background:#F6F5F0"></b></span>Claro</button>
+    <button class="opt" data-theme-opt="dark"><span class="opt-preview"><i style="background:#1E1E1C"></i><b style="background:#161614"></b></span>Oscuro</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h3>Color de acento</h3><span class="muted small">Botones, enlaces, selección y gráficos</span></div>
+  <div class="swatches" id="accents">
+    <label class="swatch-custom"><input type="color" id="accent-custom"> Personalizado</label>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h3>Barra lateral</h3></div>
+  <div class="opts" id="sidebar-opts">
+    <button class="opt" data-sb="navy"><span class="opt-preview"><i style="background:#0F1E3A"></i><b></b></span>Azul oscuro</button>
+    <button class="opt" data-sb="light"><span class="opt-preview"><i style="background:var(--bg); border-right:1px solid var(--border)"></i><b style="background:var(--surface)"></b></span>Clara</button>
+    <button class="opt" data-sb="graphite"><span class="opt-preview"><i style="background:#1C1E22"></i><b></b></span>Grafito</button>
+    <button class="opt" data-sb="accent"><span class="opt-preview"><i style="background:color-mix(in srgb, var(--accent) 72%, #000)"></i><b></b></span>Color de acento</button>
+    <label class="opt" data-sb="custom"><span class="opt-preview"><i id="sb-custom-prev"></i><b></b></span>
+      <span style="display:flex; align-items:center; justify-content:space-between;">Personalizado <input type="color" id="sb-custom"></span></label>
+  </div>
+  <div class="pref-row" style="margin-top:8px;">
+    <span>Barra compacta<small>Solo iconos; el nombre aparece al pasar el mouse</small></span>
+    <label class="checks"><label><input type="checkbox" id="sbmini"> Activar</label></label>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h3>Texto y espaciado</h3></div>
+  <div class="pref-row"><span>Tamaño<small>Escala todo el panel</small></span>
+    <div class="seg" data-pref="zoom"><button data-v="90">90 %</button><button data-v="100">100 %</button><button data-v="110">110 %</button><button data-v="120">120 %</button></div></div>
+  <div class="pref-row"><span>Densidad<small>Compacta muestra más filas por pantalla</small></span>
+    <div class="seg" data-pref="density"><button data-v="comfortable">Cómoda</button><button data-v="compact">Compacta</button></div></div>
+  <div class="pref-row"><span>Tipografía</span>
+    <div class="seg" data-pref="font"><button data-v="plex">IBM Plex</button><button data-v="system">Del sistema</button></div></div>
+  <div class="pref-row"><span>Bordes</span>
+    <div class="seg" data-pref="radius"><button data-v="square">Rectos</button><button data-v="soft">Suaves</button><button data-v="round">Redondeados</button></div></div>
+  <div class="pref-row"><span>Animaciones<small>Desactívalas si prefieres un panel más quieto</small></span>
+    <div class="seg" data-pref="motion"><button data-v="on">Activadas</button><button data-v="off">Desactivadas</button></div></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h3>Dashboard</h3></div>
+  <div class="pref-row"><span>Secciones visibles</span>
+    <div class="checks" id="dash-checks">
+      <label><input type="checkbox" data-sec="gauges"> Tacómetros</label>
+      <label><input type="checkbox" data-sec="history"> Historial</label>
+      <label><input type="checkbox" data-sec="info"> Información del sistema</label>
+      <label><input type="checkbox" data-sec="procs"> Procesos y almacenamiento</label>
+      <label><input type="checkbox" data-sec="quick"> Accesos rápidos</label>
+    </div></div>
+  <div class="pref-row"><span>Rango del historial</span>
+    <div class="seg" data-pref="range"><button data-v="300">5 min</button><button data-v="900">15 min</button><button data-v="3600">1 hora</button></div></div>
+</div>
+
+<div class="toolbar" style="justify-content:flex-end;">
+  <button class="btn" onclick="resetAll()">Restablecer apariencia</button>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = "{{ url_for('appearance.save') }}";
+const P = {{ prefs|tojson }};
+const ACCENTS = [
+  ['default', '#0E7C6B', 'Fósforo (predeterminado)'], ['#2563EB', '#2563EB', 'Azul'], ['#4F46E5', '#4F46E5', 'Índigo'],
+  ['#7C3AED', '#7C3AED', 'Violeta'], ['#DB2777', '#DB2777', 'Rosa'], ['#DC2626', '#DC2626', 'Rojo'],
+  ['#EA580C', '#EA580C', 'Naranja'], ['#D97706', '#D97706', 'Ámbar'], ['#16A34A', '#16A34A', 'Verde'],
+  ['#0891B2', '#0891B2', 'Cian'], ['#475569', '#475569', 'Pizarra'],
+];
+const $ = id => document.getElementById(id);
+
+// Swatches de acento
+$('accents').insertAdjacentHTML('afterbegin', ACCENTS.map(([v, c, n]) =>
+  `<button class="swatch" data-accent="${v}" title="${escapeHtml(n)}" style="background:${c}"></button>`).join(''));
+
+async function setPref(patch) {
+  const d = await postJSON(API, patch);
+  if (!d.ok) return ui.alert(d.error, { title: 'No se pudo guardar', icon: 'error' });
+  Object.assign(P, d.prefs);
+  $('prefs-css').textContent = d.css;
+  const h = document.documentElement.dataset;
+  Object.assign(h, { density: P.density, radius: P.radius, font: P.font, motion: P.motion, zoom: P.zoom, sbmini: P.sbmini ? '1' : '0' });
+  render();
+  ui.toast('Apariencia guardada', 'success', 1400);
+}
+
+function render() {
+  document.querySelectorAll('[data-accent]').forEach(b => b.classList.toggle('active', b.dataset.accent === P.accent));
+  $('accent-custom').value = P.accent.startsWith('#') ? P.accent : '#0E7C6B';
+  const presets = ['navy', 'light', 'graphite', 'accent'];
+  document.querySelectorAll('[data-sb]').forEach(o => o.classList.toggle('active',
+    o.dataset.sb === P.sidebar || (o.dataset.sb === 'custom' && !presets.includes(P.sidebar))));
+  const sbCustom = presets.includes(P.sidebar) ? '#1F2937' : P.sidebar;
+  $('sb-custom').value = sbCustom;
+  $('sb-custom-prev').style.background = sbCustom;
+  $('sbmini').checked = P.sbmini;
+  document.querySelectorAll('.seg[data-pref]').forEach(seg =>
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.v === String(P[seg.dataset.pref]))));
+  document.querySelectorAll('[data-sec]').forEach(cb => cb.checked = P.dash[cb.dataset.sec]);
+  const t = localStorage.getItem('mp-theme') || 'auto';
+  document.querySelectorAll('[data-theme-opt]').forEach(b => b.classList.toggle('active', b.dataset.themeOpt === t));
+}
+
+// Eventos
+document.addEventListener('click', e => {
+  const sw = e.target.closest('[data-accent]');
+  if (sw) return setPref({ accent: sw.dataset.accent });
+  const sb = e.target.closest('button[data-sb]');
+  if (sb) return setPref({ sidebar: sb.dataset.sb });
+  const segBtn = e.target.closest('.seg[data-pref] button');
+  if (segBtn) return setPref({ [segBtn.parentElement.dataset.pref]: segBtn.dataset.v });
+  const th = e.target.closest('[data-theme-opt]');
+  if (th) {
+    const v = th.dataset.themeOpt;
+    if (v === 'auto') localStorage.removeItem('mp-theme'); else localStorage.setItem('mp-theme', v);
+    document.documentElement.dataset.theme = v === 'auto'
+      ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : v;
+    render();
+  }
+});
+$('accent-custom').addEventListener('change', e => setPref({ accent: e.target.value }));
+$('sb-custom').addEventListener('input', e => { $('sb-custom-prev').style.background = e.target.value; });
+$('sb-custom').addEventListener('change', e => setPref({ sidebar: e.target.value }));
+$('sbmini').addEventListener('change', e => setPref({ sbmini: e.target.checked }));
+document.querySelectorAll('[data-sec]').forEach(cb => cb.addEventListener('change', () =>
+  setPref({ dash: { ...P.dash, [cb.dataset.sec]: cb.checked } })));
+
+async function resetAll() {
+  if (!await ui.confirm('Se restablecerán colores, barra lateral, tamaños y secciones del dashboard.', { title: 'Restablecer apariencia', confirmText: 'Restablecer' })) return;
+  await setPref({ reset: true });
+}
+
+render();
+</script>
+{% endblock %}

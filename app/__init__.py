@@ -5,11 +5,12 @@ Dedicado a Matías Aceituno, la inspiración de este proyecto. 💙
 __version__ = "0.3.0"
 
 from flask import Flask, request, abort
-from flask_login import LoginManager
+from flask_login import LoginManager, current_user
 from flask_sock import Sock
 from .auth import auth_bp, load_user
 from .modules import register_modules
 from .util import same_origin
+from . import prefs as user_prefs
 import os
 import secrets
 
@@ -52,6 +53,12 @@ def create_app():
         # Los navegadores mandan Origin en todo POST; si no coincide con el host, es CSRF.
         if request.method in ("POST", "PUT", "DELETE") and request.headers.get("Origin")                 and not same_origin():
             abort(403)
+
+    @app.context_processor
+    def _inject_prefs():
+        # Apariencia del usuario disponible en todas las plantillas
+        p = user_prefs.get(current_user.username if current_user.is_authenticated else None)
+        return {"prefs": p, "prefs_css": user_prefs.css(p)}
 
     sock = Sock(app)
 

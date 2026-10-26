@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-density="{{ prefs.density }}" data-radius="{{ prefs.radius }}" data-font="{{ prefs.font }}" data-motion="{{ prefs.motion }}" data-zoom="{{ prefs.zoom }}" data-sbmini="{{ 1 if prefs.sbmini else 0 }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}MatiPanel{% endblock %} · MatiPanel</title>
   {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style id="prefs-css">{{ prefs_css|safe }}</style>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text x='2' y='20' font-size='20'>🐧</text></svg>">
 </head>
 <body>
@@ -13,7 +14,7 @@
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-icon" title="M de Matías 💙">M</div>
-        <div>
+        <div class="brand-text">
           <div class="brand-name">MatiPanel</div>
           <div class="brand-sub">{{ request.host }}</div>
         </div>
@@ -52,6 +53,7 @@
         ]),
         ("Cuenta", [
           ("auth.security", "Seguridad", '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+          ("appearance.index", "Apariencia", '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6h1.9A5.6 5.6 0 0 0 22 11c0-5-4.5-9-10-9z"/>'),
           ("dashboard.about", "Acerca de", '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/>'),
         ]),
       ] %}
@@ -61,14 +63,14 @@
         {% for ep, label, icon in items %}
         {% set bp = ep.split('.')[0] %}
         {% set active = request.endpoint == ep or (request.blueprint == bp and bp not in ('logs', 'auth', 'dashboard')) or (ep == 'auth.security' and 'tfa' in (request.endpoint or '')) %}
-        <a href="{{ url_for(ep) }}" class="nav-item {% if active %}active{% endif %}">
+        <a href="{{ url_for(ep) }}" class="nav-item {% if active %}active{% endif %}" title="{{ label }}">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">{{ icon|safe }}</svg>
-          {{ label }}
+          <span class="nav-label">{{ label }}</span>
         </a>
         {% endfor %}
         {% endfor %}
       </nav>
-      <a class="dedication-link" href="{{ url_for('dashboard.about') }}">💙 Para Matías</a>
+      <a class="dedication-link" href="{{ url_for('dashboard.about') }}" title="Para Matías">💙 <span class="nav-label">Para Matías</span></a>
       <div class="sidebar-foot">
         <span class="mono">{{ current_user.username if current_user.is_authenticated else '' }}</span>
         <a href="{{ url_for('auth.logout') }}">Cerrar sesión</a>

@@ -34,6 +34,7 @@ Administra tu servidor Linux desde el navegador: sistema, usuarios, servicios, a
 | **Logs** | journalctl, archivos de `/var/log` y vista en vivo |
 | **Terminal** | Shell real en el navegador como tu usuario |
 | **Seguridad** | 2FA TOTP (Google Authenticator, Aegis…) con códigos de recuperación |
+| **Apariencia** | Tema claro/oscuro, color de acento, color de la barra lateral, tamaño, densidad, bordes, tipografía y secciones del dashboard (se guarda por usuario) |
 
 ## 🔐 Seguridad
 
