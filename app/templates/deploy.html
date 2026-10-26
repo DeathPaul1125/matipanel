@@ -557,7 +557,7 @@ function showTab(tab) {
   if (tab === 'env' && !envLoaded) loadEnv();
   if (tab === 'logs') { fillServices(); loadLogs(); }
   if (tab === 'summary') loadContainers();
-  if (tab === 'config') { fillConfig(); loadSecret(); }
+  if (tab === 'config') { if (!configFilled) fillConfig(); loadSecret(); }
 }
 $('#dp-tabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
 
