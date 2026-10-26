@@ -163,6 +163,8 @@ async function render() {
   if (S.db) await ensureOpen(S.db, S.schema);
   if (tok !== S.nav) return;
   renderTree();
+  const act = $('tree').querySelector('.dbx-node.active');
+  if (act) act.scrollIntoView({block: 'nearest'});
   if (!S.db) return viewHome(tok);
   if (!S.table) return viewDb(tok);
   return viewTable(tok);
@@ -563,6 +565,7 @@ function hexDump(h) {
 
 function openViewer(title, type, v, loader) {
   let text, note = '';
+  const partial = v && typeof v === 'object' && ('hex' in v ? v.len * 2 > v.hex.length : true);
   if (v && typeof v === 'object') {
     if ('hex' in v) {
       text = hexDump(v.hex);
@@ -579,7 +582,7 @@ function openViewer(title, type, v, loader) {
     <div class="small muted" id="vw-note">${esc(note)}</div>
     <pre class="terminal dbx-viewer" id="vw-pre"></pre>
     <div class="form-actions">
-      ${loader && v && typeof v === 'object' ? '<button type="button" class="btn" data-act="vw-full">Cargar valor completo</button>' : ''}
+      ${loader && partial ? '<button type="button" class="btn" data-act="vw-full">Cargar valor completo</button>' : ''}
       <button type="button" class="btn" data-act="vw-copy">Copiar</button>
       <button type="button" class="btn btn-primary" data-act="close">Cerrar</button>
     </div>`);
@@ -737,6 +740,7 @@ async function deleteSelected() {
 // ── Estructura ─────────────────────────────────────────────────────
 function viewStructure(v) {
   const m = S.meta, can = m.writable && m.type === 'table';
+  const hasCmt = m.columns.some(c => c.comment);
   const cols = m.columns.map((c, j) => `<tr>
       <td class="muted small">${j + 1}</td>
       <td class="mono"><b>${esc(c.name)}</b>${(m.key || []).includes(c.name) ? ' <span class="dbx-pk">clave</span>' : ''}</td>
@@ -745,7 +749,7 @@ function viewStructure(v) {
       <td class="mono small dbx-ellipsis" title="${esc(c.default ?? '')}">${c.default === null ? '<span class="dbx-null">ninguno</span>' : esc(c.default)}</td>
       <td class="small">${esc(c.key)}</td>
       <td class="small">${esc(c.extra)}</td>
-      <td class="small muted dbx-ellipsis" title="${esc(c.comment)}">${esc(c.comment)}</td>
+      ${hasCmt ? `<td class="small muted dbx-ellipsis" title="${esc(c.comment)}">${esc(c.comment)}</td>` : ''}
       <td class="right dbx-nowrap">${can ? `<button type="button" class="btn btn-sm" data-act="col-edit" data-c="${j}">Modificar</button>
         <button type="button" class="btn btn-sm btn-danger" data-act="col-drop" data-c="${j}">Eliminar</button>` : ''}</td></tr>`).join('');
   const idx = m.indexes.map((ix, k) => `<tr>
@@ -762,7 +766,7 @@ function viewStructure(v) {
   v.innerHTML = `<div class="card">
       <div class="card-head"><h3>Columnas</h3>${can ? '<button type="button" class="btn btn-primary btn-sm" data-act="col-add">+ Agregar columna</button>' : ''}</div>
       ${!m.writable ? flash(m.readonly_reason, 'info') : m.type !== 'table' ? flash('Es una vista: su estructura se define con SQL (consola).', 'info') : ''}
-      <div class="table-wrap"><table class="lx"><thead><tr><th>#</th><th>Nombre</th><th>Tipo</th><th>Nulo</th><th>Predeterminado</th><th>Clave</th><th>Extra</th><th>Comentario</th><th></th></tr></thead><tbody>${cols}</tbody></table></div>
+      <div class="table-wrap"><table class="lx"><thead><tr><th>#</th><th>Nombre</th><th>Tipo</th><th>Nulo</th><th>Predeterminado</th><th>Clave</th><th>Extra</th>${hasCmt ? '<th>Comentario</th>' : ''}<th></th></tr></thead><tbody>${cols}</tbody></table></div>
     </div>
     <div class="grid grid-2">
       <div class="card">

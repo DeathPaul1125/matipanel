@@ -1114,7 +1114,7 @@ table.dbx-grid tbody tr.sel td { background: var(--accent-bg); }
 .dbx-fcell select, .dbx-fcell input { height: 26px; font-size: 11.5px; padding: 0 5px; }
 .dbx-fcell select { width: 84px; flex-shrink: 0; }
 .dbx-fcell input { flex: 1; min-width: 60px; width: 100%; }
-.dbx-filters select.input { width: 100%; height: 26px; font-size: 11.5px; padding: 0 5px; }
+.dbx-filters select[data-imp-map] { width: 100%; min-width: 120px; height: 26px; font-size: 11.5px; padding: 0 5px; }
 .dbx-cb { width: 32px; text-align: center; padding-left: 6px !important; padding-right: 6px !important; }
 .dbx-rowact { white-space: nowrap; padding: 2px 4px !important; }
 .dbx-rowact .icon-btn { width: 26px; height: 26px; border: none; background: none; }
