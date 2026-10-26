@@ -85,12 +85,31 @@
     </div>
 
     <div data-step="3" hidden>
+      <label class="form-row"><span>Tipo de proyecto</span>
+        <select class="input" id="wz-kind" onchange="kindUI(this)"><option value="laravel">Laravel</option><option value="php">PHP (otro framework o PHP puro)</option></select>
+        <span class="dlg-help" data-kind="php" hidden>Apache con .htaccess, en contenedores igual que Laravel. Sin artisan, worker ni programador.</span></label>
       <div class="dp-form2">
         <label class="form-row"><span>Rama</span>
           <input class="input mono" id="wz-branch" value="main" list="wz-branches" autocomplete="off">
           <datalist id="wz-branches"></datalist></label>
         <label class="form-row"><span>Versión de PHP</span>
           <select class="input" id="wz-php">{% for v in php_versions %}<option {% if v == '8.3' %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+      </div>
+      <div data-kind="php" hidden>
+        <div class="dp-form2">
+          <label class="form-row"><span>Carpeta pública</span>
+            <input class="input mono" id="wz-docroot" placeholder="(raíz del proyecto)" autocomplete="off">
+            <span class="dlg-help">Donde está el index.php que recibe las visitas. Vacío = la raíz del repositorio.</span></label>
+          <label class="form-row"><span>Ruta del .env</span>
+            <input class="input mono" id="wz-envpath" value=".env" autocomplete="off">
+            <span class="dlg-help">Dónde lo lee tu framework (Quetzal: <span class="mono">app/config/.env</span>).</span></label>
+        </div>
+        <label class="form-row"><span>Carpetas persistentes</span>
+          <input class="input mono" id="wz-persist" placeholder="assets/uploads app/logs" autocomplete="off">
+          <span class="dlg-help">Se conservan entre despliegues (subidas, logs, plugins). Separadas por espacios.</span></label>
+        <label class="form-row"><span>Comando de migraciones (opcional)</span>
+          <input class="input mono" id="wz-migcmd" placeholder="php migrate.php" autocomplete="off">
+          <span class="dlg-help">Se ejecuta antes de activar cada versión nueva; si falla, la anterior sigue en línea.</span></label>
       </div>
       <label class="form-row"><span>Nombre interno (opcional)</span>
         <input class="input mono" id="wz-host" placeholder="miapp.apps.empresa.local" autocomplete="off">
@@ -100,8 +119,8 @@
         <span class="dlg-help">Se crea en un contenedor propio y sus credenciales se agregan al .env (DB_*).</span></label>
       <div class="dp-checks">
         <label class="dlg-check"><input type="checkbox" id="wz-redis"> Redis (caché, sesiones y colas)</label>
-        <label class="dlg-check"><input type="checkbox" id="wz-worker"> Worker de colas (queue:work)</label>
-        <label class="dlg-check"><input type="checkbox" id="wz-scheduler"> Programador de tareas (schedule:work)</label>
+        <label class="dlg-check" data-kind="laravel"><input type="checkbox" id="wz-worker"> Worker de colas (queue:work)</label>
+        <label class="dlg-check" data-kind="laravel"><input type="checkbox" id="wz-scheduler"> Programador de tareas (schedule:work)</label>
         <label class="dlg-check"><input type="checkbox" id="wz-auto" checked> Desplegar solo con cada push a la rama</label>
         <label class="dlg-check"><input type="checkbox" id="wz-now" checked> Desplegar al terminar</label>
       </div>
@@ -137,7 +156,7 @@
   <button class="tab" data-tab="deploys">Despliegues</button>
   <button class="tab" data-tab="env">Entorno</button>
   <button class="tab" data-tab="logs">Logs</button>
-  <button class="tab" data-tab="artisan">Artisan</button>
+  <button class="tab" data-tab="artisan" id="tab-artisan">Artisan</button>
   <button class="tab" data-tab="config">Configuración</button>
   <button class="tab" data-tab="delete">Eliminar</button>
 </div>
@@ -242,6 +261,9 @@
   <div class="grid grid-2">
     <div class="card">
       <h3>Código y publicación</h3>
+      <label class="form-row"><span>Tipo de proyecto</span>
+        <select class="input" id="cf-kind" onchange="kindUI(this)"><option value="laravel">Laravel</option><option value="php">PHP (otro framework o PHP puro)</option></select>
+        <span class="dlg-help" data-kind="php" hidden>Apache con .htaccess, en contenedores igual que Laravel. Sin artisan, worker ni programador.</span></label>
       <label class="form-row"><span>Repositorio de GitHub</span><input class="input mono" id="cf-repo" autocomplete="off"></label>
       <div class="dp-form2">
         <label class="form-row"><span>Rama</span><input class="input mono" id="cf-branch" autocomplete="off"></label>
@@ -251,16 +273,33 @@
         <label class="form-row"><span>Puerto interno del contenedor</span><input class="input mono" id="cf-cport" type="number" min="1" max="65535">
           <span class="dlg-help">8080 con el Dockerfile generado. Cámbialo solo si tu Dockerfile escucha en otro.</span></label>
       </div>
+      <div data-kind="php" hidden>
+        <div class="dp-form2">
+          <label class="form-row"><span>Carpeta pública</span>
+            <input class="input mono" id="cf-docroot" placeholder="(raíz del proyecto)" autocomplete="off">
+            <span class="dlg-help">Donde está el index.php que recibe las visitas. Vacío = la raíz del repositorio.</span></label>
+          <label class="form-row"><span>Ruta del .env</span>
+            <input class="input mono" id="cf-envpath" value=".env" autocomplete="off">
+            <span class="dlg-help">Dónde lo lee tu framework (Quetzal: <span class="mono">app/config/.env</span>).</span></label>
+        </div>
+        <label class="form-row"><span>Carpetas persistentes</span>
+          <input class="input mono" id="cf-persist" placeholder="assets/uploads app/logs" autocomplete="off">
+          <span class="dlg-help">Se conservan entre despliegues (subidas, logs, plugins). Separadas por espacios.</span></label>
+        <label class="form-row"><span>Comando de migraciones (opcional)</span>
+          <input class="input mono" id="cf-migcmd" placeholder="php migrate.php" autocomplete="off">
+          <span class="dlg-help">Se ejecuta antes de activar cada versión nueva; si falla, la anterior sigue en línea.</span></label>
+      </div>
       <label class="form-row"><span>Nombre interno (opcional)</span><input class="input mono" id="cf-host" placeholder="miapp.apps.empresa.local" autocomplete="off"></label>
       <label class="form-row"><span>Extensiones de PHP adicionales</span><input class="input mono" id="cf-ext" placeholder="intl gd bcmath" autocomplete="off">
         <span class="dlg-help">Solo con el Dockerfile generado; se instalan con install-php-extensions.</span></label>
       <label class="dlg-check"><input type="checkbox" id="cf-auto"> Desplegar solo con cada push (sondeo cada 60 s y webhook)</label>
-      <label class="dlg-check"><input type="checkbox" id="cf-migrate"> Ejecutar <span class="mono">php artisan migrate --force</span> en cada despliegue</label>
+      <label class="dlg-check"><input type="checkbox" id="cf-migrate"> Ejecutar las migraciones en cada despliegue
+        (<span class="mono" data-kind="laravel">php artisan migrate --force</span><span data-kind="php" hidden>el comando de arriba</span>)</label>
     </div>
     <div class="card">
       <h3>Servicios y recursos</h3>
-      <label class="dlg-check"><input type="checkbox" id="cf-worker"> Worker de colas (queue:work)</label>
-      <label class="dlg-check"><input type="checkbox" id="cf-scheduler"> Programador de tareas (schedule:work)</label>
+      <label class="dlg-check" data-kind="laravel"><input type="checkbox" id="cf-worker"> Worker de colas (queue:work)</label>
+      <label class="dlg-check" data-kind="laravel"><input type="checkbox" id="cf-scheduler"> Programador de tareas (schedule:work)</label>
       <label class="dlg-check"><input type="checkbox" id="cf-redis"> Redis</label>
       <label class="form-row"><span>Base de datos</span>
         <select class="input" id="cf-db"><option value="none">Ninguna</option><option value="mariadb">MariaDB 11</option><option value="postgres">PostgreSQL 16</option></select>
@@ -474,6 +513,14 @@ function setStep(n) {
   $('#wz-next').textContent = n === 3 ? 'Crear aplicación' : 'Siguiente';
   $('#wz-error').hidden = true;
 }
+// Muestra los campos del tipo elegido (Laravel o PHP) dentro del mismo formulario.
+function kindUI(sel) {
+  const scope = sel.closest('[data-step], [data-panel]');
+  scope.querySelectorAll('[data-kind]').forEach(el => { el.hidden = el.dataset.kind !== sel.value; });
+}
+const phpFields = px => ({ kind: $(`#${px}-kind`).value, docroot: $(`#${px}-docroot`).value.trim(),
+  env_path: $(`#${px}-envpath`).value.trim(), persist: $(`#${px}-persist`).value.trim(),
+  migrate_cmd: $(`#${px}-migcmd`).value.trim() });
 function wizError(msg) { const el = $('#wz-error'); el.textContent = msg; el.hidden = false; }
 function openWizard(draft) {
   Object.assign(wz, { step: 1, name: '', ssh: false, created: false });
@@ -484,6 +531,7 @@ function openWizard(draft) {
   $('#wz-branches').innerHTML = '';
   $('#wz-access').textContent = '';
   $('#wz-host').value = '';
+  $('#wz-kind').value = 'laravel'; kindUI($('#wz-kind'));
   $('#wiz').classList.add('open');
   setStep(1);
   if (draft) { wizNext(); } else { $('#wz-name').focus(); }
@@ -528,6 +576,7 @@ async function wizNext() {
         branch: $('#wz-branch').value.trim(), php: $('#wz-php').value, hostname: $('#wz-host').value.trim(),
         database: $('#wz-db').value, redis: $('#wz-redis').checked, worker: $('#wz-worker').checked,
         scheduler: $('#wz-scheduler').checked, auto_deploy: $('#wz-auto').checked, deploy_now: $('#wz-now').checked,
+        ...phpFields('wz'),
       });
       if (!d.ok) return wizError(d.error);
       location.href = d.url + (d.deployment ? '#deploys:' + d.deployment : '');
@@ -573,6 +622,7 @@ async function loadInfo() {
     const o = document.createElement('option'); o.value = c; o.textContent = c; $('#ar-common').appendChild(o);
   });
   INFO = d;
+  $('#tab-artisan').hidden = d.config.kind === 'php';
   renderHead(); renderSummary(); renderHistory();
   if (!configFilled) fillConfig();
   const active = d.history.some(h => h.status === 'running' || h.status === 'queued');
@@ -860,6 +910,9 @@ function fillConfig() {
   $('#cf-worker').checked = !!c.worker; $('#cf-scheduler').checked = !!c.scheduler; $('#cf-redis').checked = !!c.redis;
   $('#cf-db').value = c.database; $('#cf-mem').value = c.mem_mb || ''; $('#cf-cpus').value = c.cpus || '';
   $('#cf-key').value = INFO.pubkey;
+  $('#cf-kind').value = c.kind || 'laravel'; kindUI($('#cf-kind'));
+  $('#cf-docroot').value = c.docroot || ''; $('#cf-envpath').value = c.env_path || '.env';
+  $('#cf-persist').value = (c.persist || []).join(' '); $('#cf-migcmd').value = c.migrate_cmd || '';
   $('#key-help').textContent = INFO.ssh
     ? 'Debe estar en GitHub: repositorio → Settings → Deploy keys (solo lectura).'
     : 'El repositorio es público por HTTPS: no se usa. Sirve si cambias a la URL SSH (git@github.com:…).';
@@ -874,6 +927,7 @@ async function saveConfig() {
     php_ext: $('#cf-ext').value.trim(), auto_deploy: $('#cf-auto').checked, migrate: $('#cf-migrate').checked,
     worker: $('#cf-worker').checked, scheduler: $('#cf-scheduler').checked, redis: $('#cf-redis').checked,
     database: $('#cf-db').value, mem_mb: $('#cf-mem').value || 0, cpus: $('#cf-cpus').value || 0,
+    ...phpFields('cf'),
   };
   if (c.database !== 'none' && body.database !== c.database &&
       !await ui.confirm('Cambiar el motor de base de datos crea una base vacía con el nuevo motor y cambia las variables DB_* del .env. Los datos actuales quedan en su volumen, pero la aplicación dejará de verlos.',
@@ -884,7 +938,7 @@ async function saveConfig() {
   configFilled = false;
   await loadInfo();
   if (d.needs_apply) applyNow('Cambiaste servicios o límites. ¿Recrear los contenedores ahora (sin cortes, con la misma imagen)?');
-  else if (d.needs_deploy && await ui.confirm('Los cambios de repositorio, rama o PHP se aplican al compilar. ¿Desplegar ahora?', { title: 'Desplegar', confirmText: 'Desplegar ahora', cancelText: 'Más tarde' })) deployNow();
+  else if (d.needs_deploy && await ui.confirm('Los cambios de repositorio, rama, PHP o tipo de proyecto se aplican al compilar. ¿Desplegar ahora?', { title: 'Desplegar', confirmText: 'Desplegar ahora', cancelText: 'Más tarde' })) deployNow();
 }
 async function testAccess() {
   const out = $('#cf-access');

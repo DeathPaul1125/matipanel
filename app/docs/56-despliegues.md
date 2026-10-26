@@ -1,6 +1,6 @@
 # Despliegues
 
-Este módulo publica aplicaciones **Laravel** que están en **GitHub**, al estilo de Coolify: descarga el código, construye una imagen Docker con PHP, Nginx, Composer y los assets de npm, ejecuta las migraciones y deja la aplicación en línea en un puerto propio o con un nombre interno como `miapp.apps.empresa.local`. Cada nuevo commit se puede desplegar solo y **sin cortes**. Lo encuentras en **Menú → Web y aplicaciones → Despliegues**.
+Este módulo publica aplicaciones **Laravel** (y [otros proyectos PHP](#proyectos-php-que-no-son-laravel)) que están en **GitHub**, al estilo de Coolify: descarga el código, construye una imagen Docker con PHP, Nginx, Composer y los assets de npm, ejecuta las migraciones y deja la aplicación en línea en un puerto propio o con un nombre interno como `miapp.apps.empresa.local`. Cada nuevo commit se puede desplegar solo y **sin cortes**. Lo encuentras en **Menú → Web y aplicaciones → Despliegues**.
 
 ## Cómo funciona en un minuto
 
@@ -213,6 +213,24 @@ En **Configuración** puedes cambiar el repositorio, la rama, la versión de PHP
 - **Clave de despliegue:** **Probar acceso** y **Regenerar clave** (después tendrás que reemplazarla en GitHub).
 - **Webhook:** URL y secreto; **Regenerar** invalida el anterior.
 
+### Proyectos PHP que no son Laravel
+
+Al crear la aplicación (o en **Configuración**), elige **Tipo de proyecto → PHP (otro framework o PHP puro)**. También se despliega en contenedores, con las mismas versiones sin cortes, reversión y auto-despliegue, pero con **Apache**, que respeta el `.htaccess` del proyecto. Campos propios:
+
+| Campo | Qué poner | Ejemplo (Quetzal / Bee) |
+|---|---|---|
+| **Carpeta pública** | Donde está el `index.php` que recibe las visitas. Vacío = la raíz del repositorio. | *(vacío)* |
+| **Ruta del .env** | Dónde lo lee tu framework. El panel lo monta ahí como archivo de solo lectura. | `app/config/.env` |
+| **Carpetas persistentes** | Carpetas que deben sobrevivir a cada despliegue (subidas, logs, plugins). | `assets/uploads app/logs` |
+| **Comando de migraciones** | Opcional; se ejecuta antes de activar cada versión. Solo `php <archivo>.php [argumentos]`. | `php migrate.php` |
+
+- **Composer:** si hay `composer.json` en la raíz o en una carpeta de primer nivel (por ejemplo `app/`), se ejecuta `composer install` ahí al construir la imagen.
+- **Primer `.env`:** en el primer despliegue, si el repositorio trae `<ruta del .env>.example`, el panel lo usa como base. Revisa la pestaña **Entorno**: cambia las claves de ejemplo (salts, tokens) y desactiva el modo debug.
+- **Base de datos:** el panel rellena todas las variables que terminan en `DB_HOST`, `DB_PORT`, `DB_NAME`/`DB_DATABASE`, `DB_USER`/`DB_USERNAME` y `DB_PASS`/`DB_PASSWORD`, con cualquier prefijo. En Quetzal llena tanto `DB_*` (web) como `LDB_*` (consola, que usa `migrate.php`). La base y el usuario se llaman `app`.
+- No hay pestaña Artisan, ni worker ni programador.
+
+> **Importante:** Si tu framework tiene un instalador web (`install.php`), protégelo o elimínalo del repositorio de producción: en el contenedor sigue existiendo.
+
 ### Usar tu propio Dockerfile
 
 Si el repositorio trae un `Dockerfile` en la raíz, el panel lo usa en lugar del generado. Debe:
@@ -255,7 +273,7 @@ Si la aplicación despliega bien pero muestra **500**, mira la pestaña **Logs**
 
 ### ¿Puedo desplegar algo que no sea Laravel?
 
-Sí, si el repositorio trae su propio `Dockerfile` que sirva HTTP en el puerto interno configurado. Desactiva **Ejecutar php artisan migrate** en **Configuración** si no es Laravel.
+Sí. Para cualquier proyecto PHP elige el tipo **PHP** (ver [Proyectos PHP que no son Laravel](#proyectos-php-que-no-son-laravel)). Para otros lenguajes, agrega tu propio `Dockerfile` que sirva HTTP en el puerto interno configurado.
 
 ### ¿Dónde guarda el panel los datos de cada aplicación?
 

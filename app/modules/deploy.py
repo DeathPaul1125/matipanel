@@ -304,6 +304,29 @@ def _opts(d, cfg):
         if c is None or not (c == 0 or 0.1 <= c <= 256):
             return None, "CPUs inválidas (0 = sin límite, o de 0.1 a 256)"
         out["cpus"] = round(c, 2)
+    if "kind" in d:
+        if d["kind"] not in D.KINDS:
+            return None, "Tipo de proyecto inválido"
+        out["kind"] = d["kind"]
+    for k, label in (("docroot", "Carpeta pública"), ("env_path", "Ruta del .env")):
+        if k in d:
+            v = str(d[k] or "").strip().strip("/")
+            if (v or k == "env_path") and not D.valid_rel_path(v):
+                return None, f"{label} inválida: ruta relativa al proyecto, sin «..» (ej.: public, app/config/.env)"
+            out[k] = v
+    if "persist" in d:
+        raw = d["persist"]
+        paths = raw.replace(",", " ").split() if isinstance(raw, str) else raw if isinstance(raw, list) else None
+        paths = [str(x).strip().strip("/") for x in paths] if paths is not None else None
+        if (paths is None or len(paths) > D.MAX_PERSIST or len(set(paths)) != len(paths)
+                or not all(D.valid_rel_path(x) for x in paths)):
+            return None, f"Carpetas persistentes inválidas (hasta {D.MAX_PERSIST} rutas relativas, ej.: assets/uploads)"
+        out["persist"] = paths
+    if "migrate_cmd" in d:
+        m = " ".join(str(d["migrate_cmd"] or "").split())
+        if m and not D.valid_migrate_cmd(m):
+            return None, "Comando de migraciones inválido: «php script.php [argumentos]» (ej.: php migrate.php)"
+        out["migrate_cmd"] = m
     if "php_ext" in d:
         raw = d["php_ext"]
         exts = raw.replace(",", " ").split() if isinstance(raw, str) else raw if isinstance(raw, list) else None
@@ -320,8 +343,8 @@ def create(name):
     if not cfg.get("draft"):
         return _err("La aplicación ya fue creada", 409)
     d = _data()
-    fields = {k: d[k] for k in ("branch", "php", "hostname", "auto_deploy", "worker", "scheduler", "database", "redis")
-              if k in d}
+    fields = {k: d[k] for k in ("branch", "php", "hostname", "auto_deploy", "worker", "scheduler", "database", "redis",
+                                 "kind", "docroot", "env_path", "persist", "migrate_cmd") if k in d}
     opts, error = _opts(fields, cfg)
     if error:
         return _err(error)
@@ -525,6 +548,8 @@ def artisan(name):
     cmd = str(d.get("command", "")).strip()
     if cmd.startswith("php artisan "):
         cmd = cmd[12:].strip()
+    if D.is_php(cfg):
+        return _err("Artisan solo existe en proyectos Laravel")
     ok, why = D.valid_artisan(cmd)
     if not ok:
         return _err(why)
@@ -556,14 +581,15 @@ def config(name):
         if not ok:
             return _err("No se guardó: " + out[-1500:], 409)
     D.update_config(name, lambda c: c.update(opts))
-    svc_keys = ("database", "redis", "worker", "scheduler", "mem_mb", "cpus", "container_port")
+    svc_keys = ("database", "redis", "worker", "scheduler", "mem_mb", "cpus", "container_port",
+                "docroot", "env_path", "persist")
     changed = any(new.get(k) != cfg.get(k) for k in svc_keys)
     if changed:
         try:
             D.apply_service_changes(name)
         except (OSError, ValueError) as e:
             return _err(f"Guardado, pero no se pudo regenerar compose: {e}", 500)
-    rebuild = any(new.get(k) != cfg.get(k) for k in ("repo", "branch", "php", "php_ext"))
+    rebuild = any(new.get(k) != cfg.get(k) for k in ("repo", "branch", "php", "php_ext", "kind"))
     return jsonify({"ok": True, "needs_apply": changed and bool(new.get("active_slot")), "needs_deploy": rebuild})
 
 

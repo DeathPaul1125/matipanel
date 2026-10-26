@@ -46,6 +46,8 @@ O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 O_BINARY = getattr(os, "O_BINARY", 0)
 
 PHP_VERSIONS = ("8.2", "8.3", "8.4")
+KINDS = ("laravel", "php")         # php: cualquier framework (Apache + .htaccess), sin artisan
+MAX_PERSIST = 10
 DATABASES = ("none", "mariadb", "postgres")
 PORT_RANGE = (8081, 8999)          # puertos públicos asignados automáticamente
 PORT_EDIT_RANGE = (1024, 19999)    # rango permitido al editarlo a mano
@@ -74,6 +76,8 @@ DEP_ID_RE = re.compile(r"\d{10,17}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 TAG_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
 PHP_EXT_RE = re.compile(r"[a-z0-9_]{2,30}")
+REL_PATH_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
+MIGRATE_CMD_RE = re.compile(r"php [A-Za-z0-9_./-]+\.php(?: [A-Za-z0-9_=:.,/-]+)*")
 ARTISAN_RE = re.compile(r"[a-z:-]+( [A-Za-z0-9_=:.,/-]+)*")
 ARTISAN_BLOCKED = ("tinker", "serve", "queue:listen", "queue:work", "schedule:work", "pail", "octane:start",
                    "reverb:start", "horizon")
@@ -117,6 +121,36 @@ def valid_hostname(h):
     if not isinstance(h, str) or not 3 <= len(h) <= 253 or "." not in h:
         return False
     return all(LABEL_RE.fullmatch(lbl) for lbl in h.split(".")) and not h.split(".")[-1].isdigit()
+
+
+def valid_rel_path(p, max_len=120):
+    """Ruta relativa dentro del proyecto (app/config/.env, assets/uploads): sin «..», «.» ni «/» inicial."""
+    return (isinstance(p, str) and 0 < len(p) <= max_len and bool(REL_PATH_RE.fullmatch(p))
+            and not any(part in (".", "..") for part in p.split("/")))
+
+
+def valid_migrate_cmd(cmd):
+    """Comando previo al cambio de versión en proyectos PHP: «php script.php [args]», sin shell."""
+    return (isinstance(cmd, str) and len(cmd) <= 200 and bool(MIGRATE_CMD_RE.fullmatch(cmd))
+            and ".." not in cmd and valid_rel_path(cmd.split()[1]))
+
+
+def is_php(cfg):
+    return cfg.get("kind") == "php"
+
+
+def persist_volumes(cfg):
+    """{volumen: ruta} de las carpetas persistentes de un proyecto PHP."""
+    out = {}
+    for path in cfg.get("persist") or []:
+        if valid_rel_path(path):
+            out["p_" + re.sub(r"[^a-z0-9]+", "_", path.lower()).strip("_")[:40] + "_" +
+                hashlib.sha1(path.encode()).hexdigest()[:6]] = path
+    return out
+
+
+def db_name(cfg):
+    return "app" if is_php(cfg) else "laravel"
 
 
 def valid_artisan(cmd):
@@ -340,6 +374,52 @@ def render_dockerfile(php, node=False, npm_lock=False, php_ext=()):
     return "\n".join(lines) + "\n"
 
 
+DOCKERIGNORE_PHP = """# Generado por MatiPanel (el repositorio no trae .dockerignore)
+.git
+.env
+**/.env
+node_modules
+"""
+
+
+def find_composer_dir(src):
+    """Carpeta (relativa) con composer.json: la raíz o una subcarpeta de primer nivel (p. ej. app/)."""
+    src = Path(src)
+    if lstat_kind(src / "composer.json") == "file":
+        return ""
+    try:
+        subs = sorted(e.name for e in os.scandir(src) if e.is_dir(follow_symlinks=False) and not e.name.startswith("."))
+    except OSError:
+        return None
+    for sub in subs:
+        if valid_rel_path(sub) and lstat_kind(src / sub / "composer.json") == "file":
+            return sub
+    return None
+
+
+def render_dockerfile_php(php, php_ext=(), composer_dir=None):
+    """Dockerfile para PHP genérico sobre serversideup/php con Apache (respeta .htaccess, :8080, www-data).
+
+    La carpeta pública se fija con APACHE_DOCUMENT_ROOT en compose (cambiarla no obliga a recompilar)."""
+    if php not in PHP_VERSIONS:
+        raise ValueError("versión de PHP no soportada")
+    if composer_dir is not None and composer_dir != "" and not valid_rel_path(composer_dir):
+        raise ValueError("carpeta de composer inválida")
+    exts = [e for e in php_ext if PHP_EXT_RE.fullmatch(e)]
+    lines = [
+        "# Generado por MatiPanel. Para personalizarlo, agrega un Dockerfile a la raíz del repositorio.",
+        f"FROM serversideup/php:{php}-fpm-apache",
+        "ENV PHP_OPCACHE_ENABLE=1",
+    ]
+    if exts:
+        lines += ["USER root", "RUN install-php-extensions " + " ".join(exts), "USER www-data"]
+    lines += ["WORKDIR /var/www/html", "COPY --chown=www-data:www-data . ."]
+    if composer_dir is not None:
+        lines.append(("RUN cd " + composer_dir + " && " if composer_dir else "RUN ")
+                     + "composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader")
+    return "\n".join(lines) + "\n"
+
+
 def slot_port(cfg, slot):
     return int(cfg["slot_base"]) + (0 if slot == "blue" else 1)
 
@@ -374,7 +454,10 @@ def render_compose(cfg, appdir, slots=None):
     slots = slots if slots is not None else cfg.get("slots") or {}
     env_file = [f"{appdir}/env"]
     deps = {}
-    services, volumes = {}, {"storage": {}}
+    php_kind = is_php(cfg)
+    persist = persist_volumes(cfg) if php_kind else {}
+    services, volumes = {}, ({k: {} for k in persist} if php_kind else {"storage": {}})
+    dbn = db_name(cfg)
     if cfg.get("database") == "mariadb":
         services["db"] = {
             "image": "mariadb:11", "restart": "unless-stopped", "env_file": [f"{appdir}/db.env"],
@@ -389,7 +472,7 @@ def render_compose(cfg, appdir, slots=None):
         services["db"] = {
             "image": "postgres:16", "restart": "unless-stopped", "env_file": [f"{appdir}/db.env"],
             "volumes": ["postgres_data:/var/lib/postgresql/data"],
-            "healthcheck": {"test": ["CMD", "pg_isready", "-U", "laravel", "-d", "laravel"],
+            "healthcheck": {"test": ["CMD", "pg_isready", "-U", dbn, "-d", dbn],
                             "interval": "5s", "timeout": "5s", "retries": 30, "start_period": "20s"},
             "labels": {"matipanel.app": name, "matipanel.role": "db"},
         }
@@ -411,10 +494,22 @@ def render_compose(cfg, appdir, slots=None):
     if cfg.get("cpus"):
         limits["cpus"] = f"{float(cfg['cpus']):g}"
 
+    if php_kind:
+        app_vols = [f"{v}:/var/www/html/{path}" for v, path in persist.items()]
+        env_path = cfg.get("env_path") or ".env"
+        if valid_rel_path(env_path):  # el .env como archivo, donde el framework lo busca (solo lectura)
+            app_vols.append(f"{appdir}/env.mount:/var/www/html/{env_path}:ro")
+        docroot = cfg.get("docroot") or ""
+        webroot = "/var/www/html" + (f"/{docroot}" if docroot and valid_rel_path(docroot) else "")
+    else:
+        app_vols = ["storage:/var/www/html/storage"]
+
     def base(image, role):
         svc = {"image": image, "restart": "unless-stopped", "env_file": env_file,
-               "volumes": ["storage:/var/www/html/storage"], "stop_grace_period": "30s",
+               "volumes": list(app_vols), "stop_grace_period": "30s",
                "labels": {"matipanel.app": name, "matipanel.role": role}}
+        if php_kind:
+            svc["environment"] = {"APACHE_DOCUMENT_ROOT": webroot}
         if deps:
             svc["depends_on"] = dict(deps)
         if limits:
@@ -429,12 +524,12 @@ def render_compose(cfg, appdir, slots=None):
             services["app_" + slot] = svc
     active = slots.get(cfg.get("active_slot") or "")
     # El HEALTHCHECK de la imagen prueba HTTP; worker y programador no sirven HTTP.
-    if active and cfg.get("worker"):
+    if active and cfg.get("worker") and not php_kind:
         svc = base(active, "worker")
         svc.update(command=["php", "/var/www/html/artisan", "queue:work", "--tries=3", "--max-time=3600"],
                    stop_signal="SIGTERM", healthcheck={"disable": True})
         services["worker"] = svc
-    if active and cfg.get("scheduler"):
+    if active and cfg.get("scheduler") and not php_kind:
         svc = base(active, "scheduler")
         svc.update(command=["php", "/var/www/html/artisan", "schedule:work"], stop_signal="SIGTERM",
                    healthcheck={"disable": True})
@@ -512,21 +607,40 @@ def new_password(n=32):
     return "".join(secrets.choice(alphabet) for _ in range(n))
 
 
-def service_env(cfg, sec):
-    """Variables que el panel inyecta en el .env según los servicios activos."""
+DB_ALIAS_RE = re.compile(r"[A-Z]*DB_(HOST|PORT|NAME|DATABASE|USER|USERNAME|PASS|PASSWORD)")
+
+
+def service_env(cfg, sec, current=""):
+    """Variables que el panel inyecta en el .env según los servicios activos.
+
+    En proyectos PHP cada framework usa sus nombres (Quetzal: DB_NAME/DB_USER/DB_PASS y LDB_* para
+    la consola): se rellenan todas las claves *DB_HOST, *DB_NAME… que ya tenga el .env."""
+    if is_php(cfg) and cfg.get("database") in ("mariadb", "postgres"):
+        vals = {"HOST": "db", "PORT": "3306" if cfg["database"] == "mariadb" else "5432",
+                "NAME": db_name(cfg), "DATABASE": db_name(cfg), "USER": db_name(cfg), "USERNAME": db_name(cfg),
+                "PASS": sec.get("db_password", ""), "PASSWORD": sec.get("db_password", "")}
+        keys = [k for k, _ in parse_env(current)[0] if DB_ALIAS_RE.fullmatch(k)]
+        upd = {k: vals[DB_ALIAS_RE.fullmatch(k).group(1)] for k in keys}
+        if not upd:
+            upd = {f"DB_{k}": vals[k] for k in ("HOST", "PORT", "DATABASE", "USERNAME", "PASSWORD")}
+        if cfg.get("redis"):
+            upd.update(REDIS_HOST="redis", REDIS_PORT="6379")
+        return upd
     upd = {}
     if cfg.get("database") == "mariadb":
         upd.update(DB_CONNECTION="mysql", DB_HOST="db", DB_PORT="3306")
     elif cfg.get("database") == "postgres":
         upd.update(DB_CONNECTION="pgsql", DB_HOST="db", DB_PORT="5432")
     if cfg.get("database") in ("mariadb", "postgres"):
-        upd.update(DB_DATABASE="laravel", DB_USERNAME="laravel", DB_PASSWORD=sec.get("db_password", ""))
+        upd.update(DB_DATABASE=db_name(cfg), DB_USERNAME=db_name(cfg), DB_PASSWORD=sec.get("db_password", ""))
     if cfg.get("redis"):
         upd.update(REDIS_HOST="redis", REDIS_PORT="6379", REDIS_CLIENT="phpredis")
     return upd
 
 
 def default_env(cfg, sec):
+    if is_php(cfg):  # se completa en el primer despliegue con el .env.example del repositorio, si trae
+        return env_set("# .env de la aplicación (se monta en el contenedor como archivo)\n", service_env(cfg, sec))
     url = f"http://{cfg['hostname']}" if cfg.get("hostname") else f"http://localhost:{cfg['port']}"
     redis, db = cfg.get("redis"), cfg.get("database") in ("mariadb", "postgres")
     pairs = [("APP_NAME", cfg["name"]), ("APP_ENV", "production"), ("APP_KEY", new_app_key()),
@@ -539,10 +653,10 @@ def default_env(cfg, sec):
 
 def db_env(cfg, sec):
     if cfg.get("database") == "mariadb":
-        pairs = [("MARIADB_DATABASE", "laravel"), ("MARIADB_USER", "laravel"),
+        pairs = [("MARIADB_DATABASE", db_name(cfg)), ("MARIADB_USER", db_name(cfg)),
                  ("MARIADB_PASSWORD", sec["db_password"]), ("MARIADB_ROOT_PASSWORD", sec["db_root_password"])]
     elif cfg.get("database") == "postgres":
-        pairs = [("POSTGRES_DB", "laravel"), ("POSTGRES_USER", "laravel"), ("POSTGRES_PASSWORD", sec["db_password"])]
+        pairs = [("POSTGRES_DB", db_name(cfg)), ("POSTGRES_USER", db_name(cfg)), ("POSTGRES_PASSWORD", sec["db_password"])]
     else:
         pairs = []
     return serialize_env(pairs)
@@ -1149,6 +1263,17 @@ def _build(name, cfg, image, sha, log):
     if kind == "file":
         log.step("El repositorio trae Dockerfile: se usa ese")
         dockerfile = src / "Dockerfile"
+    elif is_php(cfg):
+        cdir = find_composer_dir(src)
+        log.step(f"Generando Dockerfile para PHP {cfg['php']} con Apache"
+                 + (" (sin composer.json: sin composer install)" if cdir is None
+                    else f" (composer install en {cdir or 'la raíz'})"))
+        dockerfile = d / "Dockerfile"
+        write_file(dockerfile, render_dockerfile_php(cfg["php"], cfg.get("php_ext") or [], cdir))
+        if lstat_kind(src / ".dockerignore") is None:
+            fd = os.open(src / ".dockerignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_BINARY, 0o644)
+            with os.fdopen(fd, "wb") as f:
+                f.write(DOCKERIGNORE_PHP.encode())
     else:
         if lstat_kind(src / "composer.json") != "file":
             raise Fail("El repositorio no tiene composer.json ni Dockerfile: no parece un proyecto Laravel")
@@ -1170,7 +1295,34 @@ def _build(name, cfg, image, sha, log):
 
 
 def _write_compose(name, cfg, slots=None):
+    if is_php(cfg):
+        # Copia del .env para montarla como archivo. Dueño www-data (uid 33 en la imagen) y 0400: el
+        # contenedor la lee; en el host nadie más entra porque la carpeta de la app es 0700 de root.
+        mount = app_dir(name) / "env.mount"
+        write_file(mount, read_env(name), 0o400)
+        if hasattr(os, "chown"):
+            os.chown(mount, 33, 33)
     write_file(app_dir(name) / "compose.yaml", render_compose(cfg, app_dir(name), slots))
+
+
+def _seed_env(name, cfg, log):
+    """Primer despliegue PHP: si el .env aún no tiene nada propio, parte del <env_path>.example del repo."""
+    if not is_php(cfg) or cfg.get("env_seeded"):
+        return
+    update_config(name, lambda c: c.update(env_seeded=True))
+    env_path = cfg.get("env_path") or ".env"
+    example = app_dir(name) / "src" / (env_path + ".example")
+    text = read_text(example, ENV_MAX) if valid_rel_path(env_path) and lstat_kind(example) == "file" else None
+    if text is None:
+        return
+    pairs, errors = parse_env(text)
+    if errors or not pairs:
+        log.write(f"Se ignoró {env_path}.example: " + ("; ".join(errors[:3]) or "vacío") + "\n")
+        return
+    current = dict(parse_env(read_env(name))[0])
+    merged = env_set(serialize_env([(k, v) for k, v in pairs if k not in current]), current)
+    write_env(name, env_set(merged, service_env(cfg, load_secrets(name), merged)))
+    log.write(f"El .env se creó a partir de {env_path}.example (revísalo en la pestaña Entorno)\n")
 
 
 def _wait_healthy(port, log, timeout=HEALTH_TIMEOUT):
@@ -1219,6 +1371,7 @@ def _pipeline(name, dep, log):
         update_config(name, lambda c: c.update(last_build_sha=info["sha"]))
         log.write(f"Commit {info['sha'][:7]} — {info['message']} ({info['author']})\n")
         _check_cancel()
+        _seed_env(name, cfg, log)
         _build(name, cfg, image, info["sha"], log)
     else:
         log.step(f"Reutilizando la imagen {image} (sin compilar de nuevo)")
@@ -1242,11 +1395,16 @@ def _pipeline(name, dep, log):
         if deps:
             log.step("Levantando servicios: " + ", ".join(deps))
             _cmd(log, compose(name, "up", "-d", "--wait", *deps), 600, "docker compose up (dependencias)")
-        if dep.get("trigger") not in ("rollback", "config") and cfg.get("migrate", True):
-            log.step("Ejecutando migraciones (php artisan migrate --force)")
+        if is_php(cfg):
+            mcmd = cfg.get("migrate_cmd") or ""
+            argv = mcmd.split() if cfg.get("migrate", True) and valid_migrate_cmd(mcmd) else None
+        else:
+            argv = ["php", "artisan", "migrate", "--force"] if cfg.get("migrate", True) else None
+        if dep.get("trigger") not in ("rollback", "config") and argv:
+            log.step(f"Ejecutando migraciones ({' '.join(argv)})")
             try:
-                _cmd(log, compose(name, "run", "--rm", "-T", "-e", "AUTORUN_ENABLED=false", tsvc,
-                                  "php", "artisan", "migrate", "--force"), MIGRATE_TIMEOUT, "Las migraciones")
+                _cmd(log, compose(name, "run", "--rm", "-T", "-e", "AUTORUN_ENABLED=false", tsvc, *argv),
+                     MIGRATE_TIMEOUT, "Las migraciones")
             except Fail as e:
                 raise Fail(f"{e}. La versión anterior sigue en línea.")
         log.step(f"Iniciando la versión nueva en el slot {target} (127.0.0.1:{slot_port(cfg, target)})")
@@ -1433,6 +1591,7 @@ def create_draft(name, repo):
                    "slot_base": base, "container_port": 8080, "auto_deploy": True, "migrate": True,
                    "worker": False, "scheduler": False, "database": "none", "redis": False,
                    "mem_mb": 0, "cpus": 0, "php_ext": [], "draft": True, "created": time.time(),
+                   "kind": "laravel", "docroot": "", "env_path": ".env", "persist": [], "migrate_cmd": "",
                    "active_slot": None, "slots": {"blue": None, "green": None}, "last_build_sha": None,
                    "current": None}
             save_config(name, cfg)
@@ -1472,9 +1631,10 @@ def apply_service_changes(name):
         if cfg["database"] in ("mariadb", "postgres") and not sec.get("db_password"):
             sec.update(db_password=new_password(), db_root_password=new_password())
             save_secrets(name, sec)
-        upd = service_env(cfg, sec)
+        current = read_env(name)
+        upd = service_env(cfg, sec, current)
         if upd:
-            write_env(name, env_set(read_env(name), upd))
+            write_env(name, env_set(current, upd))
         write_file(app_dir(name) / "db.env", db_env(cfg, sec))
         _write_compose(name, cfg)
 
@@ -1494,7 +1654,7 @@ def delete_app(name, volumes=False):
         if code != 0:
             warnings.append("docker compose down: " + (o + e).strip()[-400:])
         if volumes:
-            for v in ("storage", "mariadb_data", "postgres_data", "redis_data"):
+            for v in ("storage", "mariadb_data", "postgres_data", "redis_data", *persist_volumes(cfg)):
                 _run(["docker", "volume", "rm", f"{project_name(name)}_{v}"], 60)
         code, out, _ = _run(["docker", "image", "ls", f"matipanel/{name}", "--format", "{{.Repository}}:{{.Tag}}"], 30)
         for ref in out.split() if code == 0 else []:
@@ -1663,4 +1823,26 @@ if __name__ == "__main__":
     assert env["REDIS_HOST"] == "redis" and env["APP_KEY"].startswith("base64:") and env["QUEUE_CONNECTION"] == "redis"
     assert dict(parse_env(db_env({"database": "mariadb"}, sec))[0])["MARIADB_ROOT_PASSWORD"] == "R" * 32
     assert len(new_password()) == 32 and new_password().isalnum()
+    # Proyectos PHP genéricos (Quetzal: composer en app/, .env en app/config, DB_* y LDB_*)
+    assert valid_rel_path("app/config/.env") and valid_rel_path("assets/uploads") and not valid_rel_path("../etc")
+    assert not valid_rel_path("/etc") and not valid_rel_path("a/./b") and not valid_rel_path("a b") and not valid_rel_path("")
+    assert valid_migrate_cmd("php migrate.php") and valid_migrate_cmd("php bin/migrate.php up --force")
+    assert not valid_migrate_cmd("php ../x.php") and not valid_migrate_cmd("bash x.php") and not valid_migrate_cmd("php m.php; id")
+    df = render_dockerfile_php("8.3", ["intl", "bad;rm"], "app")
+    assert "FROM serversideup/php:8.3-fpm-apache" in df and "RUN cd app && composer install --no-dev" in df
+    assert "install-php-extensions intl\n" in df and "composer" not in render_dockerfile_php("8.4", (), None)
+    pc = {"name": "quetzal", "kind": "php", "slot_base": 20010, "active_slot": "blue", "database": "mariadb",
+          "docroot": "", "env_path": "app/config/.env", "persist": ["assets/uploads", "app/logs"], "worker": True}
+    doc = json.loads(render_compose(pc, "/apps/quetzal", {"blue": "matipanel/quetzal:abc1234"}).split("\n", 1)[1])
+    app_svc = doc["services"]["app_blue"]
+    assert app_svc["environment"] == {"APACHE_DOCUMENT_ROOT": "/var/www/html"} and "worker" not in doc["services"]
+    assert "/apps/quetzal/env.mount:/var/www/html/app/config/.env:ro" in app_svc["volumes"]
+    assert sorted(v.split(":")[1] for v in app_svc["volumes"][:2]) == ["/var/www/html/app/logs", "/var/www/html/assets/uploads"]
+    assert "storage" not in doc["volumes"] and set(persist_volumes(pc)) <= set(doc["volumes"])
+    quetzal_env = "DB_ENGINE='mysql'\nDB_HOST='localhost'\nDB_NAME=''\nDB_USER=''\nDB_PASS=''\nLDB_HOST='localhost'\nLDB_PASS=''\n"
+    upd = service_env(pc, sec, quetzal_env)
+    assert upd == {"DB_HOST": "db", "DB_NAME": "app", "DB_USER": "app", "DB_PASS": "P" * 32,
+                   "LDB_HOST": "db", "LDB_PASS": "P" * 32}, upd
+    assert set(service_env(pc, sec)) == {"DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"}
+    assert dict(parse_env(db_env(pc, sec))[0])["MARIADB_DATABASE"] == "app"
     print("ok")

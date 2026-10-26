@@ -74,7 +74,10 @@ def create_app():
     def _limit_anonymous_body():
         # El límite de 1 GB es para subidas de usuarios ya autenticados; sin sesión
         # (login, 2FA, API remota) basta con 64 KB. El webhook lee su cuerpo con su propio tope.
-        if current_user.is_authenticated or request.path.startswith(WEBHOOK_PREFIX):
+        # GET/HEAD primero: así no se carga el usuario (pwd/grp) en cada archivo estático.
+        if request.method in ("GET", "HEAD", "OPTIONS") or request.path.startswith(WEBHOOK_PREFIX):
+            return
+        if current_user.is_authenticated:
             return
         if request.headers.get("Transfer-Encoding"):
             abort(411)  # sin Content-Length (chunked) el tope de 64 KB no se podría aplicar

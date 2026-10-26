@@ -2,6 +2,9 @@
 
 ## [Sin publicar]
 
+### Añadido
+- 🐘 **Despliegues de PHP genérico** — tipo de proyecto «PHP» para frameworks que no son Laravel (Quetzal/Bee, PHP puro): Apache con `.htaccess`, carpeta pública, ruta del `.env`, carpetas persistentes y comando de migraciones propio. También en Docker, sin cortes.
+
 ### Seguridad (auditoría con security-review)
 - Archivos: chmod y chown ya no siguen un enlace simbólico puesto entre la comprobación y el cambio (se opera sobre el descriptor abierto).
 - Compartidos: la carpeta nueva de Samba/NFS se ajusta por descriptor; un enlace puesto justo tras crearla ya no desvía el chown/chmod.
