@@ -930,6 +930,21 @@ def listening_ports():
     return ports
 
 
+def port_users(port):
+    """Programas que escuchan en el puerto TCP (p. ej. {"apache2"}); vacío si nadie."""
+    code, out, _ = _run(["ss", "-ltnpH", f"sport = :{int(port)}"], timeout=10)
+    return set(re.findall(r'\(\("([^"]+)"', out)) if code == 0 else set()
+
+
+def _wait_listening(port, timeout=5):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if port in listening_ports():
+            return True
+        time.sleep(0.5)
+    return False
+
+
 _compose_cache = {"cmd": None, "at": 0.0}
 
 
@@ -1029,6 +1044,14 @@ def apply_nginx(name, cfg, upstream_port):
         return False, f"{avail} no es un archivo normal; revísalo a mano"
     if lstat_kind(link) not in (None, "link"):
         return False, f"{link} es un archivo real y no un enlace; revísalo a mano"
+    if cfg.get("hostname"):
+        # Con nombre interno Nginx necesita el puerto 80. Si lo tiene otro programa (Apache), el
+        # reload «funciona» pero Nginx descarta la configuración nueva sin avisar.
+        others = port_users(80) - {"nginx"}
+        if others:
+            return False, (f"El puerto 80 lo usa {', '.join(sorted(others))}, y el nombre interno necesita que lo "
+                           f"atienda Nginx. Quita el nombre interno en Configuración (la app seguirá en el puerto "
+                           f"{cfg['port']}) o libera el puerto 80.")
     old = read_text(avail) if kind == "file" else None
     write_file(avail, render_nginx(cfg, upstream_port), 0o644)
     made_link = False
@@ -1053,6 +1076,13 @@ def apply_nginx(name, cfg, upstream_port):
         # para que un reinicio posterior no apunte a un slot que se va a detener.
         restore()
         return False, "No se pudo recargar Nginx; se dejó la configuración anterior: " + (o + e).strip()
+    if not _wait_listening(int(cfg["port"])):
+        # Un reload con un puerto imposible de abrir no da error: Nginx sigue con la configuración vieja.
+        restore()
+        _run(["systemctl", "reload", "nginx"], timeout=60)
+        _, jlog, _ = _run(["journalctl", "-u", "nginx", "-n", "8", "--no-pager"], timeout=15)
+        return False, (f"Nginx no abrió el puerto {cfg['port']}; se dejó la configuración anterior. "
+                       f"¿Está activo Nginx y libre ese puerto?\n" + jlog.strip())
     return True, (out + err).strip()
 
 
