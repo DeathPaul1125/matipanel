@@ -1400,6 +1400,10 @@ def _pipeline(name, dep, log):
             argv = mcmd.split() if cfg.get("migrate", True) and valid_migrate_cmd(mcmd) else None
         else:
             argv = ["php", "artisan", "migrate", "--force"] if cfg.get("migrate", True) else None
+            if argv and lstat_kind(app_dir(name) / "src" / "artisan") != "file":
+                log.write("El repositorio no tiene artisan: se omiten las migraciones de Laravel. "
+                          "Si no es Laravel, cambia el tipo a «PHP» en Configuración.\n")
+                argv = None
         if dep.get("trigger") not in ("rollback", "config") and argv:
             log.step(f"Ejecutando migraciones ({' '.join(argv)})")
             try:
@@ -1453,7 +1457,8 @@ def execute(name, dep):
     except OSError:
         redact = Redactor()
     log = DeployLog(log_path(name, dep["id"]), redact)
-    log.step(f"Despliegue {dep['id']} de «{name}» ({dep.get('trigger')})")
+    kind = "PHP" if is_php(load_config(name) or {}) else "Laravel"
+    log.step(f"Despliegue {dep['id']} de «{name}» ({dep.get('trigger')}, proyecto {kind})")
     t0 = time.time()
     try:
         _pipeline(name, dep, log)
