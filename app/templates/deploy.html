@@ -569,6 +569,9 @@ async function loadInfo() {
     infoTimer = setTimeout(loadInfo, 10000);
     return;
   }
+  if (!INFO) d.artisan_common.forEach(c => {
+    const o = document.createElement('option'); o.value = c; o.textContent = c; $('#ar-common').appendChild(o);
+  });
   INFO = d;
   renderHead(); renderSummary(); renderHistory();
   if (!configFilled) fillConfig();
