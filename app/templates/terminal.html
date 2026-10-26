@@ -3,7 +3,7 @@
 {% block heading %}Terminal · {{ current_user.username }}@{{ request.host.split(':')[0] }}{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm.css') }}">
 
 <div class="toolbar">
   <button class="btn btn-primary" id="btn-connect" onclick="connect()">Conectar</button>
@@ -16,8 +16,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm-addon-fit/0.8.0/xterm-addon-fit.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/xterm.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/xterm-addon-fit.js') }}"></script>
 <script>
 let term = null, ws = null, fitAddon = null;
 

@@ -1,170 +1,177 @@
 # 🐧 MatiPanel
 
-> Administrador web ligero para servidores Linux — inspirado en Webmin/Cockpit, hecho con Python + Flask.
+> Administrador web para servidores Linux — inspirado en Webmin/Cockpit, hecho con Python + Flask.
 
-Una alternativa moderna y minimalista para administrar tu servidor Linux desde el navegador. Ideal para VPS, servidores headless, homelab y entornos institucionales pequeños.
+Administra tu servidor Linux desde el navegador: sistema, usuarios, servicios, archivos, web, PHP, bases de datos, firewall, certificados y más. Pensado para Debian 12 (también Ubuntu y, parcialmente, RHEL/Rocky).
 
-![Status](https://img.shields.io/badge/status-alpha-orange)
+![Status](https://img.shields.io/badge/status-beta-orange)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-## ✨ Características
+## ✨ Módulos
 
-### Sistema
-- **Dashboard en vivo** — CPU, memoria, disco, red, loadavg actualizados cada 3 s.
-- **Procesos** — Vista estilo `htop`, filtrado, kill con confirmación.
-- **Servicios systemd** — Start / stop / restart / enable / disable.
-- **Discos** — Particiones, puntos de montaje, uso por filesystem.
-- **Usuarios y grupos** — Listado de `/etc/passwd` y `/etc/group`.
-
-### Red y seguridad
-- **Red** — Interfaces, IPs, MAC, conexiones activas (`ss`-like).
-- **Firewall** — Soporte para UFW, firewalld e iptables (autodetectado).
-- **2FA con TOTP** — Compatible con Google Authenticator, Authy, FreeOTP, Aegis. Códigos de recuperación incluidos.
-
-### Operaciones
-- **Archivos** — Explorador con editor opcional (`MATIPANEL_FILE_WRITE=1`), backup automático.
-- **Paquetes** — APT y DNF con detección de actualizaciones de seguridad.
-- **Logs** — Consulta filtrada de `journalctl` + **vista en vivo** con WebSocket.
-- **Docker** — Containers, images, volúmenes, logs en modal, start/stop/restart.
-- **Terminal embebida** — xterm.js + PTY real, sesión interactiva como tu usuario.
-
-### Multidistro
-Detección automática y adaptación a:
-- Debian, Ubuntu, Linux Mint, Pop!_OS (APT + UFW)
-- RHEL, Rocky, AlmaLinux, CentOS, Fedora (DNF + firewalld)
+| Área | Qué puedes hacer |
+|------|------------------|
+| **Dashboard** | CPU, memoria, disco, red y carga en vivo |
+| **Sistema** | Hostname, zona horaria/NTP, sesiones (`who`, `last`), hardware, reiniciar/apagar, editar configs clave (hosts, resolv, sshd) |
+| **Procesos** | Lista estilo `htop`, filtro, kill |
+| **Servicios** | systemd: iniciar, detener, reiniciar, habilitar/deshabilitar al arranque, ver estado |
+| **Tareas (cron)** | Crontabs por usuario: crear, editar, activar/desactivar, borrar |
+| **Discos** | Particiones y uso |
+| **Respaldos** | Backups `.tar.gz` de rutas, descarga, restauración y programación |
+| **Usuarios y grupos** | Crear/borrar usuarios, contraseñas, bloqueo, shells, grupos y membresías |
+| **Red** | Interfaces y conexiones activas |
+| **Firewall** | UFW (reglas, políticas), firewalld (puertos/servicios), nftables |
+| **Servidor web** | Apache y Nginx: sitios, crear virtual hosts, activar/desactivar, módulos, recarga segura |
+| **SSL / Let's Encrypt** | Certificados con certbot: emitir, renovar, borrar |
+| **PHP** | Versiones, php.ini, extensiones, PHP-FPM y pools |
+| **Bases de datos** | MariaDB/MySQL y PostgreSQL: bases, usuarios, permisos, consola SQL, respaldo/restauración |
+| **Docker** | Contenedores, imágenes, volúmenes, logs |
+| **Archivos** | Navegar, editar, crear, renombrar/mover, copiar, borrar, permisos, propietario, subir, descargar, comprimir/extraer |
+| **Paquetes** | Buscar, instalar, quitar, actualizar (APT), actualizaciones automáticas |
+| **Logs** | journalctl, archivos de `/var/log` y vista en vivo |
+| **Terminal** | Shell real en el navegador como tu usuario |
+| **Seguridad** | 2FA TOTP (Google Authenticator, Aegis…) con códigos de recuperación |
 
 ## 🔐 Seguridad
 
-- Login contra **PAM** (mismos usuarios del sistema, sin DB extra).
-- Solo usuarios del grupo `matipanel` o `sudo` pueden ingresar.
-- HTTPS con certificado autofirmado (generado en la instalación).
-- Acciones privilegiadas vía `sudoers.d` con allowlist explícita de comandos.
-- Cookies `HttpOnly` + `SameSite=Lax`, secret key persistente.
-- Validación de nombres de unidad systemd para evitar inyección.
-- Servicio corre como usuario `matipanel` sin privilegios.
+- El servicio corre como **root** (igual que Webmin), porque administra el sistema completo. Por eso el acceso está muy restringido:
+- Login contra **PAM** con tus usuarios Linux. Solo entran los miembros de los grupos `matipanel`, `sudo`, `wheel` o `admin`.
+- Bloqueo temporal tras 5 intentos fallidos (login y 2FA). 2FA TOTP opcional por usuario.
+- HTTPS con certificado autofirmado, cookies `Secure` + `HttpOnly` + `SameSite=Lax`, verificación de `Origin` contra CSRF y WebSocket hijacking.
+- La terminal baja a los privilegios de tu usuario (nunca abre un shell root).
+- Todos los comandos se ejecutan sin shell y con validación de parámetros.
+
+> Recomendación: no expongas el puerto 8443 a internet. Limítalo a tu red o VPN con el firewall.
 
 ## 📦 Requisitos
 
-- Ubuntu 22.04+ / Debian 12+ (probado en Ubuntu 24.04 LTS)
-- Python 3.10 o superior
-- Acceso root para la instalación (solo una vez)
+- Debian 12+ (recomendado) o Ubuntu 22.04+. RHEL/Rocky/Fedora: instalación soportada, algunos módulos son solo Debian.
+- Acceso root para instalar.
+- Conexión a internet en el servidor durante la instalación (descarga paquetes Python).
 
-## 🚀 Instalación
+## 🚀 Instalación en Debian
+
+**1. Copia el proyecto al servidor.** Desde tu PC (Windows con PowerShell o Linux):
 
 ```bash
-git clone https://github.com/TU_USUARIO/matipanel.git
-cd matipanel
-sudo ./scripts/install.sh
+scp -r matipanel usuario@IP-DEL-SERVIDOR:/tmp/
+```
+
+O, si lo subes a un repositorio git, en el servidor: `git clone <url> /tmp/matipanel`.
+
+**2. Conéctate al servidor y entra como root:**
+
+```bash
+ssh usuario@IP-DEL-SERVIDOR
+su -            # o: sudo -i
+```
+
+**3. Ejecuta el instalador** indicando tu usuario Linux, el que usarás para entrar al panel:
+
+```bash
+cd /tmp/matipanel
+bash scripts/install.sh usuario
 ```
 
 El instalador:
 
-1. Instala dependencias (`python3-venv`, `libpam0g-dev`, `openssl`).
-2. Crea el usuario y grupo de servicio `matipanel`.
-3. Copia los archivos a `/opt/matipanel`.
-4. Configura un virtualenv con las dependencias Python.
-5. Genera un certificado TLS autofirmado en `/etc/matipanel/`.
-6. Instala la regla `sudoers.d` para acciones privilegiadas.
-7. Habilita y arranca el servicio systemd.
+1. Instala dependencias (`python3-venv`, compiladores, `openssl`).
+2. Crea el grupo `matipanel` y agrega a tu usuario.
+3. Copia la app a `/opt/matipanel` y crea un virtualenv con las dependencias.
+4. Genera un certificado TLS autofirmado en `/etc/matipanel/`.
+5. Configura PAM (`/etc/pam.d/matipanel`).
+6. Instala y arranca el servicio systemd `matipanel`.
 
-Cuando termine, accede a:
+Usa otro puerto con `MATIPANEL_PORT=9443 bash scripts/install.sh usuario`.
+
+**4. Abre el puerto en el firewall** (si tienes uno activo):
+
+```bash
+ufw allow 8443/tcp
+```
+
+**5. Entra desde el navegador:**
 
 ```
 https://IP-DEL-SERVIDOR:8443
 ```
 
-El navegador advertirá sobre el certificado autofirmado — es esperado. Acepta la excepción y entra con tu usuario Linux.
+El navegador advertirá sobre el certificado autofirmado: es lo esperado. Acepta la excepción y entra con tu usuario y contraseña de Linux.
 
-## 👤 Dar acceso a un usuario
+### Si algo falla
 
 ```bash
-sudo usermod -aG matipanel <nombre-usuario>
+systemctl status matipanel          # ¿está corriendo?
+journalctl -u matipanel -n 100      # errores del servicio
 ```
 
-El cambio toma efecto en el siguiente login.
+- **"Usuario o contraseña incorrectos"**: verifica que el usuario esté en el grupo (`id usuario`). Si lo acabas de agregar, ya funciona: no hace falta reiniciar.
+- **No carga la página**: revisa el firewall (`ufw status`) y que el puerto sea el correcto.
+
+### Actualizar
+
+Copia la nueva versión al servidor y vuelve a ejecutar `bash scripts/install.sh`. Se conservan el certificado, los secretos 2FA y la configuración.
+
+### Desinstalar
+
+```bash
+bash scripts/uninstall.sh
+```
+
+## 👤 Dar acceso a otro usuario
+
+```bash
+usermod -aG matipanel <usuario>
+```
+
+Para quitarlo: `gpasswd -d <usuario> matipanel`. Su sesión se cierra en la siguiente petición.
+
+## ⚙️ Opciones
+
+Se configuran con `systemctl edit matipanel`:
+
+```ini
+[Service]
+Environment="MATIPANEL_FILE_WRITE=0"   # explorador de archivos en solo lectura
+```
 
 ## 🛠️ Desarrollo
 
 ```bash
-git clone https://github.com/TU_USUARIO/matipanel.git
-cd matipanel
 ./scripts/run-dev.sh
 ```
 
-Levanta el servidor en `http://127.0.0.1:8080` (sin HTTPS, solo para desarrollo).
-
-Si estás trabajando contra un servidor remoto, usa un túnel SSH:
-
-```bash
-ssh -L 8080:localhost:8080 usuario@servidor
-```
+Levanta el servidor en `http://127.0.0.1:8080`, sin HTTPS y como tu usuario: las funciones que requieren root fallarán. Para trabajar contra un servidor remoto, usa un túnel: `ssh -L 8080:localhost:8080 usuario@servidor`.
 
 ## 📁 Estructura
 
 ```
 matipanel/
 ├── app/
-│   ├── __init__.py          # Flask factory
-│   ├── auth.py              # Login con PAM
-│   ├── modules/             # Un blueprint por módulo
-│   │   ├── dashboard.py
-│   │   ├── processes.py
-│   │   ├── services.py
-│   │   ├── disk.py
-│   │   ├── users.py
-│   │   ├── network.py
-│   │   ├── firewall.py
-│   │   ├── files.py
-│   │   ├── packages.py
-│   │   └── logs.py
-│   ├── templates/           # Jinja2 templates
-│   └── static/
-│       ├── css/style.css
-│       └── js/app.js
-├── scripts/
-│   ├── install.sh
-│   ├── uninstall.sh
-│   ├── run-dev.sh
-│   └── matipanel.sudoers
-├── systemd/
-│   └── matipanel.service
+│   ├── __init__.py       # Flask factory, CSRF por Origin
+│   ├── auth.py           # Login PAM + 2FA + rate limit
+│   ├── totp.py           # Secretos TOTP y códigos de recuperación
+│   ├── distro.py         # Detección de distro / gestor de paquetes / firewall
+│   ├── util.py           # Helpers compartidos (run, validación, rate limiter)
+│   ├── modules/          # Un blueprint por módulo
+│   ├── templates/        # Jinja2
+│   └── static/           # CSS, JS, xterm.js
+├── scripts/              # install.sh, uninstall.sh, run-dev.sh
+├── systemd/matipanel.service
 ├── wsgi.py
 └── requirements.txt
 ```
 
-## 🔧 Comandos útiles
-
-```bash
-# Estado del servicio
-sudo systemctl status matipanel
-
-# Logs en vivo
-sudo journalctl -u matipanel -f
-
-# Reiniciar tras cambios
-sudo systemctl restart matipanel
-
-# Desinstalar todo
-sudo ./scripts/uninstall.sh
-```
-
 ## 🗺️ Roadmap
 
-- [x] ~~Editor de archivos con permisos write opcionales~~
-- [x] ~~Gestión de Docker~~
-- [x] ~~2FA con TOTP~~
-- [x] ~~WebSocket para logs en vivo~~
-- [x] ~~Soporte multidistro (RHEL/Rocky con `dnf` y `firewalld`)~~
-- [x] ~~Terminal embebida (xterm.js + PTY)~~
-- [ ] Edición visual de reglas UFW/firewalld
-- [ ] Crontab GUI
-- [ ] Sesiones SSH activas (`who`, `last`)
-- [ ] Backups con borg/restic
-- [ ] Nginx vhosts manager
-- [ ] Let's Encrypt automation
+- [ ] Gestión de correo (Postfix/Dovecot)
+- [ ] DNS (BIND)
+- [ ] Samba / NFS
+- [ ] Cuotas de disco y RAID/LVM
+- [ ] Multi-servidor
 
 ## 📜 Licencia
 

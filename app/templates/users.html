@@ -3,51 +3,346 @@
 {% block heading %}Usuarios y grupos{% endblock %}
 
 {% block content %}
-<div class="toolbar">
-  <input type="text" id="filter" placeholder="Filtrar usuario…" class="input">
-  <select id="type-filter" class="input">
-    <option value="">Todos</option>
-    <option value="regular">Regulares (UID ≥ 1000)</option>
-    <option value="sistema">Sistema</option>
-  </select>
+<div class="tabs">
+  <button class="tab active" data-tab="users" onclick="showTab('users')">Usuarios</button>
+  <button class="tab" data-tab="groups" onclick="showTab('groups')">Grupos</button>
 </div>
 
-<div class="card">
-  <table class="lx" id="users-table">
-    <thead><tr><th>Usuario</th><th>UID</th><th>GID</th><th>Home</th><th>Shell</th><th>Tipo</th></tr></thead>
-    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
-  </table>
+<div id="tab-users">
+  <div class="toolbar">
+    <input type="text" id="filter" placeholder="Filtrar usuario…" class="input">
+    <select id="type-filter" class="input">
+      <option value="">Todos</option>
+      <option value="regular" selected>Regulares (UID ≥ 1000)</option>
+      <option value="sistema">Sistema</option>
+    </select>
+    <button class="btn btn-primary" onclick="openCreateUser()">+ Nuevo usuario</button>
+  </div>
+  <div class="card">
+    <table class="lx" id="users-table">
+      <thead><tr><th>Usuario</th><th>UID</th><th>Grupos</th><th>Home</th><th>Shell</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="tab-groups" style="display:none;">
+  <div class="toolbar">
+    <input type="text" id="gfilter" placeholder="Filtrar grupo…" class="input">
+    <select id="gtype-filter" class="input">
+      <option value="">Todos</option>
+      <option value="regular" selected>Regulares (GID ≥ 1000)</option>
+      <option value="sistema">Sistema</option>
+    </select>
+    <button class="btn btn-primary" onclick="openModal('m-group')">+ Nuevo grupo</button>
+  </div>
+  <div class="card">
+    <table class="lx" id="groups-table">
+      <thead><tr><th>Grupo</th><th>GID</th><th>Miembros</th><th>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Crear usuario -->
+<div class="modal" id="m-create">
+  <div class="modal-box">
+    <h3>Nuevo usuario</h3>
+    <label class="form-row"><span>Usuario</span><input class="input mono" id="c-name" maxlength="32" placeholder="juan"></label>
+    <label class="form-row"><span>Nombre completo</span><input class="input" id="c-gecos" maxlength="200"></label>
+    <label class="form-row"><span>Shell</span><select class="input" id="c-shell"></select></label>
+    <label class="form-row"><span>Contraseña (opcional; sin ella la cuenta queda sin acceso por contraseña)</span><input class="input" type="password" id="c-pass" autocomplete="new-password"></label>
+    <label class="form-row"><span>Repetir contraseña</span><input class="input" type="password" id="c-pass2" autocomplete="new-password"></label>
+    <label class="form-row"><span>Grupos adicionales (separados por coma)</span><input class="input mono" id="c-groups" placeholder="docker, www-data"></label>
+    <label class="small"><input type="checkbox" id="c-home" checked> Crear directorio home</label><br>
+    <label class="small"><input type="checkbox" id="c-sudo"> Administrador (grupo sudo)</label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-create')">Cancelar</button>
+      <button class="btn btn-primary" onclick="createUser()">Crear</button>
+    </div>
+  </div>
+</div>
+
+<!-- Contraseña -->
+<div class="modal" id="m-pass">
+  <div class="modal-box">
+    <h3>Cambiar contraseña de <span class="mono" id="p-user"></span></h3>
+    <label class="form-row"><span>Nueva contraseña</span><input class="input" type="password" id="p-pass" autocomplete="new-password"></label>
+    <label class="form-row"><span>Repetir contraseña</span><input class="input" type="password" id="p-pass2" autocomplete="new-password"></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-pass')">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePassword()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shell -->
+<div class="modal" id="m-shell">
+  <div class="modal-box">
+    <h3>Shell de <span class="mono" id="s-user"></span></h3>
+    <label class="form-row"><span>Shell</span><select class="input" id="s-shell"></select></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-shell')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveShell()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Grupos de un usuario -->
+<div class="modal" id="m-ugroups">
+  <div class="modal-box">
+    <h3>Grupos de <span class="mono" id="g-user"></span></h3>
+    <p class="small muted">Grupo primario: <span class="mono" id="g-primary"></span>. Marca los grupos suplementarios.</p>
+    <div id="g-checks" style="max-height:320px; overflow:auto; columns:3;"></div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-ugroups')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveUserGroups()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Eliminar usuario -->
+<div class="modal" id="m-del">
+  <div class="modal-box">
+    <h3>Eliminar usuario <span class="mono" id="d-user"></span></h3>
+    <label class="small"><input type="checkbox" id="d-home"> Eliminar también su directorio home y correo (userdel -r)</label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-del')">Cancelar</button>
+      <button class="btn btn-danger" onclick="deleteUser()">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Crear grupo -->
+<div class="modal" id="m-group">
+  <div class="modal-box">
+    <h3>Nuevo grupo</h3>
+    <label class="form-row"><span>Nombre</span><input class="input mono" id="ng-name" maxlength="32"></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-group')">Cancelar</button>
+      <button class="btn btn-primary" onclick="createGroup()">Crear</button>
+    </div>
+  </div>
+</div>
+
+<!-- Añadir miembro -->
+<div class="modal" id="m-member">
+  <div class="modal-box">
+    <h3>Añadir miembro a <span class="mono" id="mb-group"></span></h3>
+    <label class="form-row"><span>Usuario</span><select class="input" id="mb-user"></select></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-member')">Cancelar</button>
+      <button class="btn btn-primary" onclick="addMember()">Añadir</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let all = [];
-async function load() {
-  const r = await fetch("{{ url_for('users.list_users') }}");
-  const d = await r.json();
-  all = d.users;
-  render();
+const API = "{{ url_for('users.index') }}api/";
+let users = [], groups = [], shells = [], me = '', cur = '';
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(m.id); }));
+const val = id => document.getElementById(id).value;
+
+function showTab(t) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  document.getElementById('tab-users').style.display = t === 'users' ? '' : 'none';
+  document.getElementById('tab-groups').style.display = t === 'groups' ? '' : 'none';
 }
+
+async function load() {
+  const [ru, rg] = await Promise.all([fetch(API + 'users'), fetch(API + 'groups')]);
+  const du = await ru.json(), dg = await rg.json();
+  users = du.users; me = du.me; groups = dg.groups;
+  render(); renderGroups();
+}
+
+function statusPill(u) {
+  if (u.locked === null) return '<span class="pill mute">?</span>';
+  if (u.locked) return '<span class="pill err">bloqueado</span>';
+  if (!u.has_password) return '<span class="pill mute">sin contraseña</span>';
+  return '<span class="pill ok">activo</span>';
+}
+
 function render() {
-  const q = document.getElementById('filter').value.toLowerCase();
-  const t = document.getElementById('type-filter').value;
-  const f = all.filter(u => (!q || u.name.toLowerCase().includes(q)) && (!t || u.type === t));
+  const q = val('filter').toLowerCase(), t = val('type-filter');
+  const f = users.filter(u => (!q || u.name.toLowerCase().includes(q) || u.gecos.toLowerCase().includes(q)) && (!t || u.type === t));
   const tbody = document.querySelector('#users-table tbody');
-  if (f.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin resultados</td></tr>'; return; }
+  if (!f.length) { tbody.innerHTML = '<tr><td colspan="7" class="muted center">Sin resultados</td></tr>'; return; }
   tbody.innerHTML = f.map(u => `
     <tr>
-      <td class="mono">${u.name}</td>
+      <td><span class="mono">${escapeHtml(u.name)}</span>${u.name === me ? ' <span class="pill ok">tú</span>' : ''}
+        <div class="small muted">${escapeHtml(u.gecos.split(',')[0])}</div></td>
       <td class="mono">${u.uid}</td>
-      <td class="mono">${u.gid}</td>
-      <td class="mono">${u.home}</td>
-      <td class="mono">${u.shell}</td>
-      <td><span class="pill ${u.type === 'regular' ? 'ok' : 'mute'}">${u.type}</span></td>
-    </tr>
-  `).join('');
+      <td class="small"><span class="mono">${escapeHtml(u.primary_group)}</span>${u.groups.length ? '<span class="muted">, ' + escapeHtml(u.groups.join(', ')) + '</span>' : ''}</td>
+      <td class="mono small">${escapeHtml(u.home)}</td>
+      <td class="mono small">${escapeHtml(u.shell)}</td>
+      <td>${statusPill(u)} <span class="pill ${u.type === 'regular' ? 'ok' : 'mute'}">${escapeHtml(u.type)}</span></td>
+      <td>
+        <button class="btn btn-sm" onclick="openPassword(${jsArg(u.name)})" title="Cambiar contraseña">Contraseña</button>
+        ${u.locked
+          ? `<button class="btn btn-sm" onclick="lockUser(${jsArg(u.name)}, false)">Desbloquear</button>`
+          : `<button class="btn btn-sm" onclick="lockUser(${jsArg(u.name)}, true)">Bloquear</button>`}
+        <button class="btn btn-sm" onclick="openShell(${jsArg(u.name)})">Shell</button>
+        <button class="btn btn-sm" onclick="openUserGroups(${jsArg(u.name)})">Grupos</button>
+        ${u.uid !== 0 && u.name !== me ? `<button class="btn btn-sm btn-danger" onclick="openDelete(${jsArg(u.name)})">Eliminar</button>` : ''}
+      </td>
+    </tr>`).join('');
 }
+
+function renderGroups() {
+  const q = val('gfilter').toLowerCase(), t = val('gtype-filter');
+  const f = groups.filter(g => (!q || g.name.toLowerCase().includes(q)) &&
+    (!t || (t === 'regular') === (g.gid >= 1000)));
+  const tbody = document.querySelector('#groups-table tbody');
+  if (!f.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin resultados</td></tr>'; return; }
+  tbody.innerHTML = f.map(g => `
+    <tr>
+      <td class="mono">${escapeHtml(g.name)}</td>
+      <td class="mono">${g.gid}</td>
+      <td>${g.members.map(m => `<span class="pill mute mono">${escapeHtml(m)}
+          <a href="#" onclick="removeMember(${jsArg(g.name)}, ${jsArg(m)}); return false;" title="Quitar">×</a></span>`).join(' ') || '<span class="muted small">—</span>'}</td>
+      <td>
+        <button class="btn btn-sm" onclick="openMember(${jsArg(g.name)})">+ Miembro</button>
+        ${g.gid >= 1000 ? `<button class="btn btn-sm btn-danger" onclick="deleteGroup(${jsArg(g.name)})">Eliminar</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+
+// Ejecuta una acción POST y recarga; true si salió bien
+async function act(path, data) {
+  const d = await postJSON(API + path, data);
+  if (!d.ok) { alert('Error: ' + (d.error || 'desconocido')); return false; }
+  await load();
+  return true;
+}
+
+async function loadShells() {
+  if (shells.length) return;
+  const r = await fetch(API + 'shells');
+  shells = (await r.json()).shells;
+  const opts = shells.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  document.getElementById('c-shell').innerHTML = opts;
+  document.getElementById('s-shell').innerHTML = opts;
+}
+
+async function openCreateUser() {
+  await loadShells();
+  ['c-name', 'c-gecos', 'c-pass', 'c-pass2', 'c-groups'].forEach(id => document.getElementById(id).value = '');
+  if (shells.includes('/bin/bash')) document.getElementById('c-shell').value = '/bin/bash';
+  document.getElementById('c-home').checked = true;
+  document.getElementById('c-sudo').checked = false;
+  openModal('m-create');
+}
+
+async function createUser() {
+  if (val('c-pass') !== val('c-pass2')) { alert('Las contraseñas no coinciden'); return; }
+  const ok = await act('user/create', {
+    username: val('c-name').trim(), gecos: val('c-gecos'), shell: val('c-shell'),
+    password: val('c-pass'), groups: val('c-groups'),
+    create_home: document.getElementById('c-home').checked,
+    sudo: document.getElementById('c-sudo').checked,
+  });
+  if (ok) closeModal('m-create');
+}
+
+function openPassword(name) {
+  cur = name;
+  document.getElementById('p-user').textContent = name;
+  document.getElementById('p-pass').value = document.getElementById('p-pass2').value = '';
+  openModal('m-pass');
+}
+
+async function savePassword() {
+  if (!val('p-pass')) { alert('Escribe una contraseña'); return; }
+  if (val('p-pass') !== val('p-pass2')) { alert('Las contraseñas no coinciden'); return; }
+  if (await act('user/password', {username: cur, password: val('p-pass')})) closeModal('m-pass');
+}
+
+async function lockUser(name, lock) {
+  if (lock && !confirm('¿Bloquear la contraseña de ' + name + '? (las llaves SSH siguen funcionando)')) return;
+  await act('user/lock', {username: name, lock});
+}
+
+async function openShell(name) {
+  await loadShells();
+  cur = name;
+  document.getElementById('s-user').textContent = name;
+  document.getElementById('s-shell').value = users.find(u => u.name === name).shell;
+  openModal('m-shell');
+}
+
+async function saveShell() {
+  if (await act('user/shell', {username: cur, shell: val('s-shell')})) closeModal('m-shell');
+}
+
+function openUserGroups(name) {
+  cur = name;
+  const u = users.find(x => x.name === name);
+  document.getElementById('g-user').textContent = name;
+  document.getElementById('g-primary').textContent = u.primary_group;
+  document.getElementById('g-checks').innerHTML = groups.filter(g => g.name !== u.primary_group).map(g => `
+    <label class="small" style="display:block;"><input type="checkbox" value="${escapeHtml(g.name)}" ${u.groups.includes(g.name) ? 'checked' : ''}>
+      <span class="mono">${escapeHtml(g.name)}</span></label>`).join('');
+  openModal('m-ugroups');
+}
+
+async function saveUserGroups() {
+  const sel = [...document.querySelectorAll('#g-checks input:checked')].map(c => c.value);
+  if (await act('user/groups', {username: cur, groups: sel})) closeModal('m-ugroups');
+}
+
+function openDelete(name) {
+  cur = name;
+  document.getElementById('d-user').textContent = name;
+  document.getElementById('d-home').checked = false;
+  openModal('m-del');
+}
+
+async function deleteUser() {
+  const home = document.getElementById('d-home').checked;
+  if (!confirm('¿Eliminar definitivamente el usuario ' + cur + (home ? ' y su home' : '') + '?')) return;
+  if (await act('user/delete', {username: cur, remove_home: home})) closeModal('m-del');
+}
+
+async function createGroup() {
+  if (await act('group/create', {name: val('ng-name').trim()})) {
+    document.getElementById('ng-name').value = '';
+    closeModal('m-group');
+  }
+}
+
+async function deleteGroup(name) {
+  if (!confirm('¿Eliminar el grupo ' + name + '?')) return;
+  await act('group/delete', {name});
+}
+
+function openMember(group) {
+  cur = group;
+  const g = groups.find(x => x.name === group);
+  document.getElementById('mb-group').textContent = group;
+  document.getElementById('mb-user').innerHTML = users.filter(u => !g.members.includes(u.name))
+    .map(u => `<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${u.uid})</option>`).join('');
+  openModal('m-member');
+}
+
+async function addMember() {
+  if (await act('group/member', {group: cur, username: val('mb-user'), action: 'add'})) closeModal('m-member');
+}
+
+async function removeMember(group, user) {
+  if (!confirm('¿Quitar a ' + user + ' del grupo ' + group + '?')) return;
+  await act('group/member', {group, username: user, action: 'remove'});
+}
+
 document.getElementById('filter').addEventListener('input', render);
 document.getElementById('type-filter').addEventListener('change', render);
+document.getElementById('gfilter').addEventListener('input', renderGroups);
+document.getElementById('gtype-filter').addEventListener('change', renderGroups);
 load();
 </script>
 {% endblock %}

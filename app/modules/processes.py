@@ -1,4 +1,5 @@
 """Listado y gestión de procesos."""
+import os
 import psutil
 import time
 from flask import Blueprint, render_template, jsonify, request, abort
@@ -52,6 +53,8 @@ def list_processes():
 def kill(pid):
     """Manda SIGTERM al proceso. SIGKILL si force=1."""
     force = request.args.get("force") == "1"
+    if pid in (1, os.getpid()):
+        return jsonify({"ok": False, "error": "No se puede matar init ni el propio panel"}), 400
     try:
         p = psutil.Process(pid)
         if force:
@@ -62,7 +65,7 @@ def kill(pid):
     except psutil.NoSuchProcess:
         return jsonify({"ok": False, "error": "Proceso no existe"}), 404
     except psutil.AccessDenied:
-        return jsonify({"ok": False, "error": "Sin permisos (¿necesitas sudo?)"}), 403
+        return jsonify({"ok": False, "error": "Sin permisos"}), 403
 
 
 def _fmt_duration(seconds):

@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+{% block title %}Bases de datos{% endblock %}
+{% block heading %}Bases de datos{% endblock %}
+
+{% block content %}
+{% if not has_mysql and not has_pg %}
+<div class="card">
+  <h3>No hay motores de base de datos instalados</h3>
+  <p class="muted">Instala MariaDB (compatible con MySQL) o PostgreSQL y recarga esta página:</p>
+  <pre class="terminal">apt install mariadb-server
+# o bien
+apt install postgresql</pre>
+</div>
+{% else %}
+<div class="tabs">
+  {% if has_mysql %}<button class="tab" data-eng="mysql" onclick="selectEngine('mysql')">MariaDB / MySQL</button>{% endif %}
+  {% if has_pg %}<button class="tab" data-eng="pg" onclick="selectEngine('pg')">PostgreSQL</button>{% endif %}
+</div>
+
+<div class="grid grid-4">
+  <div class="stat"><div class="stat-lbl">Estado</div><div class="stat-val" id="s-state">—</div><div class="stat-sub mono" id="s-service">—</div></div>
+  <div class="stat"><div class="stat-lbl">Versión</div><div class="stat-val" id="s-version" style="font-size:14px;">—</div></div>
+  <div class="stat"><div class="stat-lbl">Bases de datos</div><div class="stat-val" id="s-count">—</div></div>
+  <div class="stat"><div class="stat-lbl">Tamaño total</div><div class="stat-val" id="s-size">—</div></div>
+</div>
+<div id="s-error" class="flash flash-error mono" style="display:none; white-space:pre-wrap;"></div>
+
+<div class="card" style="margin-bottom:12px;">
+  <h3>Bases de datos</h3>
+  <div class="toolbar">
+    <input type="text" id="new-db" class="input" placeholder="nombre_nueva_bd" maxlength="63">
+    <select id="new-charset" class="input only-mysql"><option>utf8mb4</option><option>latin1</option></select>
+    <button class="btn btn-primary" onclick="createDb()">+ Crear base de datos</button>
+    <button class="btn" onclick="refresh()">Refrescar</button>
+  </div>
+  <table class="lx" id="db-table">
+    <thead><tr><th>Nombre</th><th>Codificación</th><th>Tablas</th><th>Tamaño</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+  <h3>Usuarios</h3>
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="openUserModal()">+ Nuevo usuario</button>
+  </div>
+  <table class="lx" id="user-table">
+    <thead><tr><th>Usuario</th><th class="only-mysql">Host</th><th>Tipo / autenticación</th><th>Acceso total a</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Consola SQL</h3>
+  <div class="toolbar">
+    <select id="q-db" class="input"></select>
+    <button class="btn btn-primary" onclick="runQuery()">Ejecutar</button>
+    <span class="small muted">Ctrl+Enter · se ejecuta como administrador · máx. 1000 filas / 2 MB / 60 s</span>
+  </div>
+  <textarea id="q-sql" class="input" style="width:100%;" placeholder="SELECT …" spellcheck="false"></textarea>
+  <div id="q-result" style="margin-top:12px; max-height:60vh; overflow:auto;"></div>
+</div>
+
+<div id="m-user" class="modal">
+  <div class="modal-box">
+    <h3>Nuevo usuario</h3>
+    <label class="form-row"><span>Usuario</span><input type="text" id="u-name" class="input" autocomplete="off"></label>
+    <label class="form-row only-mysql"><span>Host (localhost, %, 10.0.0.%, …)</span><input type="text" id="u-host" class="input" value="localhost"></label>
+    <label class="form-row"><span>Contraseña</span>
+      <div style="display:flex; gap:6px;"><input type="password" id="u-pass" class="input" style="flex:1;" autocomplete="new-password"><button class="btn" type="button" onclick="genPass('u-pass')">Generar</button></div>
+    </label>
+    <label class="form-row"><span>Otorgar todos los privilegios sobre (opcional)</span><select id="u-db" class="input db-select"></select></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-user')">Cancelar</button>
+      <button class="btn btn-primary" onclick="createUser()">Crear</button>
+    </div>
+  </div>
+</div>
+
+<div id="m-pass" class="modal">
+  <div class="modal-box">
+    <h3>Cambiar contraseña · <span class="mono" id="p-label"></span></h3>
+    <label class="form-row"><span>Nueva contraseña</span>
+      <div style="display:flex; gap:6px;"><input type="password" id="p-pass" class="input" style="flex:1;" autocomplete="new-password"><button class="btn" type="button" onclick="genPass('p-pass')">Generar</button></div>
+    </label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-pass')">Cancelar</button>
+      <button class="btn btn-primary" onclick="changePass()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div id="m-grant" class="modal">
+  <div class="modal-box">
+    <h3>Permisos · <span class="mono" id="g-label"></span></h3>
+    <label class="form-row"><span>Base de datos</span><select id="g-db" class="input db-select"></select></label>
+    <p class="small muted">Otorga o revoca TODOS los privilegios del usuario sobre la base de datos elegida.</p>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-grant')">Cancelar</button>
+      <button class="btn btn-danger" onclick="doGrant(true)">Revocar todo</button>
+      <button class="btn btn-primary" onclick="doGrant(false)">Otorgar todo</button>
+    </div>
+  </div>
+</div>
+
+<div id="m-restore" class="modal">
+  <div class="modal-box">
+    <h3>Restaurar en <span class="mono" id="r-label"></span></h3>
+    <label class="form-row"><span>Archivo .sql o .sql.gz (máx. 512 MB)</span><input type="file" id="r-file" accept=".sql,.gz"></label>
+    <p class="small muted">El script se ejecuta sobre la base de datos existente; las tablas que contenga pueden ser reemplazadas. La importación se detiene en el primer error.</p>
+    <div id="r-status" class="small"></div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-restore')">Cerrar</button>
+      <button class="btn btn-primary" id="r-btn" onclick="doRestore()">Restaurar</button>
+    </div>
+  </div>
+</div>
+
+<div id="m-drop" class="modal">
+  <div class="modal-box">
+    <h3>Eliminar base de datos</h3>
+    <p>Se borrará <b class="mono" id="x-label"></b> con todos sus datos. Esta acción no se puede deshacer.</p>
+    <label class="form-row"><span>Escribe el nombre para confirmar</span><input type="text" id="x-confirm" class="input" autocomplete="off"></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-drop')">Cancelar</button>
+      <button class="btn btn-danger" onclick="doDrop()">Eliminar</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if has_mysql or has_pg %}
+<script>
+const BASE = "{{ url_for('databases.index') }}api/";
+const $ = id => document.getElementById(id);
+let eng = null, dbs = [], cur = {};
+const api = p => BASE + eng + '/' + p;
+const NAME_RE = /^[A-Za-z0-9_]{1,63}$/;
+
+function closeModal(id) { $(id).classList.remove('open'); }
+function openModal(id) { $(id).classList.add('open'); }
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(m.id); }));
+
+function genPass(id) {
+  const a = new Uint8Array(18);
+  crypto.getRandomValues(a);
+  $(id).value = btoa(String.fromCharCode(...a)).replace(/[+/=]/g, '');
+  $(id).type = 'text';
+}
+
+function selectEngine(e) {
+  eng = e;
+  document.querySelectorAll('.tab[data-eng]').forEach(b => b.classList.toggle('active', b.dataset.eng === e));
+  document.querySelectorAll('.only-mysql').forEach(el => el.style.display = e === 'mysql' ? '' : 'none');
+  $('q-result').innerHTML = '';
+  refresh();
+}
+
+function refresh() { loadStatus(); loadUsers(); }
+
+async function loadStatus() {
+  const d = await (await fetch(api('status'))).json();
+  dbs = d.databases || [];
+  $('s-state').innerHTML = `<span class="pill ${d.running ? 'ok' : 'err'}">${d.running ? 'activo' : 'detenido'}</span>`;
+  $('s-service').textContent = d.service || '—';
+  $('s-version').textContent = d.version || '—';
+  $('s-count').textContent = dbs.length;
+  $('s-size').textContent = d.total_h || '—';
+  $('s-error').style.display = d.error ? '' : 'none';
+  $('s-error').textContent = d.error || '';
+  renderDbs();
+  fillDbSelects();
+}
+
+function renderDbs() {
+  const tbody = document.querySelector('#db-table tbody');
+  if (!dbs.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin bases de datos</td></tr>'; return; }
+  tbody.innerHTML = dbs.map(db => {
+    const canDump = !db.system || db.name === 'mysql' || db.name === 'postgres';
+    return `<tr>
+      <td class="mono">${escapeHtml(db.name)} ${db.system ? '<span class="pill mute">sistema</span>' : ''}</td>
+      <td class="mono small">${escapeHtml(db.charset || '—')}</td>
+      <td>${escapeHtml(db.tables || '—')}</td>
+      <td>${escapeHtml(db.size_h)}</td>
+      <td>
+        ${canDump ? `<a class="btn btn-sm" href="${escapeHtml(api('backup/' + encodeURIComponent(db.name)))}">Backup</a>` : ''}
+        <button class="btn btn-sm" onclick="useInConsole(${jsArg(db.name)})">Consola</button>
+        ${db.system ? '' : `<button class="btn btn-sm" onclick="openRestore(${jsArg(db.name)})">Restaurar</button>
+        <button class="btn btn-sm btn-danger" onclick="openDrop(${jsArg(db.name)})">Eliminar</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function fillDbSelects() {
+  const opts = list => list.map(db => `<option value="${escapeHtml(db.name)}">${escapeHtml(db.name)}</option>`).join('');
+  const user = dbs.filter(db => !db.system);
+  document.querySelectorAll('.db-select').forEach(s => {
+    s.innerHTML = (s.id === 'u-db' ? '<option value="">(ninguna)</option>' : '') + opts(user);
+  });
+  const q = $('q-db'), prev = q.value;
+  q.innerHTML = `<option value="">${eng === 'mysql' ? '(sin base de datos)' : 'postgres'}</option>` +
+    opts(dbs.filter(db => db.name !== 'postgres'));
+  if (dbs.some(db => db.name === prev)) q.value = prev;
+}
+
+async function loadUsers() {
+  const tbody = document.querySelector('#user-table tbody');
+  const d = await (await fetch(api('users'))).json();
+  if (d.error) { tbody.innerHTML = `<tr><td colspan="5" class="muted center">${escapeHtml(d.error)}</td></tr>`; return; }
+  if (!d.users.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin usuarios</td></tr>'; return; }
+  tbody.innerHTML = d.users.map(u => {
+    const args = `${jsArg(u.user)},${jsArg(u.host)}`;
+    const access = u.dbs.includes('*') ? '<span class="pill warn">todas</span>'
+      : (u.dbs.map(escapeHtml).join(', ') || '<span class="muted">—</span>');
+    return `<tr>
+      <td class="mono">${u.user ? escapeHtml(u.user) : '<span class="muted">(anónimo)</span>'} ${u.system ? '<span class="pill mute">sistema</span>' : ''}</td>
+      ${eng === 'mysql' ? `<td class="mono">${escapeHtml(u.host)}</td>` : ''}
+      <td class="small">${escapeHtml(u.auth)}</td>
+      <td class="mono small">${access}</td>
+      <td>${u.system ? '' : `
+        <button class="btn btn-sm" onclick="openPass(${args})">Contraseña</button>
+        <button class="btn btn-sm" onclick="openGrant(${args})">Permisos</button>
+        <button class="btn btn-sm btn-danger" onclick="dropUser(${args})">Eliminar</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+const accLabel = (user, host) => eng === 'mysql' ? `'${user}'@'${host}'` : user;
+
+async function createDb() {
+  const name = $('new-db').value.trim();
+  if (!NAME_RE.test(name)) return alert('Nombre inválido: solo letras, números y _ (máx. 63)');
+  const d = await postJSON(api('db/create'), {name, charset: $('new-charset').value});
+  if (!d.ok) return alert('Error: ' + d.error);
+  $('new-db').value = '';
+  loadStatus();
+}
+
+function openDrop(name) {
+  cur = {db: name};
+  $('x-label').textContent = name;
+  $('x-confirm').value = '';
+  openModal('m-drop');
+  $('x-confirm').focus();
+}
+
+async function doDrop() {
+  const confirmName = $('x-confirm').value;
+  if (confirmName !== cur.db) return alert('El nombre no coincide');
+  const d = await postJSON(api('db/drop'), {name: cur.db, confirm: confirmName});
+  if (!d.ok) return alert('Error: ' + d.error);
+  closeModal('m-drop');
+  refresh();
+}
+
+function openUserModal() {
+  $('u-name').value = ''; $('u-pass').value = ''; $('u-pass').type = 'password';
+  $('u-host').value = 'localhost'; $('u-db').value = '';
+  openModal('m-user');
+  $('u-name').focus();
+}
+
+async function createUser() {
+  const d = await postJSON(api('user/create'), {
+    user: $('u-name').value.trim(), host: $('u-host').value.trim(),
+    password: $('u-pass').value, db: $('u-db').value,
+  });
+  if (!d.ok) return alert('Error: ' + d.error);
+  closeModal('m-user');
+  loadUsers();
+}
+
+function openPass(user, host) {
+  cur = {user, host};
+  $('p-label').textContent = accLabel(user, host);
+  $('p-pass').value = ''; $('p-pass').type = 'password';
+  openModal('m-pass');
+  $('p-pass').focus();
+}
+
+async function changePass() {
+  const d = await postJSON(api('user/password'), {...cur, password: $('p-pass').value});
+  if (!d.ok) return alert('Error: ' + d.error);
+  closeModal('m-pass');
+  alert('Contraseña actualizada');
+}
+
+function openGrant(user, host) {
+  cur = {user, host};
+  $('g-label').textContent = accLabel(user, host);
+  openModal('m-grant');
+}
+
+async function doGrant(revoke) {
+  const db = $('g-db').value;
+  if (!db) return alert('Elige una base de datos');
+  if (revoke && !confirm(`¿Revocar todos los privilegios de ${accLabel(cur.user, cur.host)} sobre ${db}?`)) return;
+  const d = await postJSON(api('grant'), {...cur, db, revoke});
+  if (!d.ok) return alert('Error: ' + d.error);
+  closeModal('m-grant');
+  loadUsers();
+}
+
+async function dropUser(user, host) {
+  if (!confirm(`¿Eliminar el usuario ${accLabel(user, host)}?`)) return;
+  const d = await postJSON(api('user/drop'), {user, host});
+  if (!d.ok) return alert('Error: ' + d.error);
+  loadUsers();
+}
+
+function openRestore(name) {
+  cur = {db: name};
+  $('r-label').textContent = name;
+  $('r-file').value = '';
+  $('r-status').textContent = '';
+  $('r-btn').disabled = false;
+  openModal('m-restore');
+}
+
+async function doRestore() {
+  const file = $('r-file').files[0];
+  if (!file) return alert('Elige un archivo');
+  if (file.size > 512 * 1024 * 1024) return alert('El archivo supera 512 MB');
+  if (!confirm(`¿Ejecutar ${file.name} sobre la base de datos ${cur.db}?`)) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  $('r-btn').disabled = true;
+  $('r-status').innerHTML = '<span class="muted">Restaurando… no cierres esta ventana.</span>';
+  let d;
+  try {
+    d = await (await fetch(api('restore/' + encodeURIComponent(cur.db)), {method: 'POST', body: fd})).json();
+  } catch (e) {
+    d = {ok: false, error: String(e)};
+  }
+  $('r-btn').disabled = false;
+  $('r-status').innerHTML = d.ok
+    ? '<span class="pill ok">Restauración completada</span>' + (d.output ? `<pre class="terminal output">${escapeHtml(d.output)}</pre>` : '')
+    : `<pre class="terminal output">${escapeHtml(d.error)}</pre>`;
+  if (d.ok) loadStatus();
+}
+
+function useInConsole(name) {
+  $('q-db').value = name;
+  $('q-sql').scrollIntoView({behavior: 'smooth'});
+  $('q-sql').focus();
+}
+
+async function runQuery() {
+  const sql = $('q-sql').value;
+  if (!sql.trim()) return;
+  const out = $('q-result');
+  out.innerHTML = '<div class="muted small">Ejecutando…</div>';
+  const t0 = performance.now();
+  const d = await postJSON(api('query'), {db: $('q-db').value, sql});
+  const ms = Math.round(performance.now() - t0);
+  const cols = d.columns || [], rows = d.rows || [];
+  let html = d.error ? `<div class="flash flash-error mono" style="white-space:pre-wrap;">${escapeHtml(d.error)}</div>` : '';
+  if (rows.length || cols.length > 1) {
+    html += `<table class="lx"><thead><tr>${cols.map(c => `<th class="mono">${escapeHtml(c)}</th>`).join('')}</tr></thead><tbody>` +
+      rows.map(r => `<tr>${r.map(v => `<td class="mono">${escapeHtml(v)}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
+  } else if (d.raw) {
+    html += `<pre class="terminal output">${escapeHtml(d.raw)}</pre>`;
+  } else if (d.ok) {
+    html += '<div class="muted small">Consulta ejecutada (sin resultados).</div>';
+  }
+  const info = d.ok ? `${rows.length} fila(s) · ${ms} ms` +
+    (d.truncated ? ' · <span class="pill warn">resultado truncado (máx. 1000 filas / 2 MB)</span>' : '') : '';
+  out.innerHTML = `<div class="small muted" style="margin-bottom:6px;">${info}</div>` + html;
+  if (d.ok && /^\s*(create|drop|alter|rename)\b/im.test(sql)) loadStatus();
+}
+
+$('q-sql').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
+});
+
+selectEngine({{ ('mysql' if has_mysql else 'pg')|tojson }});
+</script>
+{% endif %}
+{% endblock %}

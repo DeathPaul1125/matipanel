@@ -4,10 +4,8 @@ Streamea líneas al navegador conforme llegan.
 """
 import subprocess
 import threading
-from flask import Blueprint
 from flask_login import current_user
-
-logs_live_bp = Blueprint("logs_live", __name__)
+from ..util import valid_name, same_origin
 
 MAX_LINES_PER_SESSION = 10000
 
@@ -17,7 +15,7 @@ def register_websockets(sock):
 
     @sock.route("/logs/ws/tail")
     def tail(ws):
-        if not current_user.is_authenticated:
+        if not current_user.is_authenticated or not same_origin():
             ws.send("__error__: no autenticado")
             ws.close()
             return
@@ -29,7 +27,7 @@ def register_websockets(sock):
         unit = unit.strip()
 
         cmd = ["journalctl", "-f", "--no-pager", "--output=short-iso", "-n", "50"]
-        if unit and _valid_unit(unit):
+        if valid_name(unit):
             cmd += ["-u", unit]
 
         try:
@@ -76,9 +74,3 @@ def register_websockets(sock):
                 except Exception:
                     pass
 
-
-def _valid_unit(name):
-    if not name or len(name) > 200:
-        return False
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@.-_"
-    return all(c in allowed for c in name)

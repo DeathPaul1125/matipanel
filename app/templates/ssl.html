@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}SSL{% endblock %}
+{% block heading %}Certificados SSL (Let's Encrypt){% endblock %}
+
+{% block content %}
+{% if not available %}
+<div class="card">
+  <h3>certbot no está instalado</h3>
+  <p class="muted">Instálalo con:</p>
+  <pre class="terminal">apt install certbot python3-certbot-apache python3-certbot-nginx</pre>
+</div>
+{% else %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="toolbar" style="margin:0;">
+    <span class="muted">Renovación automática:</span>
+    <span id="timer-status" class="muted">Consultando…</span>
+    <span id="timer-line" class="mono small muted"></span>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" id="btn-dry" onclick="renew(true)">Renovar (simulación)</button>
+    <button class="btn btn-sm" id="btn-renew" onclick="renew(false)">Renovar todos</button>
+    <button class="btn btn-sm btn-primary" onclick="openObtain()">+ Obtener certificado</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="toolbar">
+    <h3 style="margin:0;">Certificados</h3>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="loadCerts()">Refrescar</button>
+  </div>
+  <table class="lx" id="certs-table">
+    <thead><tr><th>Nombre</th><th>Dominios</th><th>Expira</th><th>Días</th><th>Rutas</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="modal" id="out-modal">
+  <div class="modal-box wide">
+    <h3 id="out-title">Salida</h3>
+    <pre class="terminal output" id="out-content"></pre>
+    <div class="form-actions"><button class="btn" onclick="closeModal('out-modal')">Cerrar</button></div>
+  </div>
+</div>
+
+<div class="modal" id="obtain-modal">
+  <div class="modal-box">
+    <h3>Obtener certificado</h3>
+    <label class="form-row"><span>Dominios (separados por coma; el primero da nombre al certificado)</span>
+      <input class="input" id="o-domains" placeholder="ejemplo.com, www.ejemplo.com"></label>
+    <label class="form-row"><span>Email (avisos de caducidad)</span>
+      <input class="input" id="o-email" type="email" placeholder="admin@ejemplo.com"></label>
+    <label class="form-row"><span>Método</span>
+      <select class="input" id="o-plugin" onchange="syncPlugin()">
+        <option value="apache">Apache (instala en el vhost)</option>
+        <option value="nginx">Nginx (instala en el vhost)</option>
+        <option value="webroot">Webroot (solo obtener)</option>
+      </select></label>
+    <label class="form-row" id="o-webroot-row" style="display:none;"><span>Ruta webroot</span>
+      <input class="input mono" id="o-webroot" placeholder="/var/www/ejemplo.com/public_html"></label>
+    <label class="small" id="o-redirect-row"><input type="checkbox" id="o-redirect" checked> Redirigir HTTP a HTTPS</label>
+    <p class="small muted">Los dominios deben apuntar a este servidor y el puerto 80 debe ser accesible desde Internet.
+      Puede tardar hasta 5 minutos.</p>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('obtain-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="o-submit" onclick="obtain()">Obtener</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if available %}
+<script>
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function showOutput(title, text) {
+  document.getElementById('out-title').textContent = title;
+  document.getElementById('out-content').textContent = text || '(sin salida)';
+  document.getElementById('out-modal').classList.add('open');
+}
+
+function report(d, title) {
+  if (d.ok) showOutput(title, d.output);
+  else if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
+  else alert('Error: ' + (d.error || 'desconocido'));
+}
+
+async function loadTimer() {
+  const d = await (await fetch("{{ url_for('ssl.timer') }}")).json();
+  const cls = d.active === 'active' ? 'ok' : 'warn';
+  document.getElementById('timer-status').innerHTML =
+    `<span class="pill ${cls}">${escapeHtml(d.unit)}: ${escapeHtml(d.active)}</span>`;
+  document.getElementById('timer-line').textContent = d.line || '';
+}
+
+async function loadCerts() {
+  const tbody = document.querySelector('#certs-table tbody');
+  tbody.innerHTML = '<tr><td colspan="6" class="muted center">Cargando…</td></tr>';
+  const d = await (await fetch("{{ url_for('ssl.certs') }}")).json();
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
+  if (!d.certs.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin certificados</td></tr>'; return; }
+  tbody.innerHTML = d.certs.map(c => {
+    const days = c.days_left;
+    const cls = days === null ? 'mute' : days < 7 ? 'err' : days < 30 ? 'warn' : 'ok';
+    return `<tr>
+      <td class="mono">${escapeHtml(c.name)}</td>
+      <td class="mono small">${c.domains.map(escapeHtml).join('<br>')}</td>
+      <td class="small">${escapeHtml(c.expiry)}<br><span class="muted">${escapeHtml(c.valid)}</span></td>
+      <td><span class="pill ${cls}">${days === null ? '?' : escapeHtml(days)}</span></td>
+      <td class="mono small">${escapeHtml(c.cert_path)}<br>${escapeHtml(c.key_path)}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="delCert(${jsArg(c.name)})">Eliminar</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function renew(dry) {
+  if (!dry && !confirm('¿Renovar ahora todos los certificados próximos a caducar?')) return;
+  const btn = document.getElementById(dry ? 'btn-dry' : 'btn-renew');
+  btn.disabled = true;
+  showOutput(dry ? 'certbot renew --dry-run' : 'certbot renew', 'Ejecutando… (puede tardar varios minutos)');
+  const d = await postJSON("{{ url_for('ssl.renew') }}", {dry_run: dry});
+  btn.disabled = false;
+  report(d, dry ? 'Simulación de renovación: OK' : 'Renovación completada');
+  loadCerts();
+}
+
+async function delCert(name) {
+  if (!confirm(`¿Eliminar el certificado ${name}? Los vhosts que lo usen dejarán de arrancar si no se editan.`)) return;
+  const d = await postJSON("{{ url_for('ssl.delete') }}", {name});
+  report(d, 'Certificado eliminado: ' + name);
+  loadCerts();
+}
+
+function syncPlugin() {
+  const p = document.getElementById('o-plugin').value;
+  document.getElementById('o-webroot-row').style.display = p === 'webroot' ? '' : 'none';
+  document.getElementById('o-redirect-row').style.display = p === 'webroot' ? 'none' : '';
+}
+
+function openObtain() {
+  syncPlugin();
+  document.getElementById('obtain-modal').classList.add('open');
+}
+
+async function obtain() {
+  const btn = document.getElementById('o-submit');
+  btn.disabled = true; btn.textContent = 'Obteniendo…';
+  const d = await postJSON("{{ url_for('ssl.obtain') }}", {
+    domains: document.getElementById('o-domains').value,
+    email: document.getElementById('o-email').value.trim(),
+    plugin: document.getElementById('o-plugin').value,
+    webroot: document.getElementById('o-webroot').value.trim(),
+    redirect: document.getElementById('o-redirect').checked,
+  });
+  btn.disabled = false; btn.textContent = 'Obtener';
+  if (d.ok) closeModal('obtain-modal');
+  report(d, 'Certificado obtenido');
+  loadCerts();
+}
+
+loadTimer(); loadCerts();
+</script>
+{% endif %}
+{% endblock %}

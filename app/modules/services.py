@@ -1,8 +1,8 @@
 """Gestión de servicios systemd vía systemctl."""
 import subprocess
-import shlex
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
+from ..util import valid_name
 
 services_bp = Blueprint("services", __name__)
 
@@ -27,6 +27,20 @@ def list_services():
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
         return jsonify({"error": f"No se pudo listar: {e}"}), 500
 
+    # Estado de arranque (enabled/disabled/static) por unidad
+    enabled = {}
+    try:
+        files = subprocess.check_output(
+            ["systemctl", "list-unit-files", "--type=service", "--no-pager", "--no-legend", "--plain"],
+            text=True, timeout=10,
+        )
+        for line in files.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                enabled[parts[0]] = parts[1]
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
     services = []
     for line in out.strip().splitlines():
         parts = line.split(None, 4)
@@ -38,26 +52,39 @@ def list_services():
             "load": load,
             "active": active,
             "sub": sub,
+            "enabled": enabled.get(unit, ""),
             "description": description,
         })
     return jsonify({"services": services})
 
 
+@services_bp.route("/api/status")
+@login_required
+def status():
+    unit = request.args.get("unit", "")
+    if not valid_name(unit):
+        return jsonify({"error": "Nombre de unidad inválido"}), 400
+    r = subprocess.run(["systemctl", "status", "--no-pager", "-n", "40", "--", unit],
+                       capture_output=True, text=True, timeout=10)
+    return jsonify({"output": r.stdout or r.stderr})
+
+
 @services_bp.route("/api/action", methods=["POST"])
 @login_required
 def action():
-    """Ejecuta systemctl <action> <unit>. Requiere sudo sin password configurado."""
-    unit = request.json.get("unit", "")
-    act = request.json.get("action", "")
+    """Ejecuta systemctl <action> <unit> (el servicio corre como root)."""
+    data = request.get_json(silent=True) or {}
+    unit = data.get("unit", "")
+    act = data.get("action", "")
 
     if act not in ALLOWED_ACTIONS:
         return jsonify({"ok": False, "error": "Acción no permitida"}), 400
-    if not _valid_unit_name(unit):
+    if not valid_name(unit):
         return jsonify({"ok": False, "error": "Nombre de unidad inválido"}), 400
 
     try:
         result = subprocess.run(
-            ["sudo", "-n", "systemctl", act, unit],
+            ["systemctl", act, "--", unit],
             capture_output=True, text=True, timeout=15,
         )
         if result.returncode == 0:
@@ -66,10 +93,3 @@ def action():
     except subprocess.TimeoutExpired:
         return jsonify({"ok": False, "error": "Tiempo de espera agotado"}), 504
 
-
-def _valid_unit_name(name):
-    """Sanitización básica para evitar inyección de comandos."""
-    if not name or len(name) > 200:
-        return False
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@.-_"
-    return all(c in allowed for c in name)

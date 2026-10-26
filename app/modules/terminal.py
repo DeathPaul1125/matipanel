@@ -12,8 +12,10 @@ import signal
 import threading
 import pwd
 import json
+import time
 from flask import Blueprint, render_template
 from flask_login import login_required, current_user
+from ..util import same_origin
 
 terminal_bp = Blueprint("terminal", __name__)
 
@@ -27,7 +29,7 @@ def index():
 def register_websockets(sock):
     @sock.route("/terminal/ws")
     def ws_handler(ws):
-        if not current_user.is_authenticated:
+        if not current_user.is_authenticated or not same_origin():
             ws.close()
             return
 
@@ -41,15 +43,23 @@ def register_websockets(sock):
 
         pid, fd = pty.fork()
         if pid == 0:
+            # Hijo: bajar a los privilegios del usuario. Si falla, abortar:
+            # nunca entregar un shell root por accidente.
             try:
+                if os.getuid() == 0:
+                    os.initgroups(username, user_info.pw_gid)
                 os.setgid(user_info.pw_gid)
                 os.setuid(user_info.pw_uid)
-            except PermissionError:
-                pass
-            os.environ["HOME"] = user_info.pw_dir
-            os.environ["USER"] = username
-            os.environ["LOGNAME"] = username
-            os.environ["TERM"] = "xterm-256color"
+            except OSError:
+                os._exit(1)
+            # Entorno limpio: no heredar variables del panel (PATH del venv, etc.)
+            lang = os.environ.get("LANG", "C.UTF-8")
+            os.environ.clear()
+            os.environ.update({
+                "HOME": user_info.pw_dir, "USER": username, "LOGNAME": username,
+                "SHELL": user_info.pw_shell or "/bin/bash", "TERM": "xterm-256color",
+                "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": lang,
+            })
             try:
                 os.chdir(user_info.pw_dir)
             except OSError:
@@ -58,8 +68,10 @@ def register_websockets(sock):
             try:
                 os.execvp(shell, [shell, "-l"])
             except OSError:
-                os.execvp("/bin/sh", ["/bin/sh"])
-            return
+                try:
+                    os.execvp("/bin/sh", ["/bin/sh"])
+                finally:
+                    os._exit(1)
 
         stop_flag = {"stop": False}
 
@@ -107,11 +119,18 @@ def register_websockets(sock):
                 os.close(fd)
             except OSError:
                 pass
-            try:
-                os.kill(pid, signal.SIGHUP)
-            except (OSError, ProcessLookupError):
-                pass
-            try:
-                os.waitpid(pid, os.WNOHANG)
-            except ChildProcessError:
-                pass
+            _reap(pid)
+
+
+def _reap(pid):
+    """SIGHUP al shell; SIGKILL si no termina en 2 s. Evita zombies."""
+    try:
+        os.kill(pid, signal.SIGHUP)
+        for _ in range(20):
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                return
+            time.sleep(0.1)
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    except (OSError, ChildProcessError):
+        pass

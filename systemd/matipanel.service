@@ -1,15 +1,15 @@
 [Unit]
 Description=MatiPanel - Administrador de servidor Linux
-Documentation=https://github.com/InformaticaSenabed/matipanel
 After=network.target
 
 [Service]
 Type=simple
-User=matipanel
-Group=matipanel
+# Corre como root (igual que Webmin): necesario para PAM, la terminal con
+# el usuario logueado, systemctl, firewall y edición de archivos.
 WorkingDirectory=/opt/matipanel
-Environment="PATH=/opt/matipanel/venv/bin:/usr/bin"
-Environment="HOME=/opt/matipanel"
+Environment="PATH=/opt/matipanel/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="HOME=/var/lib/matipanel"
+Environment="MATIPANEL_SECURE_COOKIE=1"
 ExecStart=/opt/matipanel/venv/bin/gunicorn \
     --worker-class gevent \
     --workers 1 \
@@ -23,12 +23,6 @@ ExecStart=/opt/matipanel/venv/bin/gunicorn \
     wsgi:application
 Restart=on-failure
 RestartSec=5
-
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/log/matipanel /var/lib/matipanel /opt/matipanel
-PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

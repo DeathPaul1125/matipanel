@@ -1,110 +1,229 @@
 {% extends "base.html" %}
 {% block title %}Archivos{% endblock %}
-{% block heading %}Explorador de archivos{% endblock %}
+{% block heading %}Administrador de archivos{% endblock %}
 
 {% block content %}
 <div class="toolbar">
+  <button class="btn" onclick="goUp()" title="Subir un nivel">↑</button>
   <input type="text" id="path-input" class="input" value="/" style="flex:1;">
   <button class="btn" onclick="go()">Ir</button>
   {% if write_enabled %}
-    <span class="pill warn">⚠ Modo escritura activo</span>
+    <button class="btn" onclick="newItem('file')">+ Archivo</button>
+    <button class="btn" onclick="newItem('dir')">+ Carpeta</button>
+    <button class="btn btn-primary" onclick="document.getElementById('upload-input').click()">Subir…</button>
+    <input type="file" id="upload-input" multiple style="display:none" onchange="uploadFiles(this.files)">
   {% else %}
-    <span class="pill mute">read-only</span>
+    <span class="pill mute">solo lectura</span>
   {% endif %}
 </div>
 
 <div class="card">
   <div id="crumbs" class="crumbs muted small"></div>
   <table class="lx" id="files-table">
-    <thead><tr><th></th><th>Nombre</th><th>Tamaño</th><th>Propietario</th><th>Permisos</th><th>Modificado</th></tr></thead>
-    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+    <thead><tr><th></th><th>Nombre</th><th>Tamaño</th><th>Propietario</th><th>Permisos</th><th>Modificado</th><th class="right">Acciones</th></tr></thead>
+    <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
   </table>
 </div>
 
-<div id="editor-modal" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,0.6); z-index:100; align-items:center; justify-content:center;">
-  <div style="background:var(--surface); border-radius:var(--radius-lg); width:90%; max-width:1100px; height:85vh; display:flex; flex-direction:column; overflow:hidden;">
+<!-- Editor -->
+<div id="editor-modal" class="modal">
+  <div class="modal-box wide" style="height:85vh; display:flex; flex-direction:column; padding:0;">
     <div style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
       <div>
-        <div style="font-weight:500;" id="ed-filename">archivo</div>
-        <div class="muted small mono" id="ed-info"></div>
+        <div style="font-weight:500;" class="mono" id="ed-filename">archivo</div>
+        <div class="muted small" id="ed-info"></div>
       </div>
       <div style="display:flex; gap:8px;">
-        {% if write_enabled %}
-        <button class="btn btn-primary" onclick="saveFile()">Guardar</button>
-        {% endif %}
-        <button class="btn" onclick="closeEditor()">Cerrar</button>
+        {% if write_enabled %}<button class="btn btn-primary" onclick="saveFile()">Guardar</button>{% endif %}
+        <button class="btn" onclick="closeModal('editor-modal')">Cerrar</button>
       </div>
     </div>
-    <textarea id="editor" style="flex:1; width:100%; font-family:var(--mono); font-size:13px; padding:14px; border:none; resize:none; background:var(--surface); color:var(--text); outline:none;"></textarea>
+    <textarea id="editor" spellcheck="false" style="flex:1; width:100%; font-family:var(--mono); font-size:13px; padding:14px; border:none; resize:none; background:var(--surface); color:var(--text); outline:none; tab-size:4;"></textarea>
+  </div>
+</div>
+
+<!-- Permisos / propietario -->
+<div id="perm-modal" class="modal">
+  <div class="modal-box">
+    <h3>Permisos y propietario</h3>
+    <div class="mono small muted" id="perm-path" style="margin-bottom:12px;"></div>
+    <label class="form-row"><span>Modo (octal, ej. 644 o 0755)</span><input class="input" id="perm-mode"></label>
+    <label class="form-row"><span>Propietario</span><input class="input" id="perm-owner"></label>
+    <label class="form-row"><span>Grupo</span><input class="input" id="perm-group"></label>
+    <label class="small"><input type="checkbox" id="perm-rec"> Aplicar recursivamente</label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('perm-modal')">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePerms()">Aplicar</button>
+    </div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let currentPath = '';
-let editingPath = '';
 const WRITE = {{ 'true' if write_enabled else 'false' }};
+const API = "{{ url_for('files.index') }}api/";
+let currentPath = '/';
+let editingPath = '';
+let permItem = null;
+
+function join(dir, name) { return dir === '/' ? '/' + name : dir + '/' + name; }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 async function load(path) {
-  const r = await fetch("{{ url_for('files.ls') }}?path=" + encodeURIComponent(path));
+  const r = await fetch(API + "ls?path=" + encodeURIComponent(path));
   const d = await r.json();
   const tbody = document.querySelector('#files-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + d.error + '</td></tr>'; return; }
-
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="7" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
   currentPath = d.path;
   document.getElementById('path-input').value = d.path;
-  document.getElementById('crumbs').textContent = d.path;
+  document.getElementById('crumbs').textContent = d.path + ' · ' + d.items.length + ' elementos';
+  history.replaceState(null, '', '?path=' + encodeURIComponent(d.path));
 
   let rows = '';
   if (d.parent) {
-    rows += `<tr><td>📁</td><td><a href="#" onclick="load('${d.parent}'); return false;">..</a></td><td>—</td><td>—</td><td class="mono">—</td><td>—</td></tr>`;
+    rows += `<tr><td>📁</td><td><a href="#" onclick="load(${jsArg(d.parent)}); return false;">..</a></td><td colspan="5"></td></tr>`;
   }
   for (const it of d.items) {
+    const full = join(d.path, it.name);
     const icon = it.is_dir ? '📁' : (it.is_link ? '🔗' : '📄');
-    const fullPath = d.path === '/' ? '/' + it.name : d.path + '/' + it.name;
-    let name;
-    if (it.is_dir) {
-      name = `<a href="#" onclick="load('${fullPath}'); return false;">${escapeHtml(it.name)}</a>`;
-    } else {
-      name = `<a href="#" onclick="editFile('${fullPath}'); return false;">${escapeHtml(it.name)}</a>`;
+    const p = jsArg(full);
+    const name = it.is_dir
+      ? `<a href="#" onclick="load(${p}); return false;">${escapeHtml(it.name)}</a>`
+      : `<a href="#" onclick="editFile(${p}); return false;">${escapeHtml(it.name)}</a>`;
+    const link = it.is_link ? ` <span class="muted small">→ ${escapeHtml(it.target)}</span>` : '';
+    const isArchive = /\.(zip|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(it.name);
+    let acts = `<a class="btn btn-sm" href="${API}download?path=${encodeURIComponent(full)}" title="Descargar">⬇</a>`;
+    if (WRITE) {
+      acts += ` <button class="btn btn-sm" onclick="renameItem(${p})" title="Renombrar / mover">✎</button>`
+        + ` <button class="btn btn-sm" onclick="copyItem(${p})" title="Copiar">⧉</button>`
+        + ` <button class="btn btn-sm" onclick="permDialog(${jsArg(Object.assign({path: full}, it))})" title="Permisos">🔑</button>`
+        + (isArchive ? ` <button class="btn btn-sm" onclick="simple('extract', ${p}, '¿Extraer aquí?')" title="Extraer">📦</button>`
+                     : ` <button class="btn btn-sm" onclick="simple('compress', ${p}, '¿Comprimir a .tar.gz?')" title="Comprimir">🗜</button>`)
+        + ` <button class="btn btn-sm btn-danger" onclick="deleteItem(${p}, ${it.is_dir})" title="Borrar">🗑</button>`;
     }
-    rows += `<tr><td>${icon}</td><td>${name}</td><td>${humanSize(it.size)}</td><td class="mono small">${it.owner}:${it.group}</td><td class="mono">${it.perms}</td><td class="small">${it.mtime}</td></tr>`;
+    rows += `<tr><td>${icon}</td><td class="mono">${name}${link}</td><td>${it.is_dir ? '—' : humanSize(it.size)}</td>`
+      + `<td class="mono small">${escapeHtml(it.owner + ':' + it.group)}</td>`
+      + `<td class="mono small" title="${escapeHtml(it.mode_oct)}">${escapeHtml(it.perms)}</td>`
+      + `<td class="small">${escapeHtml(it.mtime)}</td><td class="right" style="white-space:nowrap;">${acts}</td></tr>`;
   }
-  tbody.innerHTML = rows;
+  tbody.innerHTML = rows || '<tr><td colspan="7" class="muted center">Directorio vacío</td></tr>';
 }
 
 async function editFile(path) {
-  const r = await fetch("{{ url_for('files.read') }}?path=" + encodeURIComponent(path));
+  const r = await fetch(API + "read?path=" + encodeURIComponent(path));
   const d = await r.json();
   if (d.error) { alert(d.error); return; }
-  editingPath = path;
-  document.getElementById('ed-filename').textContent = path;
+  editingPath = d.path;
+  document.getElementById('ed-filename').textContent = d.path;
   document.getElementById('ed-info').textContent = humanSize(d.size) + (d.language ? ' · ' + d.language : '') + (WRITE ? '' : ' · solo lectura');
   const ed = document.getElementById('editor');
   ed.value = d.content;
   ed.readOnly = !WRITE;
-  document.getElementById('editor-modal').style.display = 'flex';
+  document.getElementById('editor-modal').classList.add('open');
+  ed.focus();
 }
 
 async function saveFile() {
-  if (!WRITE) return;
-  if (!confirm('¿Guardar cambios en ' + editingPath + '? Se creará un backup .matipanel.bak')) return;
-  const r = await fetch("{{ url_for('files.write') }}", {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ path: editingPath, content: document.getElementById('editor').value })
-  });
-  const d = await r.json();
-  if (d.error) { alert('Error: ' + d.error); return; }
+  if (!confirm('¿Guardar ' + editingPath + '? Se crea un backup .matipanel.bak')) return;
+  const d = await postJSON(API + "write", { path: editingPath, content: document.getElementById('editor').value });
+  if (!d.ok) { alert('Error: ' + d.error); return; }
   alert('Guardado ✓\nBackup: ' + d.backup);
-  closeEditor();
+  closeModal('editor-modal');
   load(currentPath);
 }
 
-function closeEditor() {
-  document.getElementById('editor-modal').style.display = 'none';
-  editingPath = '';
+// Tab inserta tabulación en el editor; Ctrl+S guarda
+document.getElementById('editor').addEventListener('keydown', e => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const t = e.target, s = t.selectionStart;
+    t.setRangeText('\t', s, t.selectionEnd, 'end');
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 's' && WRITE) {
+    e.preventDefault(); saveFile();
+  }
+});
+
+async function newItem(type) {
+  const name = prompt(type === 'dir' ? 'Nombre de la carpeta:' : 'Nombre del archivo:');
+  if (!name) return;
+  const d = await postJSON(API + "create", { dir: currentPath, name, type });
+  if (!d.ok) { alert('Error: ' + d.error); return; }
+  load(currentPath);
+  if (type === 'file') editFile(d.path);
+}
+
+async function renameItem(path) {
+  const dest = prompt('Nuevo nombre, o ruta absoluta para mover:', path.split('/').pop());
+  if (!dest) return;
+  const d = await postJSON(API + "rename", { path, dest });
+  if (!d.ok) alert('Error: ' + d.error);
+  load(currentPath);
+}
+
+async function copyItem(path) {
+  const dest = prompt('Copiar a (ruta absoluta de archivo o directorio):', path + '.copia');
+  if (!dest) return;
+  const d = await postJSON(API + "copy", { path, dest });
+  if (!d.ok) alert('Error: ' + d.error);
+  load(currentPath);
+}
+
+async function deleteItem(path, isDir) {
+  if (!confirm((isDir ? '¿Borrar la carpeta y TODO su contenido?\n' : '¿Borrar el archivo?\n') + path)) return;
+  const d = await postJSON(API + "delete", { path });
+  if (!d.ok) alert('Error: ' + d.error);
+  load(currentPath);
+}
+
+async function simple(action, path, msg) {
+  if (!confirm(msg + '\n' + path)) return;
+  const d = await postJSON(API + action, { path });
+  if (!d.ok) alert('Error: ' + d.error);
+  load(currentPath);
+}
+
+function permDialog(it) {
+  permItem = it;
+  document.getElementById('perm-path').textContent = it.path;
+  document.getElementById('perm-mode').value = it.mode_oct;
+  document.getElementById('perm-owner').value = it.owner;
+  document.getElementById('perm-group').value = it.group;
+  document.getElementById('perm-rec').checked = false;
+  document.getElementById('perm-modal').classList.add('open');
+}
+
+async function savePerms() {
+  const it = permItem, rec = document.getElementById('perm-rec').checked;
+  const mode = document.getElementById('perm-mode').value.trim();
+  const owner = document.getElementById('perm-owner').value.trim();
+  const group = document.getElementById('perm-group').value.trim();
+  if (mode !== it.mode_oct || rec) {
+    const d = await postJSON(API + "chmod", { path: it.path, mode, recursive: rec });
+    if (!d.ok) { alert('chmod: ' + d.error); return; }
+  }
+  if (owner !== it.owner || group !== it.group || rec) {
+    const d = await postJSON(API + "chown", { path: it.path, owner, group, recursive: rec });
+    if (!d.ok) { alert('chown: ' + d.error); return; }
+  }
+  closeModal('perm-modal');
+  load(currentPath);
+}
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  const fd = new FormData();
+  fd.append('dir', currentPath);
+  for (const f of files) fd.append('files', f);
+  let r = await fetch(API + "upload", { method: 'POST', body: fd });
+  let d = await r.json();
+  if (!d.ok && /ya existe/.test(d.error || '') && confirm(d.error + '\n¿Sobrescribir?')) {
+    fd.append('overwrite', '1');
+    d = await (await fetch(API + "upload", { method: 'POST', body: fd })).json();
+  }
+  if (!d.ok) alert('Error: ' + d.error);
+  document.getElementById('upload-input').value = '';
+  load(currentPath);
 }
 
 function humanSize(n) {
@@ -113,9 +232,17 @@ function humanSize(n) {
   return n.toFixed(1) + ' PB';
 }
 
-function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function go() { load(document.getElementById('path-input').value); }
+function goUp() { if (currentPath !== '/') load(currentPath.replace(/\/[^\/]+$/, '') || '/'); }
 document.getElementById('path-input').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
-load('/');
+
+// ?edit=/ruta/archivo abre el editor (usado por otros módulos); ?path=/dir navega
+const qs = new URLSearchParams(location.search);
+const editTarget = qs.get('edit');
+if (editTarget) {
+  load(editTarget.replace(/\/[^\/]+$/, '') || '/').then(() => editFile(editTarget));
+} else {
+  load(qs.get('path') || '/');
+}
 </script>
 {% endblock %}

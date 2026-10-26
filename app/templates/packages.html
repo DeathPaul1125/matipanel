@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Paquetes{% endblock %}
-{% block heading %}Paquetes APT{% endblock %}
+{% block heading %}Paquetes {{ 'APT' if distro.pkg == 'apt' else (distro.pkg or '')|upper }}{% endblock %}
 
 {% block content %}
 <div class="grid grid-3">
@@ -9,17 +9,119 @@
   <div class="stat"><div class="stat-lbl">De seguridad</div><div class="stat-val" id="s-security">—</div></div>
 </div>
 
-<div class="card">
-  <h3>Actualizaciones disponibles</h3>
-  <table class="lx" id="pkg-table">
-    <thead><tr><th>Paquete</th><th>Nueva versión</th><th>Origen</th><th>Tipo</th></tr></thead>
-    <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
-  </table>
+<div class="card" id="out-card" hidden>
+  <h3 id="out-title"></h3>
+  <pre class="terminal output" id="out"></pre>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="updates" onclick="showTab('updates')">Actualizaciones</button>
+  {% if distro.pkg == 'apt' %}<button class="tab" data-tab="search" onclick="showTab('search')">Buscar e instalar</button>{% endif %}
+  <button class="tab" data-tab="installed" onclick="showTab('installed')">Instalados</button>
+</div>
+
+<div id="tab-updates">
+  <div class="toolbar">
+    <button class="btn" data-pm onclick="pkgRun('refresh')">Actualizar listas</button>
+    <button class="btn btn-primary" data-pm onclick="pkgRun('upgrade', [], '¿Actualizar todos los paquetes?')">Actualizar todo</button>
+    {% if distro.pkg == 'apt' %}
+    <button class="btn" data-pm onclick="pkgRun('full-upgrade', [], '¿Ejecutar full-upgrade? Puede instalar o eliminar paquetes para resolver dependencias.')">Full-upgrade</button>
+    {% endif %}
+    <button class="btn" data-pm onclick="upgradeSelected()">Actualizar seleccionados</button>
+    <button class="btn" data-pm onclick="pkgRun('autoremove', [], '¿Eliminar paquetes que ya no se necesitan (autoremove)?')">Autoremove</button>
+  </div>
+
+  <div class="card">
+    <h3>Actualizaciones disponibles</h3>
+    <table class="lx" id="pkg-table">
+      <thead><tr><th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)"></th><th>Paquete</th><th>Nueva versión</th><th>Origen</th><th>Tipo</th></tr></thead>
+      <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+    <div class="small muted" id="pkg-more"></div>
+  </div>
+
+  {% if distro.pkg == 'apt' %}
+  <div class="card">
+    <h3>Actualizaciones automáticas (unattended-upgrades)</h3>
+    <div id="ua" class="muted">Cargando…</div>
+  </div>
+  {% endif %}
+</div>
+
+{% if distro.pkg == 'apt' %}
+<div id="tab-search" hidden>
+  <div class="toolbar">
+    <input type="text" id="q" class="input" placeholder="Buscar paquete (p.ej. nginx, php-gd)…">
+    <button class="btn btn-primary" onclick="search()">Buscar</button>
+  </div>
+  <div class="card">
+    <table class="lx" id="search-table">
+      <thead><tr><th>Paquete</th><th>Descripción</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted center">Escribe un término y pulsa Buscar</td></tr></tbody>
+    </table>
+    <div class="small muted" id="search-info"></div>
+  </div>
+</div>
+{% endif %}
+
+<div id="tab-installed" hidden>
+  <div class="toolbar">
+    <input type="text" id="inst-filter" class="input" placeholder="Filtrar instalados…">
+    <select id="inst-sort" class="input">
+      <option value="name">Ordenar por nombre</option>
+      <option value="size">Ordenar por tamaño</option>
+    </select>
+    <span class="small muted" id="inst-info"></span>
+  </div>
+  <div class="card">
+    <table class="lx" id="inst-table">
+      <thead><tr><th>Paquete</th><th>Versión</th><th>Tamaño</th><th>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+const IS_APT = {{ (distro.pkg == 'apt')|tojson }};
+const URL_RUN = "{{ url_for('packages.run_action') }}";
+const URL_UA = "{{ url_for('packages.unattended') }}";
+const SHOW_MAX = 300;
+let busy = false, installedPkgs = null, lastQuery = '';
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('[id^="tab-"]').forEach(el => el.hidden = el.id !== 'tab-' + name);
+  if (name === 'installed' && !installedPkgs) loadInstalled();
+}
+
+function showOutput(title, text) {
+  document.getElementById('out-card').hidden = false;
+  document.getElementById('out-title').textContent = title;
+  const out = document.getElementById('out');
+  out.textContent = text;
+  out.scrollTop = out.scrollHeight;
+}
+
+async function pkgRun(action, packages = [], question = null) {
+  if (busy) { alert('Ya hay una operación de paquetes en curso'); return false; }
+  if (question && !confirm(question)) return false;
+  busy = true;
+  document.querySelectorAll('[data-pm]').forEach(b => b.disabled = true);
+  showOutput('Ejecutando ' + action + (packages.length ? ' ' + packages.join(' ') : '') + '…',
+             'Puede tardar varios minutos, no cierres la página.');
+  const d = await postJSON(URL_RUN, { action, packages });
+  busy = false;
+  document.querySelectorAll('[data-pm]').forEach(b => b.disabled = false);
+  showOutput(d.ok ? action + ': completado ✓' : 'Error: ' + (d.error || 'desconocido'), d.output || '');
+  load();
+  if (installedPkgs) loadInstalled();
+  if (lastQuery) search(true);
+  if (IS_APT) loadUA();
+  return d.ok;
+}
+
 async function load() {
   const r = await fetch("{{ url_for('packages.summary') }}");
   const d = await r.json();
@@ -28,18 +130,130 @@ async function load() {
   document.getElementById('s-security').textContent = d.security;
 
   const tbody = document.querySelector('#pkg-table tbody');
+  const more = document.getElementById('pkg-more');
+  more.textContent = d.upgradable > (d.upgradable_list || []).length
+    ? `Mostrando ${d.upgradable_list.length} de ${d.upgradable}. Usa "Actualizar todo" para el resto.` : '';
+  if (d.error) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted center">' + escapeHtml(d.error) + '</td></tr>';
+    return;
+  }
   if (!d.upgradable_list || d.upgradable_list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin actualizaciones pendientes ✓</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin actualizaciones pendientes ✓</td></tr>';
     return;
   }
   tbody.innerHTML = d.upgradable_list.map(p => `
     <tr>
-      <td class="mono">${p.name}</td>
-      <td class="mono">${p.new_version}</td>
-      <td class="small muted">${p.origin}</td>
+      <td><input type="checkbox" class="upg" value="${escapeHtml(p.name)}"></td>
+      <td class="mono">${escapeHtml(p.name)}</td>
+      <td class="mono">${escapeHtml(p.new_version)}</td>
+      <td class="small muted">${escapeHtml(p.origin)}</td>
       <td><span class="pill ${p.security ? 'err' : 'mute'}">${p.security ? 'seguridad' : 'normal'}</span></td>
     </tr>`).join('');
 }
+
+function selectAll(on) {
+  document.querySelectorAll('.upg').forEach(c => c.checked = on);
+}
+
+function upgradeSelected() {
+  const pkgs = [...document.querySelectorAll('.upg:checked')].map(c => c.value);
+  if (!pkgs.length) { alert('Selecciona al menos un paquete'); return; }
+  pkgRun('upgrade-pkgs', pkgs, `¿Actualizar ${pkgs.length} paquete(s)?\n${pkgs.join(' ')}`);
+}
+
+function removeBtns(name) {
+  let html = `<button class="btn btn-sm btn-danger" data-pm onclick="removePkg(${jsArg(name)}, false)">Eliminar</button>`;
+  if (IS_APT) html += ` <button class="btn btn-sm btn-danger" data-pm onclick="removePkg(${jsArg(name)}, true)" title="Elimina también la configuración">Purgar</button>`;
+  return html;
+}
+
+function removePkg(name, purge) {
+  pkgRun(purge ? 'purge' : 'remove', [name],
+         purge ? `¿Purgar ${name} y su configuración?` : `¿Eliminar ${name}?`);
+}
+
+async function search(silent) {
+  const q = silent ? lastQuery : document.getElementById('q').value.trim();
+  if (!q) return;
+  lastQuery = q;
+  const tbody = document.querySelector('#search-table tbody');
+  if (!silent) tbody.innerHTML = '<tr><td colspan="4" class="muted center">Buscando…</td></tr>';
+  const r = await fetch("{{ url_for('packages.search') }}?q=" + encodeURIComponent(q));
+  const d = await r.json();
+  const info = document.getElementById('search-info');
+  if (d.error) {
+    tbody.innerHTML = '<tr><td colspan="4" class="muted center">Error: ' + escapeHtml(d.error) + '</td></tr>';
+    info.textContent = '';
+    return;
+  }
+  info.textContent = d.total > d.results.length ? `Mostrando ${d.results.length} de ${d.total} resultados — refina la búsqueda.` : `${d.total} resultado(s)`;
+  if (!d.results.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin resultados</td></tr>'; return; }
+  tbody.innerHTML = d.results.map(p => `
+    <tr>
+      <td class="mono">${escapeHtml(p.name)}</td>
+      <td class="small">${escapeHtml(p.description)}</td>
+      <td>${p.installed ? `<span class="pill ok">instalado</span> <span class="small muted mono">${escapeHtml(p.version)}</span>` : '<span class="pill mute">no instalado</span>'}</td>
+      <td>${p.installed ? removeBtns(p.name)
+        : `<button class="btn btn-sm btn-primary" data-pm onclick="pkgRun('install', [${jsArg(p.name)}], ${jsArg('¿Instalar ' + p.name + '?')})">Instalar</button>`}</td>
+    </tr>`).join('');
+}
+
+async function loadInstalled() {
+  const r = await fetch("{{ url_for('packages.installed') }}");
+  const d = await r.json();
+  if (d.error) {
+    document.querySelector('#inst-table tbody').innerHTML = '<tr><td colspan="4" class="muted center">' + escapeHtml(d.error) + '</td></tr>';
+    return;
+  }
+  installedPkgs = d.packages;
+  renderInstalled();
+}
+
+function renderInstalled() {
+  if (!installedPkgs) return;
+  const q = document.getElementById('inst-filter').value.toLowerCase();
+  let list = installedPkgs.filter(p => !q || p.name.toLowerCase().includes(q));
+  if (document.getElementById('inst-sort').value === 'size') list = [...list].sort((a, b) => b.bytes - a.bytes);
+  document.getElementById('inst-info').textContent = list.length > SHOW_MAX
+    ? `Mostrando ${SHOW_MAX} de ${list.length} — usa el filtro` : `${list.length} paquete(s)`;
+  const tbody = document.querySelector('#inst-table tbody');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin resultados</td></tr>'; return; }
+  tbody.innerHTML = list.slice(0, SHOW_MAX).map(p => `
+    <tr>
+      <td class="mono">${escapeHtml(p.name)}</td>
+      <td class="mono small">${escapeHtml(p.version)}</td>
+      <td class="small">${escapeHtml(p.size)}</td>
+      <td>${removeBtns(p.name)}</td>
+    </tr>`).join('');
+}
+
+async function loadUA() {
+  const el = document.getElementById('ua');
+  if (!el) return;
+  const d = await (await fetch(URL_UA)).json();
+  if (!d.installed) {
+    el.innerHTML = `<span class="pill warn">no instalado</span>
+      <button class="btn btn-sm" data-pm onclick="pkgRun('install', ['unattended-upgrades'], '¿Instalar unattended-upgrades?')">Instalar unattended-upgrades</button>`;
+    return;
+  }
+  el.innerHTML = `<span class="pill ${d.enabled ? 'ok' : 'mute'}">${d.enabled ? 'activadas' : 'desactivadas'}</span>
+    <button class="btn btn-sm" onclick="toggleUA(${jsArg(!d.enabled)})">${d.enabled ? 'Desactivar' : 'Activar'}</button>
+    <div class="small muted">Las actualizaciones de seguridad se instalan automáticamente a diario (/etc/apt/apt.conf.d/20auto-upgrades).</div>`;
+}
+
+async function toggleUA(enabled) {
+  if (!confirm(enabled ? '¿Activar actualizaciones automáticas?' : '¿Desactivar actualizaciones automáticas?')) return;
+  const d = await postJSON(URL_UA, { enabled });
+  if (!d.ok) alert('Error: ' + d.error);
+  loadUA();
+}
+
+if (IS_APT) {
+  document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+  loadUA();
+}
+document.getElementById('inst-filter').addEventListener('input', renderInstalled);
+document.getElementById('inst-sort').addEventListener('change', renderInstalled);
 load();
 </script>
 {% endblock %}

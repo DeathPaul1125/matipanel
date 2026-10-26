@@ -18,7 +18,7 @@ def detect():
       id:      'ubuntu', 'debian', 'rocky', 'fedora', ...
       name:    PRETTY_NAME
       pkg:     'apt' | 'dnf' | 'yum' | 'pacman' | 'zypper'
-      fw:      'ufw' | 'firewalld' | 'iptables' | None
+      fw:      'ufw' | 'firewalld' | 'nftables' | 'iptables' | None
     """
     info = {"id": "unknown", "id_like": "", "name": "Linux", "version": ""}
 
@@ -65,6 +65,8 @@ def detect():
         fw = "ufw"
     elif shutil.which("firewall-cmd"):
         fw = "firewalld"
+    elif shutil.which("nft"):
+        fw = "nftables"
     elif shutil.which("iptables"):
         fw = "iptables"
     else:

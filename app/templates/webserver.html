@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}Servidor web{% endblock %}
+{% block heading %}Servidor web{% endblock %}
+
+{% block content %}
+{% if not servers %}
+<div class="card">
+  <h3>No hay servidor web instalado</h3>
+  <p class="muted">Instala Apache o Nginx con:</p>
+  <pre class="terminal">apt install apache2
+# o bien
+apt install nginx</pre>
+</div>
+{% else %}
+<div class="tabs" id="srv-tabs">
+  {% for s in servers %}
+  <button class="tab{% if loop.first %} active{% endif %}" data-srv="{{ s.key }}" onclick="selectServer('{{ s.key }}')">{{ s.label }}</button>
+  {% endfor %}
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+  <div class="toolbar" style="margin:0;">
+    <span id="ws-status" class="muted">Consultando…</span>
+    <span id="ws-version" class="mono muted"></span>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="serviceAction('test')">Probar config</button>
+    <button class="btn btn-sm btn-primary" onclick="serviceAction('reload')">Recargar</button>
+    <button class="btn btn-sm" onclick="serviceAction('restart')">Reiniciar</button>
+    <button class="btn btn-sm" onclick="viewLog('error')">error.log</button>
+    <button class="btn btn-sm" onclick="viewLog('access')">access.log</button>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+  <div class="toolbar">
+    <h3 style="margin:0;">Sitios</h3>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="loadSites()">Refrescar</button>
+    <button class="btn btn-sm btn-primary" onclick="openCreate()">+ Nuevo sitio</button>
+  </div>
+  <table class="lx" id="sites-table">
+    <thead><tr><th>Archivo</th><th>Estado</th><th>Dominios</th><th>Document root</th><th>Puertos</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card" id="mods-card" style="display:none;">
+  <div class="toolbar">
+    <h3 style="margin:0;">Módulos de Apache</h3>
+    <span style="flex:1"></span>
+    <input type="text" id="mod-filter" class="input" placeholder="Filtrar módulo…">
+    <select id="mod-state" class="input">
+      <option value="">Todos</option>
+      <option value="on">Habilitados</option>
+      <option value="off">Deshabilitados</option>
+    </select>
+  </div>
+  <table class="lx" id="mods-table">
+    <thead><tr><th>Módulo</th><th>Estado</th><th>Acción</th></tr></thead>
+    <tbody><tr><td colspan="3" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <p class="small muted">Tras cambiar módulos usa «Reiniciar» (algunos, como los MPM, no se aplican con una recarga).</p>
+</div>
+
+<div class="modal" id="out-modal">
+  <div class="modal-box wide">
+    <h3 id="out-title">Salida</h3>
+    <pre class="terminal output" id="out-content"></pre>
+    <div class="form-actions"><button class="btn" onclick="closeModal('out-modal')">Cerrar</button></div>
+  </div>
+</div>
+
+<div class="modal" id="create-modal">
+  <div class="modal-box">
+    <h3>Nuevo virtual host (<span id="create-srv"></span>)</h3>
+    <label class="form-row"><span>Dominio</span>
+      <input class="input" id="c-domain" placeholder="ejemplo.com" oninput="syncDocroot()"></label>
+    <label class="form-row"><span>Alias (separados por coma o espacio)</span>
+      <input class="input" id="c-aliases" placeholder="www.ejemplo.com"></label>
+    <label class="form-row"><span>Document root (bajo /var/www, /srv o /home)</span>
+      <input class="input mono" id="c-docroot" placeholder="/var/www/ejemplo.com/public_html"></label>
+    <label class="form-row"><span>PHP-FPM</span>
+      <select class="input" id="c-php"><option value="">Sin PHP</option></select></label>
+    <p class="small muted">Se crea el directorio con un index.html de ejemplo (propietario www-data), se escribe
+      sites-available/&lt;dominio&gt;.conf, se habilita, se prueba la configuración y se recarga.
+      Si la prueba falla, el sitio se revierte.</p>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('create-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="c-submit" onclick="createSite()">Crear</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if servers %}
+<script>
+const BASE = "{{ url_for('webserver.index') }}";
+const EDIT_URL = "{{ url_for('files.index') }}?edit=";
+let cur = {{ servers[0].key | tojson }};
+let allMods = [];
+let docrootTouched = false;
+
+const api = p => BASE + 'api/' + cur + '/' + p;
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function showOutput(title, text) {
+  document.getElementById('out-title').textContent = title;
+  document.getElementById('out-content').textContent = text || '(sin salida)';
+  document.getElementById('out-modal').classList.add('open');
+}
+
+function report(d, title) {
+  if (d.ok) { if (d.output) showOutput(title, d.output); }
+  else if (d.output) showOutput('Error: ' + (d.error || ''), d.output);
+  else alert('Error: ' + (d.error || 'desconocido'));
+}
+
+function selectServer(key) {
+  cur = key;
+  document.querySelectorAll('#srv-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.srv === key));
+  document.getElementById('mods-card').style.display = key === 'apache' ? '' : 'none';
+  loadStatus(); loadSites();
+  if (key === 'apache') loadMods();
+}
+
+async function loadStatus() {
+  const d = await (await fetch(api('status'))).json();
+  const cls = d.active === 'active' ? 'ok' : d.active === 'failed' ? 'err' : 'mute';
+  document.getElementById('ws-status').innerHTML = `<span class="pill ${cls}">${escapeHtml(d.active || d.error)}</span>`;
+  document.getElementById('ws-version').textContent = d.version || '';
+}
+
+async function serviceAction(act) {
+  if (act === 'restart' && !confirm('¿Reiniciar ' + cur + '? Se cortarán las conexiones activas.')) return;
+  const d = await postJSON(api('service'), {action: act});
+  if (d.ok) showOutput('Prueba de configuración: OK' + (act !== 'test' ? ' — ' + act + ' aplicado' : ''), d.output);
+  else report(d);
+  loadStatus();
+}
+
+async function viewLog(kind) {
+  showOutput(kind + '.log', 'Cargando…');
+  const d = await (await fetch(api('log') + '?kind=' + kind)).json();
+  document.getElementById('out-title').textContent = d.path || kind;
+  const pre = document.getElementById('out-content');
+  pre.textContent = d.error || d.log || '(vacío)';
+  pre.scrollTop = pre.scrollHeight;
+}
+
+async function loadSites() {
+  const tbody = document.querySelector('#sites-table tbody');
+  const d = await (await fetch(api('sites'))).json();
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
+  if (!d.sites.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin sitios</td></tr>'; return; }
+  tbody.innerHTML = d.sites.map(s => {
+    const domains = s.server_name.concat(s.aliases);
+    return `<tr>
+      <td class="mono">${escapeHtml(s.name)}${s.default ? ' <span class="pill mute">default</span>' : ''}</td>
+      <td><span class="pill ${s.enabled ? 'ok' : 'mute'}">${s.enabled ? 'habilitado' : 'deshabilitado'}</span></td>
+      <td class="mono small">${domains.length ? domains.map(escapeHtml).join('<br>') : '<span class="muted">—</span>'}</td>
+      <td class="mono small">${escapeHtml(s.docroot.join(', ') || '—')}</td>
+      <td class="mono small">${escapeHtml(s.ports.join(', ') || '—')}</td>
+      <td>
+        ${!s.available ? '<span class="small muted">solo en sites-enabled</span>'
+          : s.enabled ? `<button class="btn btn-sm" onclick="siteAction(${jsArg(s.name)},'disable')">Deshabilitar</button>`
+          : `<button class="btn btn-sm" onclick="siteAction(${jsArg(s.name)},'enable')">Habilitar</button>`}
+        <a class="btn btn-sm" href="${escapeHtml(EDIT_URL + encodeURIComponent(s.path))}">Editar</a>
+        ${s.available ? `<button class="btn btn-sm btn-danger" onclick="siteAction(${jsArg(s.name)},'delete',${s.default})">Eliminar</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function siteAction(name, act, isDefault) {
+  const labels = {enable: 'Habilitar', disable: 'Deshabilitar', delete: 'Eliminar'};
+  if (!confirm(`¿${labels[act]} el sitio ${name}?` + (act === 'delete' ? ' El archivo se borrará de sites-available.' : ''))) return;
+  let force = false;
+  if (act === 'delete' && isDefault) {
+    if (!confirm(name + ' es un sitio por defecto del paquete. ¿Seguro que quieres eliminarlo?')) return;
+    force = true;
+  }
+  const d = await postJSON(api('site'), {name, action: act, force});
+  report(d, labels[act] + ': ' + name);
+  loadSites(); loadStatus();
+}
+
+async function loadMods() {
+  const tbody = document.querySelector('#mods-table tbody');
+  const d = await (await fetch(BASE + 'api/apache/mods')).json();
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
+  allMods = d.mods;
+  renderMods();
+}
+
+function renderMods() {
+  const q = document.getElementById('mod-filter').value.toLowerCase();
+  const st = document.getElementById('mod-state').value;
+  const f = allMods.filter(m => (!q || m.name.includes(q)) && (!st || (st === 'on') === m.enabled));
+  const tbody = document.querySelector('#mods-table tbody');
+  if (!f.length) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">Sin resultados</td></tr>'; return; }
+  tbody.innerHTML = f.map(m => `<tr>
+    <td class="mono">${escapeHtml(m.name)}</td>
+    <td><span class="pill ${m.enabled ? 'ok' : 'mute'}">${m.enabled ? 'habilitado' : 'deshabilitado'}</span></td>
+    <td><button class="btn btn-sm" onclick="modAction(${jsArg(m.name)},${jsArg(m.enabled ? 'disable' : 'enable')})">${m.enabled ? 'Deshabilitar' : 'Habilitar'}</button></td>
+  </tr>`).join('');
+}
+
+async function modAction(name, act) {
+  if (!confirm(`¿${act === 'enable' ? 'Habilitar' : 'Deshabilitar'} el módulo ${name}?`)) return;
+  const d = await postJSON(BASE + 'api/apache/mod', {name, action: act});
+  if (d.ok) showOutput(d.test_ok ? 'Módulo actualizado — config OK (reinicia para aplicar)'
+                                 : 'Módulo actualizado — ¡la prueba de config FALLÓ!', d.output);
+  else report(d);
+  loadMods();
+}
+
+function syncDocroot() {
+  if (docrootTouched) return;
+  const dom = document.getElementById('c-domain').value.trim().toLowerCase();
+  document.getElementById('c-docroot').value = dom ? '/var/www/' + dom + '/public_html' : '';
+}
+
+async function openCreate() {
+  docrootTouched = false;
+  ['c-domain', 'c-aliases', 'c-docroot'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('create-srv').textContent = cur;
+  const sel = document.getElementById('c-php');
+  sel.innerHTML = '<option value="">Sin PHP</option>';
+  document.getElementById('create-modal').classList.add('open');
+  const d = await (await fetch(BASE + 'api/php')).json();
+  sel.innerHTML += (d.versions || []).map(v => `<option value="${escapeHtml(v)}">PHP ${escapeHtml(v)}-FPM</option>`).join('');
+}
+
+async function createSite() {
+  const btn = document.getElementById('c-submit');
+  btn.disabled = true;
+  const d = await postJSON(api('create'), {
+    domain: document.getElementById('c-domain').value.trim(),
+    aliases: document.getElementById('c-aliases').value,
+    docroot: document.getElementById('c-docroot').value.trim(),
+    php: document.getElementById('c-php').value,
+  });
+  btn.disabled = false;
+  if (d.ok) { closeModal('create-modal'); showOutput('Sitio creado: ' + d.path, d.output); }
+  else report(d);
+  loadSites(); loadStatus();
+}
+
+document.getElementById('c-docroot').addEventListener('input', () => docrootTouched = true);
+document.getElementById('mod-filter').addEventListener('input', renderMods);
+document.getElementById('mod-state').addEventListener('change', renderMods);
+selectServer(cur);
+</script>
+{% endif %}
+{% endblock %}

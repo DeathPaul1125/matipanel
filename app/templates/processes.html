@@ -46,7 +46,7 @@ function render() {
       <td class="mono truncate" title="${escapeHtml(p.cmd)}">${escapeHtml(p.cmd)}</td>
       <td>${p.cpu}</td>
       <td>${p.mem}</td>
-      <td><span class="pill mute">${p.status}</span></td>
+      <td><span class="pill mute">${escapeHtml(p.status)}</span></td>
       <td class="mono">${p.running}</td>
       <td><button class="btn btn-sm btn-danger" onclick="killProc(${p.pid})">Kill</button></td>
     </tr>
@@ -59,10 +59,6 @@ async function killProc(pid) {
   const d = await r.json();
   if (!d.ok) alert('Error: ' + d.error);
   setTimeout(loadProcesses, 500);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 document.getElementById('filter').addEventListener('input', render);

@@ -4,6 +4,7 @@ import json
 import shutil
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
+from ..util import valid_name
 
 docker_bp = Blueprint("docker", __name__)
 
@@ -143,7 +144,7 @@ def action():
     if not _safe_id(container):
         return jsonify({"ok": False, "error": "ID/nombre inválido"}), 400
 
-    code, out, err = _docker(act, container, timeout=20)
+    code, out, err = _docker(act, "--", container, timeout=20)
     if code != 0:
         return jsonify({"ok": False, "error": err.strip()}), 500
     return jsonify({"ok": True, "output": out.strip()})
@@ -154,14 +155,11 @@ def action():
 def logs(container):
     if not _safe_id(container):
         return jsonify({"error": "ID inválido"}), 400
-    code, out, err = _docker("logs", "--tail", "200", container, timeout=10)
+    code, out, err = _docker("logs", "--tail", "200", "--", container, timeout=10)
     if code != 0:
         return jsonify({"error": err.strip()}), 500
     return jsonify({"logs": out + err})
 
 
 def _safe_id(s):
-    if not s or len(s) > 200:
-        return False
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-/"
-    return all(c in allowed for c in s)
+    return valid_name(s, extra="/")

@@ -74,21 +74,21 @@ async function loadContainers() {
   const r = await fetch("{{ url_for('docker.containers') }}");
   const d = await r.json();
   const tbody = document.querySelector('#cont-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + d.error + '</td></tr>'; return; }
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
   if (!d.containers.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin containers</td></tr>'; return; }
   tbody.innerHTML = d.containers.map(c => {
     const cls = c.state === 'running' ? 'ok' : c.state === 'paused' ? 'warn' : 'mute';
     return `<tr>
-      <td class="mono">${c.id}</td>
+      <td class="mono">${escapeHtml(c.id)}</td>
       <td class="mono">${escapeHtml(c.name)}</td>
       <td class="mono small truncate">${escapeHtml(c.image)}</td>
-      <td><span class="pill ${cls}">${c.state}</span> <span class="small muted">${escapeHtml(c.status)}</span></td>
+      <td><span class="pill ${cls}">${escapeHtml(c.state)}</span> <span class="small muted">${escapeHtml(c.status)}</span></td>
       <td class="small mono">${escapeHtml(c.ports || '—')}</td>
       <td>
-        <button class="btn btn-sm" onclick="dockerAction('${c.id}','start')">▶</button>
-        <button class="btn btn-sm" onclick="dockerAction('${c.id}','stop')">■</button>
-        <button class="btn btn-sm" onclick="dockerAction('${c.id}','restart')">↻</button>
-        <button class="btn btn-sm" onclick="viewLogs('${c.id}','${escapeHtml(c.name)}')">logs</button>
+        <button class="btn btn-sm" onclick="dockerAction(${jsArg(c.id)},'start')">▶</button>
+        <button class="btn btn-sm" onclick="dockerAction(${jsArg(c.id)},'stop')">■</button>
+        <button class="btn btn-sm" onclick="dockerAction(${jsArg(c.id)},'restart')">↻</button>
+        <button class="btn btn-sm" onclick="viewLogs(${jsArg(c.id)},${jsArg(c.name)})">logs</button>
       </td>
     </tr>`;
   }).join('');
@@ -98,11 +98,11 @@ async function loadImages() {
   const r = await fetch("{{ url_for('docker.images') }}");
   const d = await r.json();
   const tbody = document.querySelector('#img-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="5" class="muted center">' + d.error + '</td></tr>'; return; }
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="5" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
   if (!d.images.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin imágenes</td></tr>'; return; }
   tbody.innerHTML = d.images.map(i => `
     <tr>
-      <td class="mono">${i.id}</td>
+      <td class="mono">${escapeHtml(i.id)}</td>
       <td class="mono">${escapeHtml(i.repo)}</td>
       <td class="mono">${escapeHtml(i.tag)}</td>
       <td>${escapeHtml(i.size)}</td>
@@ -114,7 +114,7 @@ async function loadVolumes() {
   const r = await fetch("{{ url_for('docker.volumes') }}");
   const d = await r.json();
   const tbody = document.querySelector('#vol-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">' + d.error + '</td></tr>'; return; }
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
   if (!d.volumes.length) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">Sin volúmenes</td></tr>'; return; }
   tbody.innerHTML = d.volumes.map(v => `
     <tr><td class="mono">${escapeHtml(v.name)}</td><td>${escapeHtml(v.driver)}</td><td class="mono small">${escapeHtml(v.mount)}</td></tr>
@@ -137,13 +137,12 @@ async function viewLogs(id, name) {
   document.getElementById('logs-title').textContent = 'docker logs ' + name;
   document.getElementById('logs-content').textContent = 'Cargando…';
   modal.style.display = 'flex';
-  const r = await fetch("/docker/api/logs/" + id);
+  const r = await fetch("/docker/api/logs/" + encodeURIComponent(id));
   const d = await r.json();
   document.getElementById('logs-content').textContent = d.error || d.logs || '(vacío)';
   document.getElementById('logs-content').scrollTop = 999999;
 }
 
-function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 loadInfo(); loadContainers(); loadImages(); loadVolumes();
 setInterval(() => { loadInfo(); loadContainers(); }, 10000);

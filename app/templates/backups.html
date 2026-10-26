@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Respaldos{% endblock %}
+{% block heading %}Respaldos{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <button class="btn btn-primary" onclick="openForm(false)">Nuevo respaldo</button>
+  <button class="btn" onclick="openForm(true)">Nuevo trabajo programado</button>
+  <button class="btn" onclick="load()">Refrescar</button>
+  <span class="muted small">Destino: <code>{{ backup_dir }}</code></span>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+  <h3>Trabajos programados</h3>
+  <table class="lx" id="jobs-table">
+    <thead><tr><th>Nombre</th><th>Rutas</th><th>Frecuencia</th><th>Conservar</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Respaldos existentes</h3>
+  <table class="lx" id="bk-table">
+    <thead><tr><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div id="form-modal" class="modal">
+  <div class="modal-box">
+    <h3 id="form-title">Nuevo respaldo</h3>
+    <label class="form-row"><span>Nombre (letras, números, _ y -)</span><input id="f-name" class="input mono" maxlength="40"></label>
+    <label class="form-row"><span>Rutas absolutas (una por línea)</span><textarea id="f-paths" class="input" placeholder="/etc&#10;/var/www"></textarea></label>
+    <label class="form-row"><span>Exclusiones (opcional, una por línea; ej. *.log, var/www/cache)</span><textarea id="f-excludes" class="input" style="min-height:60px;"></textarea></label>
+    <div id="f-sched">
+      <div class="grid grid-3" style="margin:0;">
+        <label class="form-row"><span>Frecuencia</span>
+          <select id="f-type" class="input" onchange="document.getElementById('f-dow-row').style.display = this.value === 'weekly' ? '' : 'none'">
+            <option value="daily">Diario</option><option value="weekly">Semanal</option></select></label>
+        <label class="form-row" id="f-dow-row" style="display:none;"><span>Día</span>
+          <select id="f-dow" class="input"><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option>
+            <option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option></select></label>
+        <label class="form-row"><span>Hora</span><input id="f-time" type="time" class="input" value="02:30"></label>
+      </div>
+      <label class="form-row"><span>Copias a conservar</span><input id="f-keep" type="number" class="input" min="1" max="365" value="7"></label>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeForm()">Cancelar</button>
+      <button class="btn btn-primary" id="f-submit" onclick="submitForm()">Crear</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const DL_URL = "{{ url_for('backups.download', fname='__F__') }}";
+const DAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+let jobs = {}, scheduled = false;
+
+function fmtBytes(n) {
+  for (const u of ['B', 'KB', 'MB', 'GB', 'TB']) { if (n < 1024) return n.toFixed(1) + ' ' + u; n /= 1024; }
+  return n.toFixed(1) + ' PB';
+}
+function lines(id) { return document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean); }
+function schedText(s) { return (s.type === 'weekly' ? 'Semanal, ' + DAYS[s.dow] : 'Diario') + ' a las ' + s.time; }
+
+async function load() {
+  const r = await fetch("{{ url_for('backups.list_all') }}");
+  const d = await r.json();
+  jobs = d.jobs;
+
+  const names = Object.keys(jobs).sort();
+  document.querySelector('#jobs-table tbody').innerHTML = names.length ? names.map(n => {
+    const j = jobs[n];
+    return `<tr>
+      <td class="mono">${escapeHtml(n)}</td>
+      <td class="mono small">${j.paths.map(escapeHtml).join('<br>')}</td>
+      <td>${escapeHtml(schedText(j.schedule))}</td>
+      <td>${escapeHtml(j.keep)}</td>
+      <td>
+        <button class="btn btn-sm" onclick="runJob(${jsArg(n)})">Ejecutar ahora</button>
+        <button class="btn btn-sm" onclick="editJob(${jsArg(n)})">Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteJob(${jsArg(n)})">Eliminar</button>
+      </td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="muted center">Sin trabajos programados</td></tr>';
+
+  document.querySelector('#bk-table tbody').innerHTML = d.backups.length ? d.backups.map(b => `
+    <tr>
+      <td class="mono">${escapeHtml(b.file)}</td>
+      <td>${fmtBytes(b.size)}</td>
+      <td>${escapeHtml(new Date(b.mtime * 1000).toLocaleString())}</td>
+      <td>
+        <a class="btn btn-sm" href="${DL_URL.replace('__F__', encodeURIComponent(b.file))}">Descargar</a>
+        <button class="btn btn-sm" onclick="restore(${jsArg(b.file)})">Restaurar</button>
+        <button class="btn btn-sm btn-danger" onclick="del(${jsArg(b.file)})">Eliminar</button>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="4" class="muted center">Sin respaldos</td></tr>';
+}
+
+function openForm(isJob, job, name) {
+  scheduled = isJob;
+  document.getElementById('form-title').textContent = isJob ? (name ? 'Editar trabajo' : 'Nuevo trabajo programado') : 'Nuevo respaldo';
+  document.getElementById('f-submit').textContent = isJob ? 'Guardar' : 'Crear';
+  document.getElementById('f-sched').style.display = isJob ? '' : 'none';
+  const nameEl = document.getElementById('f-name');
+  nameEl.value = name || ''; nameEl.readOnly = !!name;
+  document.getElementById('f-paths').value = job ? job.paths.join('\n') : '';
+  document.getElementById('f-excludes').value = job ? (job.excludes || []).join('\n') : '';
+  const s = job ? job.schedule : { type: 'daily', time: '02:30', dow: 1 };
+  document.getElementById('f-type').value = s.type;
+  document.getElementById('f-dow').value = String(s.dow ?? 1);
+  document.getElementById('f-time').value = s.time;
+  document.getElementById('f-keep').value = job ? job.keep : 7;
+  document.getElementById('f-dow-row').style.display = s.type === 'weekly' ? '' : 'none';
+  document.getElementById('form-modal').classList.add('open');
+}
+function closeForm() { document.getElementById('form-modal').classList.remove('open'); }
+function editJob(n) { openForm(true, jobs[n], n); }
+
+async function submitForm() {
+  const data = { name: document.getElementById('f-name').value.trim(), paths: lines('f-paths'), excludes: lines('f-excludes') };
+  let url = "{{ url_for('backups.create') }}";
+  if (scheduled) {
+    url = "{{ url_for('backups.job_save') }}";
+    const type = document.getElementById('f-type').value;
+    data.keep = parseInt(document.getElementById('f-keep').value, 10);
+    data.schedule = { type, time: document.getElementById('f-time').value };
+    if (type === 'weekly') data.schedule.dow = parseInt(document.getElementById('f-dow').value, 10);
+  }
+  const btn = document.getElementById('f-submit');
+  btn.disabled = true; btn.textContent = 'Procesando…';
+  const d = await postJSON(url, data);
+  btn.disabled = false; btn.textContent = scheduled ? 'Guardar' : 'Crear';
+  if (!d.ok) { alert('Error: ' + d.error); return; }
+  if (d.file) alert('Respaldo creado: ' + d.file);
+  closeForm(); load();
+}
+
+async function runJob(name) {
+  if (!confirm(`¿Ejecutar ahora el trabajo ${name}? Puede tardar varios minutos.`)) return;
+  const d = await postJSON("{{ url_for('backups.job_run') }}", { name });
+  alert(d.ok ? 'Listo: ' + d.output : 'Error: ' + d.error);
+  load();
+}
+
+async function deleteJob(name) {
+  if (!confirm(`¿Eliminar el trabajo programado ${name}? Los respaldos ya creados se conservan.`)) return;
+  const d = await postJSON("{{ url_for('backups.job_delete') }}", { name });
+  if (!d.ok) alert('Error: ' + d.error);
+  load();
+}
+
+async function del(file) {
+  if (!confirm(`¿Eliminar definitivamente ${file}?`)) return;
+  const d = await postJSON("{{ url_for('backups.delete') }}", { file });
+  if (!d.ok) alert('Error: ' + d.error);
+  load();
+}
+
+async function restore(file) {
+  const target = prompt(`Directorio destino para extraer ${file}.\n"/" sobrescribe los archivos originales en su ubicación.`, '/');
+  if (target === null) return;
+  let confirmText = '';
+  if (target.trim() === '/') {
+    confirmText = prompt('ATENCIÓN: se sobrescribirán archivos del sistema con el contenido del respaldo.\nEscribe RESTAURAR para continuar:');
+    if (confirmText !== 'RESTAURAR') { alert('Restauración cancelada.'); return; }
+  } else if (!confirm(`¿Extraer ${file} en ${target}?`)) return;
+  const d = await postJSON("{{ url_for('backups.restore') }}", { file, target: target.trim(), confirm: confirmText });
+  alert(d.ok ? 'Restauración completada.' : 'Error: ' + d.error);
+}
+
+load();
+</script>
+{% endblock %}

@@ -8,4 +8,3 @@ pyotp>=2.9.0
 qrcode>=7.4.0
 gunicorn>=21.2.0
 gevent>=23.9.0
-gevent-websocket>=0.10.1

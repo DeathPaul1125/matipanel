@@ -1,7 +1,11 @@
-"""Consulta a journalctl + vista en vivo vía WebSocket."""
+"""Consulta a journalctl, archivos de /var/log y vista en vivo vía WebSocket."""
+import os
 import subprocess
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
+from ..util import valid_name, run
+
+LOG_DIR = "/var/log"
 
 logs_bp = Blueprint("logs", __name__)
 
@@ -21,12 +25,12 @@ def live():
 @logs_bp.route("/api/recent")
 @login_required
 def recent():
-    n = min(int(request.args.get("n", 200)), 1000)
+    n = max(1, min(request.args.get("n", 200, type=int), 1000))
     unit = request.args.get("unit", "").strip()
     priority = request.args.get("priority", "").strip()
 
     cmd = ["journalctl", "--no-pager", "-n", str(n), "--output=short-iso"]
-    if unit and _valid_unit(unit):
+    if valid_name(unit):
         cmd += ["-u", unit]
     if priority in ("emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"):
         cmd += ["-p", priority]
@@ -41,8 +45,33 @@ def recent():
     return jsonify({"lines": out.splitlines()})
 
 
-def _valid_unit(name):
-    if not name or len(name) > 200:
-        return False
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@.-_"
-    return all(c in allowed for c in name)
+@logs_bp.route("/api/files")
+@login_required
+def files():
+    """Archivos de texto en /var/log (sin rotados comprimidos)."""
+    found = []
+    for root, _, names in os.walk(LOG_DIR):
+        for name in names:
+            if name.endswith((".gz", ".xz", ".bz2", ".zst")) or name in ("wtmp", "btmp", "lastlog"):
+                continue
+            full = os.path.join(root, name)
+            try:
+                found.append({"path": full, "size": os.path.getsize(full)})
+            except OSError:
+                pass
+    found.sort(key=lambda f: f["path"])
+    return jsonify({"files": found})
+
+
+@logs_bp.route("/api/file")
+@login_required
+def file_tail():
+    path = os.path.realpath(request.args.get("path", ""))
+    if not path.startswith(LOG_DIR + "/") or not os.path.isfile(path):
+        return jsonify({"error": "Solo archivos dentro de /var/log"}), 400
+    n = max(1, min(request.args.get("n", 200, type=int), 5000))
+    code, out, err = run(["tail", "-n", str(n), "--", path], timeout=10)
+    if code != 0:
+        return jsonify({"error": err.strip()}), 500
+    return jsonify({"lines": out.splitlines()})
+

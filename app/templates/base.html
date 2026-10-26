@@ -17,74 +17,54 @@
           <div class="brand-sub">{{ request.host }}</div>
         </div>
       </div>
+      {#- (sección, [(endpoint, etiqueta, contenido SVG)]) -#}
+      {% set NAV = [
+        ("Sistema", [
+          ("dashboard.index", "Dashboard", '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>'),
+          ("system.index", "Sistema", '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>'),
+          ("processes.index", "Procesos", '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>'),
+          ("services.index", "Servicios", '<circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8"/>'),
+          ("cron.index", "Tareas (cron)", '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/>'),
+          ("disk.index", "Discos", '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>'),
+          ("backups.index", "Respaldos", '<path d="M21 8v13H3V8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>'),
+        ]),
+        ("Acceso", [
+          ("users.index", "Usuarios y grupos", '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'),
+        ]),
+        ("Red", [
+          ("network.index", "Interfaces", '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'),
+          ("firewall.index", "Firewall", '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
+        ]),
+        ("Servidores", [
+          ("webserver.index", "Servidor web", '<rect x="2" y="3" width="20" height="7" rx="1"/><rect x="2" y="14" width="20" height="7" rx="1"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/>'),
+          ("ssl.index", "SSL / Let's Encrypt", '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/>'),
+          ("php.index", "PHP", '<ellipse cx="12" cy="12" rx="10" ry="6"/><path d="M8 10v4M8 10h1.5a1 1 0 0 1 0 2H8M14 10v4M14 10h1.5a1 1 0 0 1 0 2H14"/>'),
+          ("databases.index", "Bases de datos", '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
+          ("docker.index", "Docker", '<rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M2 16h18a3 3 0 0 0 3-3"/>'),
+        ]),
+        ("Herramientas", [
+          ("files.index", "Archivos", '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
+          ("packages.index", "Paquetes", '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
+          ("logs.index", "Logs", '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
+          ("logs.live", "Logs en vivo", '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>'),
+          ("terminal.index", "Terminal", '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
+        ]),
+        ("Cuenta", [
+          ("auth.security", "Seguridad", '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+        ]),
+      ] %}
       <nav>
-        <div class="nav-group">Sistema</div>
-        <a href="{{ url_for('dashboard.index') }}" class="nav-item {% if request.endpoint == 'dashboard.index' %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
-          Dashboard
+        {% for section, items in NAV %}
+        <div class="nav-group">{{ section }}</div>
+        {% for ep, label, icon in items %}
+        {% set bp = ep.split('.')[0] %}
+        {% set active = request.endpoint == ep or (request.blueprint == bp and bp not in ('logs', 'auth')) or (ep == 'auth.security' and 'tfa' in (request.endpoint or '')) %}
+        <a href="{{ url_for(ep) }}" class="nav-item {% if active %}active{% endif %}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">{{ icon|safe }}</svg>
+          {{ label }}
         </a>
-        <a href="{{ url_for('processes.index') }}" class="nav-item {% if 'processes' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>
-          Procesos
-        </a>
-        <a href="{{ url_for('services.index') }}" class="nav-item {% if 'services' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          Servicios
-        </a>
-        <a href="{{ url_for('disk.index') }}" class="nav-item {% if 'disk' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
-          Discos
-        </a>
-
-        <div class="nav-group">Acceso</div>
-        <a href="{{ url_for('users.index') }}" class="nav-item {% if 'users' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          Usuarios
-        </a>
-
-        <div class="nav-group">Red</div>
-        <a href="{{ url_for('network.index') }}" class="nav-item {% if 'network' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-          Interfaces
-        </a>
-        <a href="{{ url_for('firewall.index') }}" class="nav-item {% if 'firewall' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          Firewall
-        </a>
-
-        <div class="nav-group">Archivos</div>
-        <a href="{{ url_for('files.index') }}" class="nav-item {% if 'files' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          Explorador
-        </a>
-
-        <div class="nav-group">Mantenimiento</div>
-        <a href="{{ url_for('packages.index') }}" class="nav-item {% if 'packages' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-          Paquetes
-        </a>
-        <a href="{{ url_for('logs.index') }}" class="nav-item {% if request.endpoint == 'logs.index' %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          Logs
-        </a>
-        <a href="{{ url_for('logs.live') }}" class="nav-item {% if request.endpoint == 'logs.live' %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
-          Logs en vivo
-        </a>
-        <a href="{{ url_for('docker.index') }}" class="nav-item {% if 'docker' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="9" width="4" height="4"/><rect x="7" y="9" width="4" height="4"/><rect x="12" y="9" width="4" height="4"/><rect x="7" y="4" width="4" height="4"/><path d="M2 16h18a3 3 0 0 0 3-3"/></svg>
-          Docker
-        </a>
-        <a href="{{ url_for('terminal.index') }}" class="nav-item {% if 'terminal' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-          Terminal
-        </a>
-
-        <div class="nav-group">Cuenta</div>
-        <a href="{{ url_for('auth.security') }}" class="nav-item {% if 'auth.security' in request.endpoint or 'tfa' in request.endpoint %}active{% endif %}">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          Seguridad
-        </a>
+        {% endfor %}
+        {% endfor %}
       </nav>
       <div class="sidebar-foot">
         <span>{{ current_user.username if current_user.is_authenticated else '' }}</span>

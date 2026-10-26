@@ -11,10 +11,18 @@
 <div class="card">
   <table class="lx" id="svc-table">
     <thead>
-      <tr><th>Unidad</th><th>Estado</th><th>Sub</th><th>Descripción</th><th>Acciones</th></tr>
+      <tr><th>Unidad</th><th>Estado</th><th>Sub</th><th>Arranque</th><th>Descripción</th><th>Acciones</th></tr>
     </thead>
-    <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
   </table>
+</div>
+
+<div id="status-modal" class="modal">
+  <div class="modal-box wide">
+    <h3 id="status-title" class="mono"></h3>
+    <pre class="terminal output" id="status-out"></pre>
+    <div class="form-actions"><button class="btn" onclick="document.getElementById('status-modal').classList.remove('open')">Cerrar</button></div>
+  </div>
 </div>
 {% endblock %}
 
@@ -27,7 +35,7 @@ async function loadServices() {
   const d = await r.json();
   if (d.error) {
     document.querySelector('#svc-table tbody').innerHTML =
-      '<tr><td colspan="5" class="muted center">Error: ' + d.error + '</td></tr>';
+      '<tr><td colspan="6" class="muted center">Error: ' + escapeHtml(d.error) + '</td></tr>';
     return;
   }
   allSvcs = d.services;
@@ -39,7 +47,7 @@ function render() {
   const filtered = allSvcs.filter(s => !q || s.unit.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
   const tbody = document.querySelector('#svc-table tbody');
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="muted center">Sin resultados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin resultados</td></tr>';
     return;
   }
   tbody.innerHTML = filtered.map(s => {
@@ -47,13 +55,19 @@ function render() {
     return `
       <tr>
         <td class="mono">${escapeHtml(s.unit)}</td>
-        <td><span class="pill ${cls}">${s.active}</span></td>
+        <td><span class="pill ${cls}">${escapeHtml(s.active)}</span></td>
         <td class="mono">${escapeHtml(s.sub)}</td>
+        <td><span class="pill ${s.enabled === 'enabled' ? 'ok' : 'mute'}">${escapeHtml(s.enabled || '—')}</span></td>
         <td>${escapeHtml(s.description)}</td>
         <td>
-          <button class="btn btn-sm" onclick="action('${s.unit}', 'start')">▶</button>
-          <button class="btn btn-sm" onclick="action('${s.unit}', 'stop')">■</button>
-          <button class="btn btn-sm" onclick="action('${s.unit}', 'restart')">↻</button>
+          <button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'start')">▶</button>
+          <button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'stop')">■</button>
+          <button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'restart')">↻</button>
+          ${s.enabled === 'enabled'
+            ? `<button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'disable')" title="No iniciar al arrancar">⏻ off</button>`
+            : s.enabled === 'disabled'
+              ? `<button class="btn btn-sm" onclick="action(${jsArg(s.unit)}, 'enable')" title="Iniciar al arrancar">⏻ on</button>` : ''}
+          <button class="btn btn-sm" onclick="showStatus(${jsArg(s.unit)})">estado</button>
         </td>
       </tr>`;
   }).join('');
@@ -61,17 +75,19 @@ function render() {
 
 async function action(unit, act) {
   if (!confirm(`¿Ejecutar ${act} en ${unit}?`)) return;
-  const r = await fetch("{{ url_for('services.action') }}", {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ unit, action: act })
-  });
-  const d = await r.json();
+  const d = await postJSON("{{ url_for('services.action') }}", { unit, action: act });
   if (!d.ok) alert('Error: ' + d.error);
   setTimeout(loadServices, 600);
 }
 
-function escapeHtml(s){return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function showStatus(unit) {
+  document.getElementById('status-title').textContent = unit;
+  document.getElementById('status-out').textContent = 'Cargando…';
+  document.getElementById('status-modal').classList.add('open');
+  const d = await (await fetch("{{ url_for('services.status') }}?unit=" + encodeURIComponent(unit))).json();
+  document.getElementById('status-out').textContent = d.error || d.output;
+}
+
 
 document.getElementById('filter').addEventListener('input', render);
 loadServices();

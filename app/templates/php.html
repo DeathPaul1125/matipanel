@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}PHP{% endblock %}
+{% block heading %}PHP{% endblock %}
+
+{% block content %}
+{% if not installed %}
+<div class="card">
+  <h3>PHP no está instalado</h3>
+  <p class="muted">Instala PHP-FPM y CLI (versión por defecto de Debian):</p>
+  <pre class="terminal">apt install php-fpm php-cli</pre>
+  <p class="muted small">Para tener varias versiones en paralelo (p.ej. 8.1, 8.3, 8.4) agrega el repositorio de Ondřej Surý:</p>
+  <pre class="terminal">apt install -y lsb-release ca-certificates curl
+curl -sSLo /usr/share/keyrings/deb.sury.org-php.gpg https://packages.sury.org/php/apt.gpg
+echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
+apt update && apt install php8.3-fpm php8.3-cli</pre>
+  <p><a class="btn" href="{{ url_for('packages.index') }}">Ir a Paquetes</a></p>
+</div>
+{% else %}
+<div class="card">
+  <div class="toolbar">
+    <span class="mono" id="p-default">—</span>
+    <span class="muted small" id="p-alt-mode"></span>
+    <select id="alt" class="input"></select>
+    <button class="btn" onclick="setAlt()">Establecer CLI por defecto</button>
+    <button class="btn" onclick="loadOverview()">Refrescar</button>
+  </div>
+</div>
+
+<div class="card" id="out-card" hidden>
+  <h3 id="out-title"></h3>
+  <pre class="terminal output" id="out"></pre>
+</div>
+
+<div class="tabs" id="ver-tabs"></div>
+<div id="ver-panel"><p class="muted center">Cargando…</p></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if installed %}
+<script>
+const EDIT_URL = "{{ url_for('files.index') }}?edit=";
+const URL_OVERVIEW = "{{ url_for('php.overview') }}";
+const URL_MODULES = "{{ url_for('php.modules') }}";
+const DIRECTIVES = ["memory_limit", "upload_max_filesize", "post_max_size", "max_execution_time", "display_errors", "date.timezone"];
+const VALUE_RE = /^[A-Za-z0-9_./:+-]{1,64}$/;
+let data = null, current = null;
+
+const editLink = p => `<a class="btn btn-sm" href="${escapeHtml(EDIT_URL + encodeURIComponent(p))}">editar</a>`;
+
+function showOutput(title, text) {
+  document.getElementById('out-card').hidden = false;
+  document.getElementById('out-title').textContent = title;
+  const out = document.getElementById('out');
+  out.textContent = text;
+  out.scrollTop = out.scrollHeight;
+}
+
+async function loadOverview() {
+  data = await (await fetch(URL_OVERVIEW)).json();
+  document.getElementById('p-default').textContent = data.default || 'php CLI no disponible';
+  document.getElementById('p-alt-mode').textContent = data.alt.mode ? `(alternativa: ${data.alt.mode})` : '';
+  document.getElementById('alt').innerHTML = data.versions.filter(v => v.binary).map(v =>
+    `<option value="${escapeHtml(v.version)}" ${data.alt.current === '/usr/bin/php' + v.version ? 'selected' : ''}>php${escapeHtml(v.version)}</option>`).join('');
+  if (!data.versions.some(v => v.version === current)) current = data.versions.length ? data.versions[0].version : null;
+  renderTabs();
+  renderVersion();
+}
+
+function renderTabs() {
+  document.getElementById('ver-tabs').innerHTML = data.versions.map(v =>
+    `<button class="tab ${v.version === current ? 'active' : ''}" onclick="selectVer(${jsArg(v.version)})">PHP ${escapeHtml(v.version)}</button>`).join('');
+}
+
+function selectVer(v) {
+  current = v;
+  renderTabs();
+  renderVersion();
+}
+
+function renderVersion() {
+  const panel = document.getElementById('ver-panel');
+  const v = data.versions.find(x => x.version === current);
+  if (!v) { panel.innerHTML = '<div class="card muted">No se encontraron versiones en /etc/php/</div>'; return; }
+
+  const inis = v.inis.map(ini => `
+    <div class="card">
+      <h3>php.ini — ${escapeHtml(ini.sapi)} <span class="mono small muted">${escapeHtml(ini.path)}</span> ${editLink(ini.path)}</h3>
+      <form onsubmit="saveIni(event, ${jsArg(ini.sapi)})">
+        <div class="grid grid-3">
+          ${DIRECTIVES.map(k => `
+            <label class="form-row"><span class="mono">${k}</span>
+              <input class="input mono" name="${k}" value="${escapeHtml(ini.values[k] ?? '')}" placeholder="(sin definir)">
+            </label>`).join('')}
+        </div>
+        <div class="form-actions"><button class="btn btn-primary">Guardar y aplicar</button></div>
+      </form>
+    </div>`).join('');
+
+  const fpm = !v.fpm.installed ? '' : `
+    <div class="card">
+      <h3>PHP-FPM <span class="pill ${v.fpm.active ? 'ok' : 'err'}">${v.fpm.active ? 'activo' : 'inactivo'}</span>
+        <button class="btn btn-sm" onclick="restartFpm()">Reiniciar php${escapeHtml(v.version)}-fpm</button></h3>
+      <table class="lx">
+        <thead><tr><th>Pool</th><th>Archivo</th><th>listen</th><th>pm</th><th>pm.max_children</th><th></th></tr></thead>
+        <tbody>${v.fpm.pools.length ? v.fpm.pools.map(p => `
+          <tr>
+            <td class="mono">${escapeHtml(p.name)}</td>
+            <td class="mono small">${escapeHtml(p.path)}</td>
+            <td class="mono small">${escapeHtml(p.listen ?? '—')}</td>
+            <td class="mono">${escapeHtml(p.pm ?? '—')}</td>
+            <td class="mono">${escapeHtml(p['pm.max_children'] ?? '—')}</td>
+            <td>${editLink(p.path)}</td>
+          </tr>`).join('') : '<tr><td colspan="6" class="muted center">Sin pools</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+
+  panel.innerHTML = `
+    <div class="card">
+      <h3>PHP ${escapeHtml(v.version)}</h3>
+      <div>SAPIs: ${v.sapis.map(s => `<span class="pill ok">${escapeHtml(s)}</span>`).join(' ') || '<span class="muted">ninguno</span>'}
+        <span class="pill ${v.binary ? 'ok' : 'mute'}">php${escapeHtml(v.version)} ${v.binary ? 'en PATH' : 'sin binario CLI'}</span></div>
+    </div>
+    ${inis}
+    ${fpm}
+    <div class="card">
+      <h3>Módulos</h3>
+      <div id="mods" class="muted">Cargando…</div>
+    </div>
+    <div class="card">
+      <h3>Instalar extensión</h3>
+      <div class="toolbar">
+        <span class="mono">php${escapeHtml(v.version)}-</span>
+        <input id="ext" class="input mono" placeholder="mysql, gd, intl, curl, redis…">
+        <button class="btn btn-primary" id="ext-btn" onclick="installExt()">Instalar</button>
+      </div>
+    </div>`;
+  loadModules();
+}
+
+async function saveIni(ev, sapi) {
+  ev.preventDefault();
+  const ini = data.versions.find(x => x.version === current).inis.find(i => i.sapi === sapi);
+  const values = {};
+  for (const k of DIRECTIVES) {
+    const val = ev.target.elements[k].value.trim();
+    if (!val || val === (ini.values[k] ?? '')) continue;
+    if (!VALUE_RE.test(val)) { alert(`Valor inválido para ${k}`); return; }
+    values[k] = val;
+  }
+  if (!Object.keys(values).length) { alert('Sin cambios'); return; }
+  const list = Object.entries(values).map(([k, v]) => `${k} = ${v}`).join('\n');
+  if (!confirm(`¿Guardar en ${ini.path}?\n\n${list}\n\nSe creará un respaldo .matipanel.bak`)) return;
+  const d = await postJSON("{{ url_for('php.set_ini') }}", { version: current, sapi, values });
+  alert(d.ok ? 'Guardado ✓' + (d.message ? '\n' + d.message : '') : 'Error: ' + d.error);
+  loadOverview();
+}
+
+async function setAlt() {
+  const version = document.getElementById('alt').value;
+  if (!version || !confirm(`¿Usar php${version} como CLI por defecto?`)) return;
+  const d = await postJSON("{{ url_for('php.set_alternative') }}", { version });
+  if (!d.ok) alert('Error: ' + d.error);
+  loadOverview();
+}
+
+async function restartFpm() {
+  if (!confirm(`¿Reiniciar php${current}-fpm?`)) return;
+  const d = await postJSON("{{ url_for('php.restart_fpm') }}", { version: current });
+  if (!d.ok) alert('Error: ' + d.error);
+  loadOverview();
+}
+
+async function loadModules() {
+  const ver = current;
+  const d = await (await fetch(URL_MODULES + '?version=' + encodeURIComponent(ver))).json();
+  const el = document.getElementById('mods');
+  if (ver !== current || !el) return;
+  if (d.error) { el.textContent = 'Error: ' + d.error; return; }
+  el.classList.remove('muted');
+  el.innerHTML = `
+    <p class="small muted">Cargados en CLI (${d.loaded.length}): <span class="mono">${escapeHtml(d.loaded.join(', ') || '—')}</span></p>
+    <table class="lx">
+      <thead><tr><th>Módulo (mods-available)</th>${d.sapis.map(s => `<th>${escapeHtml(s)}</th>`).join('')}</tr></thead>
+      <tbody>${d.modules.map(m => `
+        <tr>
+          <td class="mono">${escapeHtml(m.name)}</td>
+          ${d.sapis.map(s => `<td><input type="checkbox" ${m.enabled[s] ? 'checked' : ''}
+            onchange="toggleMod(this, ${jsArg(m.name)}, ${jsArg(s)})"></td>`).join('')}
+        </tr>`).join('') || `<tr><td colspan="${d.sapis.length + 1}" class="muted center">Sin módulos</td></tr>`}
+      </tbody>
+    </table>`;
+}
+
+async function toggleMod(cb, module, sapi) {
+  const enable = cb.checked;
+  if (!confirm(`¿${enable ? 'Habilitar' : 'Deshabilitar'} ${module} en ${sapi} (PHP ${current})?`)) { cb.checked = !enable; return; }
+  cb.disabled = true;
+  const d = await postJSON("{{ url_for('php.toggle_module') }}", { version: current, sapi, module, enable });
+  cb.disabled = false;
+  if (!d.ok) { cb.checked = !enable; alert('Error: ' + d.error); return; }
+  if (d.message) showOutput('Módulo ' + module, d.message);
+  loadModules();
+}
+
+async function installExt() {
+  const name = document.getElementById('ext').value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9+.-]{0,63}$/.test(name)) { alert('Nombre de extensión inválido'); return; }
+  const pkg = `php${current}-${name}`;
+  if (!confirm(`¿Instalar ${pkg}?`)) return;
+  const btn = document.getElementById('ext-btn');
+  btn.disabled = true;
+  showOutput('Instalando ' + pkg + '…', 'Puede tardar unos minutos.');
+  const d = await postJSON("{{ url_for('php.install_ext') }}", { version: current, name });
+  btn.disabled = false;
+  showOutput(d.ok ? pkg + ': instalado ✓' : 'Error: ' + (d.error || ''), d.output || '');
+  if (d.ok) loadModules();
+}
+
+loadOverview();
+</script>
+{% endif %}
+{% endblock %}

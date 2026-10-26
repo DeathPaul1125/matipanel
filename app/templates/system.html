@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Sistema{% endblock %}
+{% block heading %}Sistema{% endblock %}
+
+{% block content %}
+<div class="grid grid-4">
+  <div class="stat"><div class="stat-lbl">Hostname</div><div class="stat-val mono" id="s-host" style="font-size:16px;">—</div><div class="stat-sub" id="s-os">—</div></div>
+  <div class="stat"><div class="stat-lbl">Kernel</div><div class="stat-val mono" id="s-kernel" style="font-size:14px;">—</div><div class="stat-sub" id="s-uptime">—</div></div>
+  <div class="stat"><div class="stat-lbl">CPU</div><div class="stat-val" id="s-cpus">—</div><div class="stat-sub" id="s-cpu">—</div></div>
+  <div class="stat"><div class="stat-lbl">Memoria</div><div class="stat-val" id="s-mem">—</div><div class="stat-sub" id="s-swap">—</div></div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-tab="general">General</button>
+  <button class="tab" data-tab="sessions">Sesiones</button>
+  <button class="tab" data-tab="hardware">Hardware</button>
+  <button class="tab" data-tab="configs">Configuración</button>
+</div>
+
+<div id="tab-general" class="tab-pane">
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Hostname</h3>
+      <div class="toolbar">
+        <input type="text" id="hostname" class="input mono" maxlength="253">
+        <button class="btn btn-primary" onclick="saveHostname()">Cambiar</button>
+      </div>
+      <p class="muted small">Usa <code>hostnamectl</code> y actualiza la línea <code>127.0.1.1</code> de /etc/hosts (copia en /etc/hosts.matipanel.bak).</p>
+    </div>
+    <div class="card">
+      <h3>Fecha y hora</h3>
+      <p>Hora local: <span class="mono" id="t-local">—</span></p>
+      <p>NTP: <span id="t-ntp">—</span> &nbsp; <button class="btn btn-sm" id="t-ntp-btn" onclick="toggleNtp()">—</button></p>
+      <div class="toolbar">
+        <input type="text" id="tz" class="input mono" list="tz-list" placeholder="America/Guatemala">
+        <datalist id="tz-list"></datalist>
+        <button class="btn btn-primary" onclick="saveTz()">Cambiar zona</button>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Encendido</h3>
+    <p class="muted small">Se te pedirá escribir el hostname para confirmar. La acción se ejecuta 3 segundos después.</p>
+    <button class="btn btn-danger" onclick="power('reboot')">Reiniciar servidor</button>
+    <button class="btn btn-danger" onclick="power('poweroff')">Apagar servidor</button>
+  </div>
+</div>
+
+<div id="tab-sessions" class="tab-pane" style="display:none;">
+  <div class="toolbar"><button class="btn" onclick="loadSessions()">Refrescar</button></div>
+  <div class="card" style="margin-bottom:12px;"><h3>Usuarios conectados (who)</h3><pre class="terminal output" id="who">Cargando…</pre></div>
+  <div class="card" style="margin-bottom:12px;"><h3>Últimos accesos (last)</h3><pre class="terminal output" id="last">Cargando…</pre></div>
+  <div class="card"><h3>Accesos fallidos (lastb)</h3><pre class="terminal output" id="lastb">Cargando…</pre></div>
+</div>
+
+<div id="tab-hardware" class="tab-pane" style="display:none;">
+  <div class="card" style="margin-bottom:12px;">
+    <h3>Dispositivos de bloque</h3>
+    <table class="lx" id="disk-table">
+      <thead><tr><th>Nombre</th><th>Tamaño</th><th>Tipo</th><th>FS</th><th>Montaje</th><th>Modelo</th></tr></thead>
+      <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h3>/etc/fstab <a class="btn btn-sm" href="{{ url_for('files.index') }}?edit=%2Fetc%2Ffstab">editar</a></h3>
+    <pre class="terminal output" id="fstab"></pre>
+  </div>
+</div>
+
+<div id="tab-configs" class="tab-pane" style="display:none;">
+  <div class="grid grid-3" id="configs"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const EDIT_URL = "{{ url_for('files.index') }}?edit=";
+let info = {};
+
+document.querySelectorAll('.tabs .tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tabs .tab').forEach(x => x.classList.toggle('active', x === t));
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = p.id === 'tab-' + t.dataset.tab ? '' : 'none');
+  if (t.dataset.tab === 'sessions') loadSessions();
+}));
+
+function fmtUptime(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return `arriba ${d}d ${h}h ${m}m`;
+}
+
+async function loadInfo() {
+  const r = await fetch("{{ url_for('system.info') }}");
+  info = await r.json();
+  const set = (id, v) => document.getElementById(id).textContent = v;
+  set('s-host', info.hostname); set('s-os', info.os);
+  set('s-kernel', info.kernel); set('s-uptime', info.arch + ' · ' + fmtUptime(info.uptime));
+  set('s-cpus', info.cpu_count + ' núcleos'); set('s-cpu', info.cpu_model);
+  set('s-mem', `${info.mem_used} / ${info.mem_total}`);
+  set('s-swap', `Swap: ${info.swap_used} / ${info.swap_total}`);
+  document.getElementById('hostname').value = info.hostname;
+  set('fstab', info.fstab || '(vacío o inexistente)');
+
+  const t = info.time;
+  if (t.error) { set('t-local', t.error); }
+  else {
+    set('t-local', t.local_time);
+    document.getElementById('tz').value = t.timezone;
+    document.getElementById('t-ntp').innerHTML = t.ntp
+      ? '<span class="pill ok">activo</span> ' + (t.synced ? '<span class="pill ok">sincronizado</span>' : '<span class="pill warn">sin sincronizar</span>')
+      : '<span class="pill mute">inactivo</span>';
+    const b = document.getElementById('t-ntp-btn');
+    b.textContent = t.ntp ? 'Desactivar NTP' : 'Activar NTP';
+    b.disabled = !t.can_ntp && !t.ntp;
+  }
+
+  const rows = [];
+  (function walk(list, depth) {
+    for (const d of list || []) { rows.push([d, depth]); walk(d.children, depth + 1); }
+  })(info.disks, 0);
+  document.querySelector('#disk-table tbody').innerHTML = rows.length ? rows.map(([d, depth]) => `
+    <tr>
+      <td class="mono">${'&nbsp;&nbsp;'.repeat(depth)}${depth ? '└ ' : ''}${escapeHtml(d.name)}</td>
+      <td>${escapeHtml(d.size)}</td><td>${escapeHtml(d.type)}</td><td>${escapeHtml(d.fstype || '')}</td>
+      <td class="mono">${escapeHtml(d.mountpoint || '')}</td><td>${escapeHtml(d.model || '')}</td>
+    </tr>`).join('') : '<tr><td colspan="6" class="muted center">' + escapeHtml(info.lsblk_error || 'Sin datos') + '</td></tr>';
+
+  document.getElementById('configs').innerHTML = info.configs.map(c => `
+    <div class="card">
+      <h3 class="mono" style="font-size:14px;">${escapeHtml(c.path)}</h3>
+      <p class="muted small">${escapeHtml(c.desc)}</p>
+      ${c.exists ? `<a class="btn btn-sm" href="${EDIT_URL + encodeURIComponent(c.path)}">editar</a>` : '<span class="pill mute">no existe</span>'}
+      ${c.path === '/etc/ssh/sshd_config' && c.exists ? '<button class="btn btn-sm" onclick="sshRestart()">Probar y reiniciar SSH</button>' : ''}
+    </div>`).join('');
+}
+
+async function loadTimezones() {
+  const r = await fetch("{{ url_for('system.timezones') }}");
+  const d = await r.json();
+  if (d.timezones) document.getElementById('tz-list').innerHTML = d.timezones.map(z => `<option value="${escapeHtml(z)}">`).join('');
+}
+
+async function loadSessions() {
+  const r = await fetch("{{ url_for('system.sessions') }}");
+  const d = await r.json();
+  for (const k of ['who', 'last', 'lastb']) document.getElementById(k).textContent = d[k];
+}
+
+function report(d, okMsg) {
+  if (!d.ok) { alert('Error: ' + d.error); return false; }
+  if (d.warning) alert(d.warning); else if (okMsg) alert(okMsg);
+  return true;
+}
+
+async function saveHostname() {
+  const hostname = document.getElementById('hostname').value.trim();
+  if (!confirm(`¿Cambiar el hostname a "${hostname}"?`)) return;
+  if (report(await postJSON("{{ url_for('system.set_hostname') }}", { hostname }), 'Hostname actualizado')) loadInfo();
+}
+
+async function saveTz() {
+  const timezone = document.getElementById('tz').value.trim();
+  if (!confirm(`¿Cambiar la zona horaria a ${timezone}?`)) return;
+  if (report(await postJSON("{{ url_for('system.set_timezone') }}", { timezone }))) loadInfo();
+}
+
+async function toggleNtp() {
+  const enabled = !info.time.ntp;
+  if (!confirm(enabled ? '¿Activar sincronización NTP?' : '¿Desactivar sincronización NTP?')) return;
+  if (report(await postJSON("{{ url_for('system.set_ntp') }}", { enabled }))) loadInfo();
+}
+
+async function power(action) {
+  const label = action === 'reboot' ? 'REINICIAR' : 'APAGAR';
+  if (!confirm(`¿Seguro que deseas ${label} el servidor?`)) return;
+  const typed = prompt(`Para confirmar, escribe el hostname del servidor (${info.hostname}):`);
+  if (typed === null) return;
+  if (typed !== info.hostname) { alert('El hostname no coincide. Acción cancelada.'); return; }
+  report(await postJSON("{{ url_for('system.power') }}", { action, confirm: typed }),
+    action === 'reboot' ? 'El servidor se reiniciará en unos segundos.' : 'El servidor se apagará en unos segundos.');
+}
+
+async function sshRestart() {
+  if (!confirm('Se validará sshd_config con "sshd -t" y, si es correcto, se reiniciará SSH. ¿Continuar?')) return;
+  report(await postJSON("{{ url_for('system.ssh_restart') }}", {}), 'Configuración válida. SSH reiniciado.');
+}
+
+loadInfo();
+loadTimezones();
+</script>
+{% endblock %}

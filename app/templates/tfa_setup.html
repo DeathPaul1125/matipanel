@@ -7,7 +7,7 @@
   <h3>Paso 1 · Escanea el QR con tu app</h3>
   <p class="muted small">Google Authenticator, Authy, FreeOTP, Aegis, 1Password, etc.</p>
 
-  <div id="qr-container" style="margin:16px 0; padding:16px; background:#fff; border-radius:8px; display:inline-block;"></div>
+  <div style="margin:16px 0; padding:16px; background:#fff; border-radius:8px; display:inline-block; width:232px;">{{ qr_svg|safe }}</div>
 
   <details style="margin-top:8px;">
     <summary class="muted small" style="cursor:pointer;">¿No puedes escanear? Mostrar secret manualmente</summary>
@@ -28,14 +28,4 @@
     <a href="{{ url_for('auth.security') }}" class="btn">Cancelar</a>
   </form>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script>
-new QRCode(document.getElementById('qr-container'), {
-  text: {{ otpauth_uri|tojson }},
-  width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M
-});
-</script>
 {% endblock %}

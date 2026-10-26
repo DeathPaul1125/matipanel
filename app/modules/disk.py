@@ -2,16 +2,9 @@
 import psutil
 from flask import Blueprint, render_template, jsonify
 from flask_login import login_required
+from ..util import bytes_to_human as _bytes_to_human
 
 disk_bp = Blueprint("disk", __name__)
-
-
-def _bytes_to_human(n):
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
 
 
 @disk_bp.route("/")

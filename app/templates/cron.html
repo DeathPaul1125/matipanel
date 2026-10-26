@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Tareas programadas{% endblock %}
+{% block heading %}Tareas programadas (cron){% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <button class="tab active" data-tab="user" onclick="showTab('user')">Crontabs de usuario</button>
+  <button class="tab" data-tab="system" onclick="showTab('system')">Sistema (solo lectura)</button>
+</div>
+
+<div id="tab-user">
+  <div class="toolbar">
+    <select id="user" class="input" onchange="loadCrontab()"></select>
+    <button class="btn btn-primary" onclick="openJob(null)">+ Nueva tarea</button>
+    <button class="btn" onclick="loadCrontab()">↻ Recargar</button>
+  </div>
+  <div class="card" style="margin-bottom:12px;">
+    <table class="lx" id="jobs-table">
+      <thead><tr><th>Estado</th><th>Programación</th><th>Comando</th><th>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card" id="env-card" style="display:none;">
+    <h3>Variables de entorno</h3>
+    <pre class="terminal" id="env-lines"></pre>
+  </div>
+</div>
+
+<div id="tab-system" style="display:none;">
+  <div id="system-files"><div class="card muted center">Cargando…</div></div>
+</div>
+
+<div class="modal" id="m-job">
+  <div class="modal-box">
+    <h3 id="job-title">Nueva tarea</h3>
+    <label class="form-row"><span>Frecuencia</span>
+      <select class="input" id="j-preset" onchange="togglePreset()">
+        <option value="">Personalizada</option>
+        <option value="@reboot">Al arrancar (@reboot)</option>
+        <option value="@hourly">Cada hora (@hourly)</option>
+        <option value="@daily">Diaria (@daily)</option>
+        <option value="@midnight">Medianoche (@midnight)</option>
+        <option value="@weekly">Semanal (@weekly)</option>
+        <option value="@monthly">Mensual (@monthly)</option>
+        <option value="@yearly">Anual (@yearly)</option>
+        <option value="@annually">Anual (@annually)</option>
+      </select>
+    </label>
+    <div id="j-fields" class="grid" style="grid-template-columns:repeat(5,1fr); gap:8px;">
+      <label class="form-row"><span>Minuto</span><input class="input mono" id="j-minute" value="*"></label>
+      <label class="form-row"><span>Hora</span><input class="input mono" id="j-hour" value="*"></label>
+      <label class="form-row"><span>Día mes</span><input class="input mono" id="j-day" value="*"></label>
+      <label class="form-row"><span>Mes</span><input class="input mono" id="j-month" value="*"></label>
+      <label class="form-row"><span>Día semana</span><input class="input mono" id="j-weekday" value="*"></label>
+    </div>
+    <p class="small muted" id="j-help">Ejemplos: <span class="mono">*/5</span> cada 5, <span class="mono">1-5</span> rango, <span class="mono">1,15</span> lista, <span class="mono">mon-fri</span>.</p>
+    <label class="form-row"><span>Comando</span><input class="input mono" id="j-command" placeholder="/usr/local/bin/backup.sh >/dev/null 2>&1"></label>
+    <p class="small muted">Nota: en crontab el carácter <span class="mono">%</span> equivale a salto de línea; escríbelo como <span class="mono">\%</span>.</p>
+    <label class="small"><input type="checkbox" id="j-enabled" checked> Activa</label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-job')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveJob()">Guardar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = "{{ url_for('cron.index') }}api/";
+const FIELDS = ['minute', 'hour', 'day', 'month', 'weekday'];
+let entries = [], editing = null, systemLoaded = false;
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(m.id); }));
+const curUser = () => document.getElementById('user').value;
+
+function showTab(t) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  document.getElementById('tab-user').style.display = t === 'user' ? '' : 'none';
+  document.getElementById('tab-system').style.display = t === 'system' ? '' : 'none';
+  if (t === 'system' && !systemLoaded) loadSystem();
+}
+
+async function loadUsers() {
+  const r = await fetch(API + 'users');
+  const d = await r.json();
+  document.getElementById('user').innerHTML = d.users.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+  loadCrontab();
+}
+
+async function loadCrontab() {
+  const tbody = document.querySelector('#jobs-table tbody');
+  const r = await fetch(API + 'crontab/' + encodeURIComponent(curUser()));
+  const d = await r.json();
+  if (d.error) { tbody.innerHTML = '<tr><td colspan="4" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
+  entries = d.entries;
+  const jobs = entries.filter(e => e.type === 'job');
+  const env = entries.filter(e => e.type === 'env');
+  document.getElementById('env-card').style.display = env.length ? '' : 'none';
+  document.getElementById('env-lines').textContent = env.map(e => e.raw).join('\n');
+  if (!jobs.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin tareas para este usuario</td></tr>'; return; }
+  tbody.innerHTML = jobs.map(j => `
+    <tr>
+      <td><span class="pill ${j.enabled ? 'ok' : 'mute'}">${j.enabled ? 'activa' : 'desactivada'}</span></td>
+      <td class="mono">${escapeHtml(j.schedule)}</td>
+      <td class="mono small">${escapeHtml(j.command)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm" onclick="openJob(${jsArg(j.i)})">Editar</button>
+        <button class="btn btn-sm" onclick="jobAction('toggle', ${jsArg(j.i)})">${j.enabled ? 'Desactivar' : 'Activar'}</button>
+        <button class="btn btn-sm btn-danger" onclick="jobAction('delete', ${jsArg(j.i)})">Eliminar</button>
+      </td>
+    </tr>`).join('');
+}
+
+function togglePreset() {
+  const custom = !document.getElementById('j-preset').value;
+  document.getElementById('j-fields').style.display = custom ? '' : 'none';
+  document.getElementById('j-help').style.display = custom ? '' : 'none';
+}
+
+function openJob(i) {
+  editing = i === null ? null : entries.find(e => e.i === i);
+  document.getElementById('job-title').textContent = editing ? 'Editar tarea' : 'Nueva tarea (' + curUser() + ')';
+  const sched = editing ? editing.schedule : '';
+  const preset = sched.startsWith('@') ? sched.toLowerCase() : '';
+  const parts = !editing || preset ? ['*', '*', '*', '*', '*'] : sched.split(' ');
+  document.getElementById('j-preset').value = preset;
+  FIELDS.forEach((f, k) => document.getElementById('j-' + f).value = parts[k]);
+  document.getElementById('j-command').value = editing ? editing.command : '';
+  document.getElementById('j-enabled').checked = editing ? editing.enabled : true;
+  togglePreset();
+  openModal('m-job');
+}
+
+async function saveJob() {
+  const data = {
+    user: curUser(),
+    preset: document.getElementById('j-preset').value,
+    command: document.getElementById('j-command').value,
+    enabled: document.getElementById('j-enabled').checked,
+    index: editing ? editing.i : null,
+    raw: editing ? editing.raw : null,
+  };
+  FIELDS.forEach(f => data[f] = document.getElementById('j-' + f).value);
+  const d = await postJSON(API + 'job/save', data);
+  if (!d.ok) { alert('Error: ' + (d.error || 'desconocido')); return; }
+  closeModal('m-job');
+  loadCrontab();
+}
+
+async function jobAction(act, i) {
+  const e = entries.find(x => x.i === i);
+  if (act === 'delete' && !confirm('¿Eliminar la tarea?\n\n' + e.schedule + ' ' + e.command)) return;
+  const d = await postJSON(API + 'job/' + act, {user: curUser(), index: e.i, raw: e.raw});
+  if (!d.ok) alert('Error: ' + (d.error || 'desconocido'));
+  loadCrontab();
+}
+
+async function loadSystem() {
+  const box = document.getElementById('system-files');
+  const r = await fetch(API + 'system');
+  const d = await r.json();
+  systemLoaded = true;
+  if (!d.files.length) { box.innerHTML = '<div class="card muted center">Sin crontabs del sistema</div>'; return; }
+  box.innerHTML = d.files.map(f => `
+    <div class="card" style="margin-bottom:12px;">
+      <h3 class="mono">${escapeHtml(f.path)}</h3>
+      <pre class="terminal output">${escapeHtml(f.content)}</pre>
+    </div>`).join('');
+}
+
+loadUsers();
+</script>
+{% endblock %}

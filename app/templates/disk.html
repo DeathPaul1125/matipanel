@@ -27,11 +27,11 @@ async function load() {
     const cls = p.percent >= 85 ? 'err' : p.percent >= 65 ? 'warn' : '';
     return `
       <tr>
-        <td class="mono">${p.device}</td>
-        <td class="mono">${p.mountpoint}</td>
-        <td>${p.fstype}</td>
-        <td>${p.total_h}</td>
-        <td>${p.used_h}</td>
+        <td class="mono">${escapeHtml(p.device)}</td>
+        <td class="mono">${escapeHtml(p.mountpoint)}</td>
+        <td>${escapeHtml(p.fstype)}</td>
+        <td>${escapeHtml(p.total_h)}</td>
+        <td>${escapeHtml(p.used_h)}</td>
         <td>
           <div class="bar ${cls}"><span style="width:${p.percent}%"></span></div>
           <span class="muted small">${p.percent}%</span>
