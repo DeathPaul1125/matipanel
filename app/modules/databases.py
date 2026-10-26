@@ -423,9 +423,18 @@ def query(engine):
         return _bad("Consulta vacía o demasiado grande (máx. 1 MB)")
     if db and not _valid_db(db):
         return _bad("Base de datos inválida")
+    # Mismo validador que el Explorador BD: rechaza \! y otros comandos del cliente (system, source…),
+    # que ejecutarían en el shell del servidor.
+    from .dbexplorer import split_sql
+    _, split_err = split_sql(sql, engine)
+    if split_err:
+        return _bad(split_err)
     # PG: el servidor también cancela la sentencia (matar al cliente no detiene un pg_sleep)
     env = {**os.environ, "PGOPTIONS": f"-c statement_timeout={QUERY_TIMEOUT}s"} if engine == "pg" else None
-    code, out, err, truncated = _run_capped(_cmd(engine, db, names=True), sql, env)
+    cmd = _cmd(engine, db, names=True)
+    if engine == "mysql":
+        cmd[1:1] = _my_sandbox_opt()
+    code, out, err, truncated = _run_capped(cmd, sql, env)
 
     lines = out.splitlines()
     if truncated and lines:

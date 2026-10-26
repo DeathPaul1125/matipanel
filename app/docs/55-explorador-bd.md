@@ -1,6 +1,6 @@
 # Explorador de bases de datos
 
-El explorador te deja ver y editar el contenido de tus bases de MariaDB/MySQL y PostgreSQL desde el navegador, al estilo de phpMyAdmin o Adminer: navegar tablas, filtrar y ordenar datos, editar filas, cambiar la estructura, ejecutar SQL, exportar e importar. Lo encuentras en **Menú → Servidores → Explorador BD**. También puedes entrar desde [Bases de datos](24-bases-de-datos.md) con el botón **Explorar** de cada base.
+El explorador te deja ver y editar el contenido de tus bases de MariaDB/MySQL y PostgreSQL desde el navegador, al estilo de phpMyAdmin o Adminer: navegar tablas, filtrar y ordenar datos, editar filas, cambiar la estructura, ejecutar SQL, exportar e importar. Lo encuentras en **Menú → Bases de datos → Explorador BD**. También puedes entrar desde [Bases de datos](24-bases-de-datos.md) con el botón **Explorar** de cada base.
 
 > **Importante:** El explorador trabaja como administrador del motor (`root` en MariaDB/MySQL, `postgres` en PostgreSQL). Puedes leer y cambiar cualquier tabla. Antes de una operación destructiva, haz un respaldo con **Exportar** o con el botón **Backup** de [Bases de datos](24-bases-de-datos.md).
 

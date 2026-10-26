@@ -97,8 +97,10 @@ function download(name, text, mime) {
 }
 
 function toCSV(cols, rows) {
-  const f = v => v === null || v === undefined ? '' :
-    (v === '' || v !== v.trim() || /[",\r\n]/.test(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  // Celdas que una hoja de cálculo ejecutaría como fórmula (=, +, -, @…) salvo números: se antepone '
+  const safe = v => /^[=+\-@\t\r]/.test(v) && !/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(v) ? "'" + v : v;
+  const f = v => v === null || v === undefined ? '' : (v = safe(String(v)),
+    (v === '' || v !== v.trim() || /[",\r\n]/.test(v)) ? '"' + v.replace(/"/g, '""') + '"' : v);
   return [cols, ...rows].map(r => r.map(f).join(',')).join('\r\n') + '\r\n';
 }
 

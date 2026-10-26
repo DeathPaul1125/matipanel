@@ -1,0 +1,935 @@
+{% extends "base.html" %}
+{% block title %}Despliegues{% endblock %}
+{% block heading %}Despliegues{% endblock %}
+
+{% block content %}
+{% if app_name %}
+<p class="small dp-back"><a href="{{ url_for('deploy.index') }}">← Todas las aplicaciones</a></p>
+{% endif %}
+
+<!-- Requisitos -->
+<div class="card" id="req-card" hidden>
+  <div class="card-head">
+    <h3>Requisitos del servidor</h3>
+    <span class="dp-req-actions">
+      <button class="btn btn-sm" onclick="loadReq()">Volver a comprobar</button>
+      <button class="btn btn-sm btn-primary" id="req-all" onclick="installReq('all')" hidden>Instalar lo que falta</button>
+    </span>
+  </div>
+  <div class="health-chips" id="req-chips"></div>
+  <div class="table-wrap" id="req-table-wrap" hidden>
+    <table class="lx" id="req-table">
+      <thead><tr><th>Componente</th><th>Estado</th><th>Detalle</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p class="small muted" id="req-note" hidden>La instalación usa los paquetes de Debian (<span class="mono">docker.io</span>,
+    <span class="mono">docker-compose</span>, <span class="mono">docker-buildx</span>, <span class="mono">git</span>,
+    <span class="mono">nginx</span>) y puede tardar varios minutos.</p>
+</div>
+
+{% if not app_name %}
+<!-- ── Lista ── -->
+<div class="card">
+  <div class="toolbar">
+    <h3 style="margin:0;">Aplicaciones</h3>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="loadApps()">Refrescar</button>
+    <button class="btn btn-sm btn-primary" onclick="openWizard()">+ Nueva aplicación</button>
+  </div>
+  <div id="apps-empty" class="dp-empty" hidden>
+    <h3>Publica tus aplicaciones Laravel desde GitHub</h3>
+    <p class="muted">Conecta un repositorio y el panel se encarga del resto: descarga el código, construye una imagen
+      Docker (PHP + Nginx, Composer y los assets con npm), ejecuta las migraciones y la publica en un puerto propio
+      o con un nombre interno como <span class="mono">miapp.apps.empresa.local</span>. Cada nuevo commit se despliega
+      solo y <b>sin cortes</b>: la versión nueva arranca al lado de la actual y Nginx cambia cuando ya responde.
+      Si algo falla, la versión anterior sigue en línea y puedes revertir con un clic.</p>
+    <button class="btn btn-primary" onclick="openWizard()">+ Nueva aplicación</button>
+  </div>
+  <div class="table-wrap" id="apps-wrap">
+    <table class="lx" id="apps-table">
+      <thead><tr><th>Aplicación</th><th>Estado</th><th>Dirección</th><th>Último despliegue</th><th>Commit</th><th class="right">Acciones</th></tr></thead>
+      <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Asistente ── -->
+<div class="modal" id="wiz">
+  <div class="modal-box dp-wiz">
+    <h3>Nueva aplicación</h3>
+    <div class="dp-steps"><span data-s="1">1 · Repositorio</span><span data-s="2">2 · Acceso</span><span data-s="3">3 · Opciones</span></div>
+
+    <div data-step="1">
+      <label class="form-row"><span>Nombre</span>
+        <input class="input mono" id="wz-name" placeholder="miapp" maxlength="31" autocomplete="off">
+        <span class="dlg-help">Minúsculas, números y guiones; empieza con letra. No se puede cambiar después.</span></label>
+      <label class="form-row"><span>Repositorio de GitHub</span>
+        <input class="input mono" id="wz-repo" placeholder="git@github.com:empresa/miapp.git" autocomplete="off">
+        <span class="dlg-help">Público: <span class="mono">https://github.com/dueño/repo</span> ·
+          Privado: <span class="mono">git@github.com:dueño/repo.git</span> (el panel genera una clave de despliegue).</span></label>
+    </div>
+
+    <div data-step="2" hidden>
+      <div id="wz-ssh" hidden>
+        <p class="small">Agrega esta <b>clave de despliegue</b> en GitHub: en el repositorio, <b>Settings → Deploy keys →
+          Add deploy key</b>. Ponle un título (por ejemplo <span class="mono">MatiPanel</span>), pega la clave y
+          <b>no</b> marques <b>Allow write access</b>.</p>
+        <textarea class="input mono dp-key" id="wz-key" rows="3" readonly></textarea>
+        <div class="toolbar dp-mt"><button class="btn btn-sm" data-copy="#wz-key">Copiar clave</button></div>
+      </div>
+      <p class="small" id="wz-https" hidden>Repositorio público por HTTPS: no hace falta clave. Prueba el acceso para
+        confirmar que el panel lo puede leer.</p>
+      <div class="toolbar"><button class="btn btn-sm btn-primary" id="wz-test" onclick="wizTest()">Probar acceso</button>
+        <span class="small" id="wz-access"></span></div>
+    </div>
+
+    <div data-step="3" hidden>
+      <div class="dp-form2">
+        <label class="form-row"><span>Rama</span>
+          <input class="input mono" id="wz-branch" value="main" list="wz-branches" autocomplete="off">
+          <datalist id="wz-branches"></datalist></label>
+        <label class="form-row"><span>Versión de PHP</span>
+          <select class="input" id="wz-php">{% for v in php_versions %}<option {% if v == '8.3' %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+      </div>
+      <label class="form-row"><span>Nombre interno (opcional)</span>
+        <input class="input mono" id="wz-host" placeholder="miapp.apps.empresa.local" autocomplete="off">
+        <span class="dlg-help">Necesita un registro DNS que apunte a este servidor (por ejemplo el comodín <span class="mono">*.apps.empresa.local</span>). El puerto propio se asigna solo.</span></label>
+      <label class="form-row"><span>Base de datos</span>
+        <select class="input" id="wz-db"><option value="none">Ninguna (uso una externa)</option><option value="mariadb">MariaDB 11</option><option value="postgres">PostgreSQL 16</option></select>
+        <span class="dlg-help">Se crea en un contenedor propio y sus credenciales se agregan al .env (DB_*).</span></label>
+      <div class="dp-checks">
+        <label class="dlg-check"><input type="checkbox" id="wz-redis"> Redis (caché, sesiones y colas)</label>
+        <label class="dlg-check"><input type="checkbox" id="wz-worker"> Worker de colas (queue:work)</label>
+        <label class="dlg-check"><input type="checkbox" id="wz-scheduler"> Programador de tareas (schedule:work)</label>
+        <label class="dlg-check"><input type="checkbox" id="wz-auto" checked> Desplegar solo con cada push a la rama</label>
+        <label class="dlg-check"><input type="checkbox" id="wz-now" checked> Desplegar al terminar</label>
+      </div>
+    </div>
+
+    <div class="dlg-error" id="wz-error" hidden></div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeWizard()">Cancelar</button>
+      <button class="btn" id="wz-back" onclick="wizBack()" hidden>Atrás</button>
+      <button class="btn btn-primary" id="wz-next" onclick="wizNext()">Siguiente</button>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<!-- ── Detalle ── -->
+<section class="health" id="app-head" style="margin-bottom:12px;">
+  <span class="led lg mute" id="app-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="app-title">{{ app_name }}</h1>
+    <div class="health-sub" id="app-sub">Cargando…</div>
+  </div>
+  <div class="health-chips">
+    <button class="btn btn-sm btn-primary" onclick="deployNow()">Desplegar ahora</button>
+    <button class="btn btn-sm" onclick="appAction('restart')">Reiniciar</button>
+    <button class="btn btn-sm" onclick="appAction('start')">Iniciar</button>
+    <button class="btn btn-sm btn-danger" onclick="appAction('stop')">Detener</button>
+  </div>
+</section>
+
+<div class="tabs" id="dp-tabs">
+  <button class="tab active" data-tab="summary">Resumen</button>
+  <button class="tab" data-tab="deploys">Despliegues</button>
+  <button class="tab" data-tab="env">Entorno</button>
+  <button class="tab" data-tab="logs">Logs</button>
+  <button class="tab" data-tab="artisan">Artisan</button>
+  <button class="tab" data-tab="config">Configuración</button>
+  <button class="tab" data-tab="delete">Eliminar</button>
+</div>
+
+<!-- Resumen -->
+<div data-panel="summary">
+  <div class="grid grid-2">
+    <div class="card"><h3>Aplicación</h3><dl class="kv dp-kv1" id="sum-kv"></dl></div>
+    <div class="card">
+      <div class="card-head"><h3>Contenedores</h3><button class="btn btn-sm" onclick="loadContainers()">Refrescar</button></div>
+      <div class="table-wrap">
+        <table class="lx" id="ct-table">
+          <thead><tr><th>Servicio</th><th>Estado</th><th>Detalle</th></tr></thead>
+          <tbody><tr><td colspan="3" class="muted center">Cargando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Despliegues -->
+<div data-panel="deploys" hidden>
+  <div class="card">
+    <div class="card-head"><h3>Historial</h3><span class="small muted">Últimos 50 despliegues · se conservan las imágenes de los últimos 5 exitosos para revertir</span></div>
+    <div class="table-wrap">
+      <table class="lx" id="hist-table">
+        <thead><tr><th>Estado</th><th>Inicio</th><th>Duración</th><th>Commit</th><th>Origen</th><th class="right">Acciones</th></tr></thead>
+        <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card" id="log-card" hidden>
+    <div class="toolbar">
+      <h3 style="margin:0;" id="log-title">Log</h3>
+      <span id="log-status"></span>
+      <span style="flex:1"></span>
+      <label class="small muted"><input type="checkbox" id="log-follow" checked> Seguir</label>
+      <button class="btn btn-sm btn-danger" id="log-cancel" hidden>Cancelar despliegue</button>
+      <button class="btn btn-sm" onclick="closeLog()">Cerrar</button>
+    </div>
+    <pre class="terminal output dp-log" id="log-pre"></pre>
+  </div>
+</div>
+
+<!-- Entorno -->
+<div data-panel="env" hidden>
+  <div class="card">
+    <div class="toolbar">
+      <div class="seg" id="env-mode"><button class="active" data-mode="table">Tabla</button><button data-mode="text">Texto</button></div>
+      <label class="small"><input type="checkbox" id="env-show"> Mostrar valores</label>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" id="env-add" onclick="envAddRow()">+ Variable</button>
+      <button class="btn btn-sm" onclick="loadEnv()">Descartar cambios</button>
+      <button class="btn btn-sm btn-primary" onclick="saveEnv()">Guardar</button>
+    </div>
+    <p class="small muted">Es el <span class="mono">.env</span> de la aplicación. No se copia en la imagen: se entrega a los
+      contenedores al arrancar, así que los cambios se aplican recreando los contenedores (sin compilar ni cortar el servicio).
+      Las variables <span class="mono">DB_*</span> y <span class="mono">REDIS_*</span> las completa el panel cuando activas esos servicios.
+      El modo tabla no conserva los comentarios; usa el modo texto si los necesitas.</p>
+    <div class="dlg-error" id="env-errors" hidden></div>
+    <div class="table-wrap" id="env-table-wrap">
+      <table class="lx dp-env">
+        <thead><tr><th style="width:32%">Variable</th><th>Valor</th><th></th></tr></thead>
+        <tbody id="env-body"></tbody>
+      </table>
+    </div>
+    <textarea class="input dp-envtext" id="env-text" spellcheck="false" hidden></textarea>
+  </div>
+</div>
+
+<!-- Logs -->
+<div data-panel="logs" hidden>
+  <div class="card">
+    <div class="toolbar">
+      <select class="input dp-narrow" id="lg-svc" onchange="loadLogs()"></select>
+      <select class="input dp-narrow" id="lg-tail" onchange="loadLogs()"><option>100</option><option selected>300</option><option>1000</option></select>
+      <span class="small muted">últimas líneas de <span class="mono">docker compose logs</span></span>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="loadLogs()">Refrescar</button>
+    </div>
+    <pre class="terminal output dp-log" id="lg-pre">Elige un servicio.</pre>
+  </div>
+</div>
+
+<!-- Artisan -->
+<div data-panel="artisan" hidden>
+  <div class="card">
+    <div class="toolbar">
+      <select class="input dp-narrow" id="ar-common"><option value="">Comandos frecuentes…</option></select>
+      <span class="mono small">php artisan</span>
+      <input class="input mono" id="ar-cmd" placeholder="migrate:status" autocomplete="off">
+      <button class="btn btn-sm btn-primary" id="ar-run" onclick="runArtisan()">Ejecutar</button>
+    </div>
+    <p class="small muted">Se ejecuta dentro del contenedor que está en línea. No se permiten comandos interactivos
+      (tinker, serve, queue:work…). Los destructivos (db:wipe, migrate:fresh…) piden confirmación.</p>
+    <pre class="terminal output dp-log" id="ar-out" hidden></pre>
+  </div>
+</div>
+
+<!-- Configuración -->
+<div data-panel="config" hidden>
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Código y publicación</h3>
+      <label class="form-row"><span>Repositorio de GitHub</span><input class="input mono" id="cf-repo" autocomplete="off"></label>
+      <div class="dp-form2">
+        <label class="form-row"><span>Rama</span><input class="input mono" id="cf-branch" autocomplete="off"></label>
+        <label class="form-row"><span>Versión de PHP</span>
+          <select class="input" id="cf-php">{% for v in php_versions %}<option>{{ v }}</option>{% endfor %}</select></label>
+        <label class="form-row"><span>Puerto público</span><input class="input mono" id="cf-port" type="number" min="1024" max="19999"></label>
+        <label class="form-row"><span>Puerto interno del contenedor</span><input class="input mono" id="cf-cport" type="number" min="1" max="65535">
+          <span class="dlg-help">8080 con el Dockerfile generado. Cámbialo solo si tu Dockerfile escucha en otro.</span></label>
+      </div>
+      <label class="form-row"><span>Nombre interno (opcional)</span><input class="input mono" id="cf-host" placeholder="miapp.apps.empresa.local" autocomplete="off"></label>
+      <label class="form-row"><span>Extensiones de PHP adicionales</span><input class="input mono" id="cf-ext" placeholder="intl gd bcmath" autocomplete="off">
+        <span class="dlg-help">Solo con el Dockerfile generado; se instalan con install-php-extensions.</span></label>
+      <label class="dlg-check"><input type="checkbox" id="cf-auto"> Desplegar solo con cada push (sondeo cada 60 s y webhook)</label>
+      <label class="dlg-check"><input type="checkbox" id="cf-migrate"> Ejecutar <span class="mono">php artisan migrate --force</span> en cada despliegue</label>
+    </div>
+    <div class="card">
+      <h3>Servicios y recursos</h3>
+      <label class="dlg-check"><input type="checkbox" id="cf-worker"> Worker de colas (queue:work)</label>
+      <label class="dlg-check"><input type="checkbox" id="cf-scheduler"> Programador de tareas (schedule:work)</label>
+      <label class="dlg-check"><input type="checkbox" id="cf-redis"> Redis</label>
+      <label class="form-row"><span>Base de datos</span>
+        <select class="input" id="cf-db"><option value="none">Ninguna</option><option value="mariadb">MariaDB 11</option><option value="postgres">PostgreSQL 16</option></select>
+        <span class="dlg-help">Cambiar de motor no migra los datos: se crea una base vacía con el otro motor (el volumen anterior se conserva).</span></label>
+      <div class="dp-form2">
+        <label class="form-row"><span>Memoria máxima (MB)</span><input class="input mono" id="cf-mem" type="number" min="0" placeholder="0 = sin límite"></label>
+        <label class="form-row"><span>CPUs máximas</span><input class="input mono" id="cf-cpus" type="number" min="0" step="0.1" placeholder="0 = sin límite"></label>
+      </div>
+      <p class="small muted">Los límites se aplican a la app, al worker y al programador.</p>
+      <div class="form-actions"><button class="btn btn-primary" onclick="saveConfig()">Guardar configuración</button></div>
+    </div>
+  </div>
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Clave de despliegue (SSH)</h3>
+      <p class="small muted" id="key-help"></p>
+      <textarea class="input mono dp-key" id="cf-key" rows="3" readonly></textarea>
+      <div class="toolbar dp-mt">
+        <button class="btn btn-sm" data-copy="#cf-key">Copiar</button>
+        <button class="btn btn-sm" onclick="testAccess()">Probar acceso</button>
+        <button class="btn btn-sm btn-danger" onclick="regenKey()">Regenerar clave</button>
+        <span class="small" id="cf-access"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Webhook de GitHub</h3>
+      <p class="small muted">Opcional. GitHub.com no llega a un servidor de la red interna; úsalo desde un runner
+        propio de GitHub Actions o deja el sondeo automático (cada 60 s). Solo los eventos <b>push</b> a la rama
+        configurada despliegan.</p>
+      <label class="form-row"><span>URL</span><input class="input mono" id="wh-url" readonly></label>
+      <label class="form-row"><span>Secreto (HMAC SHA-256)</span><input class="input mono" id="wh-secret" type="password" readonly autocomplete="off"></label>
+      <div class="toolbar">
+        <button class="btn btn-sm" data-copy="#wh-url">Copiar URL</button>
+        <button class="btn btn-sm" onclick="toggleSecret()">Mostrar</button>
+        <button class="btn btn-sm" data-copy="#wh-secret">Copiar secreto</button>
+        <button class="btn btn-sm btn-danger" onclick="regenSecret()">Regenerar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Eliminar -->
+<div data-panel="delete" hidden>
+  <div class="card dp-danger">
+    <h3>Eliminar aplicación</h3>
+    <p class="muted">Se detienen y borran los contenedores, las imágenes, el sitio de Nginx
+      (<span class="mono" id="del-nginx"></span>) y la carpeta de la aplicación con su .env, su clave y su historial.
+      El repositorio en GitHub no se toca; recuerda quitar la clave de despliegue allí.</p>
+    <label class="dlg-check"><input type="checkbox" id="del-vols"> Borrar también los volúmenes (base de datos y storage). <b>No se puede deshacer.</b></label>
+    <button class="btn btn-danger-solid" onclick="deleteApp()">Eliminar aplicación</button>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = {{ url_for('deploy.index')|tojson }};
+const APP = {{ (app_name or '')|tojson }};
+const api = p => BASE + 'api/' + p;
+const appApi = (p, name) => BASE + 'api/apps/' + encodeURIComponent(name || APP) + (p ? '/' + p : '');
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+async function getJSON(url) {
+  try { const r = await fetch(url); return await r.json(); }
+  catch (e) { return { ok: false, error: String(e) }; }
+}
+function fmtDate(ts) { return ts ? new Date(ts * 1000).toLocaleString('es') : '—'; }
+function ago(ts) {
+  if (!ts) return '—';
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return 'hace un momento';
+  if (s < 3600) return 'hace ' + Math.round(s / 60) + ' min';
+  if (s < 86400) return 'hace ' + Math.round(s / 3600) + ' h';
+  return 'hace ' + Math.round(s / 86400) + ' d';
+}
+function dur(s) {
+  if (s == null) return '—';
+  s = Math.round(s);
+  return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
+}
+const STATUS = { queued: ['mute', 'En cola'], running: ['warn', 'En curso'], success: ['ok', 'Exitoso'],
+                 failed: ['err', 'Falló'], cancelled: ['mute', 'Cancelado'] };
+const TRIGGER = { manual: 'Manual', poll: 'Auto (sondeo)', webhook: 'Webhook', rollback: 'Reversión', config: 'Aplicar cambios' };
+const LED = { running: '', degraded: 'warn', deploying: 'warn live', queued: 'warn', failed: 'err', stopped: 'err',
+              new: 'mute', draft: 'mute', unknown: 'mute' };
+function pill(status) {
+  const [cls, label] = STATUS[status] || ['mute', status];
+  return `<span class="pill ${cls}"><span class="dot"></span>${escapeHtml(label)}</span>`;
+}
+function urlsOf(a) {
+  const out = [];
+  if (a.port) out.push(`http://${location.hostname}:${a.port}`);
+  if (a.hostname) out.push(`http://${a.hostname}`);
+  return out;
+}
+function linkList(urls) {
+  return urls.map(u => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" class="mono small">${escapeHtml(u)}</a>`).join('<br>');
+}
+function commitHtml(c) {
+  if (!c || !c.sha) return '<span class="muted">—</span>';
+  return `<span class="mono">${escapeHtml(c.sha.slice(0, 7))}</span> <span class="small muted truncate dp-msg" title="${escapeHtml(c.message || '')}">${escapeHtml(c.message || '')}</span>`;
+}
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => ui.toast('Copiado'), () => ui.toast('No se pudo copiar', 'error'));
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); ui.toast('Copiado'); } catch (e) { ui.toast('No se pudo copiar', 'error'); }
+  ta.remove();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-copy]');
+  if (b) { const el = $(b.dataset.copy); if (el && el.value) copyText(el.value); }
+});
+function showError(d, title) {
+  ui.alert(d.error || 'Error desconocido', { title: title || 'Error', icon: 'error' });
+}
+
+// ── Requisitos ──
+let REQ = null;
+async function loadReq() {
+  const d = await getJSON(api('requirements'));
+  if (!d.items) return;
+  REQ = d;
+  const card = $('#req-card');
+  card.hidden = APP && d.ready;
+  $('#req-chips').innerHTML = d.items.map(i => `<span class="chip"><span class="led sm ${i.ok ? '' : (i.optional ? 'warn' : 'err')}"></span>${escapeHtml(i.label)}</span>`).join('');
+  const missing = d.items.some(i => !i.ok);
+  $('#req-table-wrap').hidden = !missing;
+  $('#req-note').hidden = !missing;
+  $('#req-all').hidden = !missing || !d.apt;
+  $('#req-table tbody').innerHTML = d.items.map(i => `<tr>
+    <td>${escapeHtml(i.label)}</td>
+    <td>${i.ok ? '<span class="pill ok">Listo</span>' : `<span class="pill ${i.optional ? 'warn' : 'err'}">Falta</span>`}</td>
+    <td class="small muted">${escapeHtml(i.detail)}</td>
+    <td class="right">${!i.ok && d.apt ? `<button class="btn btn-sm" data-install="${escapeHtml(i.key)}">Instalar</button>` : ''}</td></tr>`).join('');
+}
+$('#req-table').addEventListener('click', e => {
+  const b = e.target.closest('[data-install]');
+  if (b) installReq(b.dataset.install);
+});
+async function installReq(key) {
+  if (!await ui.confirm(key === 'all' ? '¿Instalar todos los componentes que faltan?' : '¿Instalar este componente?',
+    { title: 'Instalar', confirmText: 'Instalar' })) return;
+  const btns = $$('#req-card button');
+  btns.forEach(b => b.disabled = true);
+  ui.toast('Instalando… puede tardar varios minutos', 'info', 6000);
+  const d = await postJSON(api('install'), { key });
+  btns.forEach(b => b.disabled = false);
+  if (!d.ok) { ui.alert((d.error || 'Falló') + (d.output ? '\n\n' + d.output.slice(-1500) : ''), { title: 'No se pudo instalar', icon: 'error' }); }
+  else ui.toast('Instalado');
+  loadReq();
+}
+
+{% if not app_name %}
+// ── Lista ──
+async function loadApps() {
+  const d = await getJSON(api('apps'));
+  const tbody = $('#apps-table tbody');
+  if (!d.apps) { tbody.innerHTML = `<tr><td colspan="6" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  $('#apps-empty').hidden = d.apps.length > 0;
+  $('#apps-wrap').hidden = d.apps.length === 0;
+  tbody.innerHTML = d.apps.map(a => {
+    const last = a.last;
+    const actions = a.draft
+      ? `<button class="btn btn-sm" data-act="continue" data-name="${escapeHtml(a.name)}" data-repo="${escapeHtml(a.repo)}">Continuar</button>
+         <button class="btn btn-sm btn-danger" data-act="drop" data-name="${escapeHtml(a.name)}">Eliminar</button>`
+      : `<a class="btn btn-sm" href="${escapeHtml(BASE + 'app/' + encodeURIComponent(a.name))}">Abrir</a>
+         <button class="btn btn-sm btn-primary" data-act="deploy" data-name="${escapeHtml(a.name)}">Desplegar</button>`;
+    return `<tr>
+      <td><a href="${escapeHtml(BASE + 'app/' + encodeURIComponent(a.name))}" class="mono"><b>${escapeHtml(a.name)}</b></a>
+        <div class="small muted truncate">${escapeHtml(a.repo)} · ${escapeHtml(a.branch)}</div></td>
+      <td><span class="dp-state"><span class="led sm ${LED[a.state] ?? 'mute'}"></span>${escapeHtml(a.state_text)}</span></td>
+      <td>${a.draft ? '—' : linkList(urlsOf(a))}</td>
+      <td>${last ? `${pill(last.status)} <span class="small muted">${escapeHtml(ago(last.finished || last.started || last.created))}</span>` : '<span class="muted">—</span>'}</td>
+      <td>${commitHtml(a.current)}</td>
+      <td class="right dp-nowrap">${actions}</td></tr>`;
+  }).join('');
+}
+$('#apps-table').addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const name = b.dataset.name;
+  if (b.dataset.act === 'deploy') {
+    const d = await postJSON(appApi('deploy', name), {});
+    if (!d.ok) return showError(d);
+    ui.toast(d.message || 'Despliegue en cola');
+    loadApps();
+  } else if (b.dataset.act === 'continue') {
+    openWizard({ name, repo: b.dataset.repo });
+  } else if (b.dataset.act === 'drop') {
+    if (!await ui.confirm(`Se borrará el borrador «${name}» y su clave de despliegue.`, { title: 'Eliminar borrador', danger: true, confirmText: 'Eliminar' })) return;
+    const d = await postJSON(appApi('delete', name), { confirm: name });
+    if (!d.ok) return showError(d);
+    loadApps();
+  }
+});
+
+// ── Asistente ──
+const wz = { step: 1, name: '', ssh: false, created: false };
+function setStep(n) {
+  wz.step = n;
+  $$('#wiz [data-step]').forEach(el => el.hidden = el.dataset.step !== String(n));
+  $$('#wiz .dp-steps span').forEach(el => el.classList.toggle('active', el.dataset.s === String(n)));
+  $('#wz-back').hidden = n === 1;
+  $('#wz-next').textContent = n === 3 ? 'Crear aplicación' : 'Siguiente';
+  $('#wz-error').hidden = true;
+}
+function wizError(msg) { const el = $('#wz-error'); el.textContent = msg; el.hidden = false; }
+function openWizard(draft) {
+  Object.assign(wz, { step: 1, name: '', ssh: false, created: false });
+  $('#wz-name').value = draft ? draft.name : '';
+  $('#wz-name').readOnly = !!draft;
+  $('#wz-repo').value = draft ? draft.repo : '';
+  $('#wz-branch').value = 'main';
+  $('#wz-branches').innerHTML = '';
+  $('#wz-access').textContent = '';
+  $('#wz-host').value = '';
+  $('#wiz').classList.add('open');
+  setStep(1);
+  if (draft) { wizNext(); } else { $('#wz-name').focus(); }
+}
+function closeWizard() {
+  $('#wiz').classList.remove('open');
+  if (wz.name) loadApps();
+}
+function wizBack() { setStep(Math.max(1, wz.step - 1)); }
+async function wizTest() {
+  const btn = $('#wz-test'), out = $('#wz-access');
+  btn.disabled = true; out.className = 'small muted'; out.textContent = 'Probando…';
+  const d = await postJSON(appApi('test-access', wz.name), {});
+  btn.disabled = false;
+  if (!d.ok) { out.className = 'small dp-bad'; out.textContent = d.error || 'Sin acceso'; return false; }
+  out.className = 'small dp-good';
+  out.textContent = `Acceso correcto: ${d.branches.length} rama(s).`;
+  $('#wz-branches').innerHTML = d.branches.map(b => `<option value="${escapeHtml(b)}">`).join('');
+  if (!d.branches.includes($('#wz-branch').value)) {
+    $('#wz-branch').value = d.branches.includes('main') ? 'main' : d.branches.includes('master') ? 'master' : (d.branches[0] || 'main');
+  }
+  return true;
+}
+async function wizNext() {
+  const btn = $('#wz-next');
+  btn.disabled = true;
+  try {
+    if (wz.step === 1) {
+      const d = await postJSON(api('draft'), { name: $('#wz-name').value.trim(), repo: $('#wz-repo').value.trim() });
+      if (!d.ok) return wizError(d.error);
+      wz.name = d.name; wz.ssh = d.ssh;
+      $('#wz-name').readOnly = true;
+      $('#wz-key').value = d.pubkey;
+      $('#wz-ssh').hidden = !d.ssh;
+      $('#wz-https').hidden = d.ssh;
+      $('#wz-access').textContent = '';
+      setStep(2);
+    } else if (wz.step === 2) {
+      setStep(3);
+    } else {
+      const d = await postJSON(appApi('create', wz.name), {
+        branch: $('#wz-branch').value.trim(), php: $('#wz-php').value, hostname: $('#wz-host').value.trim(),
+        database: $('#wz-db').value, redis: $('#wz-redis').checked, worker: $('#wz-worker').checked,
+        scheduler: $('#wz-scheduler').checked, auto_deploy: $('#wz-auto').checked, deploy_now: $('#wz-now').checked,
+      });
+      if (!d.ok) return wizError(d.error);
+      location.href = d.url + (d.deployment ? '#deploys:' + d.deployment : '');
+    }
+  } finally { btn.disabled = false; }
+}
+$('#wiz').addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeWizard();
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); wizNext(); }
+});
+
+loadReq(); loadApps();
+setInterval(loadApps, 10000);
+const draftParam = new URLSearchParams(location.search).get('draft');
+if (draftParam) getJSON(api('apps')).then(d => {
+  const a = (d.apps || []).find(x => x.name === draftParam && x.draft);
+  if (a) openWizard({ name: a.name, repo: a.repo });
+});
+{% else %}
+// ── Detalle ──
+let INFO = null, infoTimer = null, configFilled = false;
+
+function showTab(tab) {
+  $$('#dp-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  $$('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== tab);
+  if (location.hash.split(':')[0] !== '#' + tab) history.replaceState(null, '', '#' + tab);
+  if (tab === 'env' && !envLoaded) loadEnv();
+  if (tab === 'logs') { fillServices(); loadLogs(); }
+  if (tab === 'summary') loadContainers();
+  if (tab === 'config') { fillConfig(); loadSecret(); }
+}
+$('#dp-tabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
+
+async function loadInfo() {
+  clearTimeout(infoTimer);
+  const d = await getJSON(appApi(''));
+  if (!d.config) {
+    $('#app-sub').textContent = d.error || 'No se pudo cargar la aplicación';
+    infoTimer = setTimeout(loadInfo, 10000);
+    return;
+  }
+  INFO = d;
+  renderHead(); renderSummary(); renderHistory();
+  if (!configFilled) fillConfig();
+  const active = d.history.some(h => h.status === 'running' || h.status === 'queued');
+  infoTimer = setTimeout(loadInfo, active ? 2000 : 8000);
+}
+
+function renderHead() {
+  const d = INFO;
+  $('#app-led').className = 'led lg ' + (LED[d.state] ?? 'mute');
+  $('#app-title').textContent = d.name + ' — ' + d.state_text;
+  const parts = [];
+  const urls = urlsOf(d);
+  if (d.config.active_slot && urls.length) parts.push(linkList(urls).replace(/<br>/g, ' · '));
+  if (d.current && d.current.sha) parts.push('commit ' + commitHtml(d.current));
+  parts.push(`<span class="mono small">${escapeHtml(d.repo)}</span> · rama <span class="mono small">${escapeHtml(d.branch)}</span>`);
+  $('#app-sub').innerHTML = parts.join(' · ');
+}
+
+function renderSummary() {
+  const d = INFO, c = d.config;
+  const services = [c.database === 'mariadb' ? 'MariaDB 11' : c.database === 'postgres' ? 'PostgreSQL 16' : null,
+    c.redis ? 'Redis' : null, c.worker ? 'Worker de colas' : null, c.scheduler ? 'Programador' : null].filter(Boolean);
+  const rows = [
+    ['Direcciones', urlsOf(d).length ? linkList(urlsOf(d)) : '—'],
+    ['Commit en línea', commitHtml(d.current) + (d.current && d.current.author ? ` <span class="small muted">· ${escapeHtml(d.current.author)}</span>` : '')],
+    ['Imagen', d.current ? `<span class="mono">${escapeHtml(d.current.image || '—')}</span>` : '—'],
+    ['Desplegado', d.current ? escapeHtml(fmtDate(d.current.at)) : '—'],
+    ['Slot activo', c.active_slot ? `<span class="mono">${escapeHtml(c.active_slot)} · 127.0.0.1:${escapeHtml(d.slot_ports[c.active_slot])}</span>` : '—'],
+    ['PHP', escapeHtml(c.php)],
+    ['Servicios', escapeHtml(services.join(', ') || 'Solo la aplicación')],
+    ['Auto-despliegue', c.auto_deploy ? '<span class="pill ok">Activado</span>' : '<span class="pill mute">Desactivado</span>'],
+  ];
+  $('#sum-kv').innerHTML = rows.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join('');
+}
+
+async function loadContainers() {
+  const tbody = $('#ct-table tbody');
+  const d = await getJSON(appApi('containers'));
+  if (!d.ok) { tbody.innerHTML = `<tr><td colspan="3" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  if (!d.containers.length) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">Sin contenedores (aún no se ha desplegado o está detenida)</td></tr>'; return; }
+  tbody.innerHTML = d.containers.map(c => {
+    const cls = c.state === 'running' ? (c.health && c.health !== 'healthy' ? 'warn' : 'ok') : c.state === 'restarting' ? 'warn' : 'mute';
+    return `<tr><td class="mono">${escapeHtml(c.service)}</td>
+      <td><span class="pill ${cls}">${escapeHtml(c.state)}${c.health ? ' · ' + escapeHtml(c.health) : ''}</span></td>
+      <td class="small muted">${escapeHtml(c.status)}</td></tr>`;
+  }).join('');
+}
+
+function renderHistory() {
+  const tbody = $('#hist-table tbody');
+  const h = INFO.history;
+  if (!h.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted center">Todavía no hay despliegues. Pulsa «Desplegar ahora».</td></tr>'; return; }
+  const curImage = INFO.current && INFO.current.image;
+  tbody.innerHTML = h.map(x => {
+    const running = x.status === 'running';
+    const d = running && x.started ? Date.now() / 1000 - x.started : x.duration;
+    const acts = [`<button class="btn btn-sm" data-act="log" data-id="${escapeHtml(x.id)}">Log</button>`];
+    if (x.status === 'success' && x.image && x.image !== curImage)
+      acts.push(`<button class="btn btn-sm" data-act="rollback" data-id="${escapeHtml(x.id)}">Revertir</button>`);
+    if (x.status === 'queued' || running)
+      acts.push(`<button class="btn btn-sm btn-danger" data-act="cancel" data-id="${escapeHtml(x.id)}">Cancelar</button>`);
+    const extra = x.status === 'queued' && x.queue_pos ? ` <span class="small muted">#${escapeHtml(x.queue_pos)}</span>` : '';
+    const live = x.image && x.image === curImage && x.status === 'success' ? ' <span class="pill ok">en línea</span>' : '';
+    return `<tr${logState.id === x.id ? ' class="dp-sel"' : ''}>
+      <td>${pill(x.status)}${extra}${live}</td>
+      <td class="small" title="${escapeHtml(fmtDate(x.started || x.created))}">${escapeHtml(ago(x.started || x.created))}</td>
+      <td class="small">${escapeHtml(dur(d))}</td>
+      <td>${commitHtml(x)}${x.error ? `<div class="small dp-bad truncate" title="${escapeHtml(x.error)}">${escapeHtml(x.error)}</div>` : ''}</td>
+      <td class="small">${escapeHtml(TRIGGER[x.trigger] || x.trigger)}</td>
+      <td class="right dp-nowrap">${acts.join(' ')}</td></tr>`;
+  }).join('');
+}
+$('#hist-table').addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const id = b.dataset.id, dep = INFO.history.find(x => x.id === id);
+  if (b.dataset.act === 'log') openLog(id);
+  else if (b.dataset.act === 'cancel') cancelDeploy(id);
+  else if (b.dataset.act === 'rollback') {
+    const sha = (dep.sha || '').slice(0, 7);
+    if (!await ui.confirm(`Se volverá a poner en línea la imagen ${dep.image} (commit ${sha}) sin compilar de nuevo. ` +
+      'Las migraciones de la base de datos NO se revierten.', { title: 'Revertir versión', danger: true, typed: sha || APP, confirmText: 'Revertir' })) return;
+    const d = await postJSON(appApi('rollback'), { id });
+    if (!d.ok) return showError(d);
+    ui.toast('Reversión en cola');
+    await loadInfo(); openLog(d.id);
+  }
+});
+async function cancelDeploy(id) {
+  if (!await ui.confirm('¿Cancelar este despliegue? Si ya estaba en curso, la versión anterior sigue en línea.',
+    { title: 'Cancelar despliegue', danger: true, confirmText: 'Cancelar despliegue', cancelText: 'Volver' })) return;
+  const d = await postJSON(appApi('cancel'), { id });
+  if (!d.ok) return showError(d);
+  ui.toast(d.message || 'Cancelado');
+  loadInfo();
+}
+
+// Log en vivo (incremental)
+const LOG_MAX = 2 * 1024 * 1024;
+let logState = { id: null, offset: 0, timer: null };
+function openLog(id) {
+  clearTimeout(logState.timer);
+  const dep = INFO && INFO.history.find(x => x.id === id);
+  const live = dep && (dep.status === 'running' || dep.status === 'queued');
+  logState = { id, offset: live ? 0 : -1, timer: null };
+  $('#log-card').hidden = false;
+  $('#log-title').textContent = 'Log · ' + fmtDate(dep && (dep.started || dep.created));
+  $('#log-pre').textContent = live || !dep ? '' : '(se muestra el final del log)\n';
+  if (INFO) renderHistory();
+  if ($('[data-panel="deploys"]').hidden) showTab('deploys');
+  history.replaceState(null, '', '#deploys:' + id);
+  pollLog();
+  $('#log-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function closeLog() {
+  clearTimeout(logState.timer);
+  logState = { id: null, offset: 0, timer: null };
+  $('#log-card').hidden = true;
+  history.replaceState(null, '', '#deploys');
+  if (INFO) renderHistory();
+}
+async function pollLog() {
+  const id = logState.id;
+  if (!id) return;
+  const d = await getJSON(appApi('log') + '?id=' + encodeURIComponent(id) + '&offset=' + logState.offset);
+  if (logState.id !== id) return;
+  if (d.error && d.text === undefined) { $('#log-status').innerHTML = `<span class="small dp-bad">${escapeHtml(d.error)}</span>`; return; }
+  const pre = $('#log-pre');
+  if (d.text) {
+    pre.appendChild(document.createTextNode(d.text));
+    if (pre.textContent.length > LOG_MAX) pre.textContent = '[… principio recortado en pantalla …]\n' + pre.textContent.slice(-LOG_MAX * 0.75);
+    if ($('#log-follow').checked) pre.scrollTop = pre.scrollHeight;
+  }
+  logState.offset = d.offset;
+  $('#log-status').innerHTML = pill(d.status);
+  const btn = $('#log-cancel');
+  btn.hidden = !(d.status === 'running' || d.status === 'queued');
+  btn.onclick = () => cancelDeploy(id);
+  if (!d.done) logState.timer = setTimeout(pollLog, d.text && d.offset < d.size ? 200 : 1500);
+  else loadInfo();
+}
+
+// Acciones de cabecera
+async function deployNow() {
+  const d = await postJSON(appApi('deploy'), {});
+  if (!d.ok) return showError(d);
+  ui.toast(d.message || 'Despliegue en cola');
+  await loadInfo(); openLog(d.id);
+}
+const ACTIONS = {
+  start: { verb: 'Iniciar', text: '¿Iniciar los contenedores de la aplicación?' },
+  stop: { verb: 'Detener', text: 'Se detendrán todos los contenedores (también la base de datos y Redis). La aplicación quedará fuera de línea.', danger: true },
+  restart: { verb: 'Reiniciar', text: 'Se reiniciarán la aplicación, el worker y el programador. Habrá un corte de unos segundos. Para aplicar cambios del .env sin cortes usa Entorno → Guardar → Aplicar ahora.', danger: true },
+};
+async function appAction(act) {
+  const a = ACTIONS[act];
+  if (!await ui.confirm(a.text, { title: a.verb + ' aplicación', danger: !!a.danger, confirmText: a.verb })) return;
+  ui.toast(a.verb + '…', 'info');
+  const d = await postJSON(appApi('action'), { action: act });
+  if (!d.ok) return showError(d);
+  ui.toast('Listo');
+  loadInfo(); loadContainers();
+}
+async function applyNow(question) {
+  if (question && !await ui.confirm(question, { title: 'Aplicar cambios', confirmText: 'Aplicar ahora', cancelText: 'Más tarde' })) return;
+  const d = await postJSON(appApi('apply'), {});
+  if (!d.ok) return showError(d);
+  ui.toast('Aplicando cambios sin cortes…', 'info');
+  await loadInfo(); openLog(d.id);
+}
+
+// Entorno
+let envLoaded = false, envMode = 'table';
+const KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
+async function loadEnv() {
+  const d = await getJSON(appApi('env'));
+  if (d.pairs === undefined) return showError(d);
+  envLoaded = true;
+  $('#env-body').innerHTML = '';
+  d.pairs.forEach(([k, v]) => envAddRow(k, v));
+  if (!d.pairs.length) envAddRow();
+  $('#env-text').value = d.text;
+  const errs = $('#env-errors');
+  errs.hidden = !d.errors.length;
+  errs.textContent = d.errors.length ? 'El .env actual tiene líneas que no se pudieron leer (corrígelas en modo texto): ' + d.errors.join('; ') : '';
+  applyShow();
+}
+function envAddRow(k = '', v = '') {
+  const tr = document.createElement('tr');
+  const multi = v.includes('\n');
+  tr.innerHTML = `<td><input class="input mono" data-k placeholder="NOMBRE" autocomplete="off"></td>
+    <td>${multi ? '<textarea class="input mono dp-envval" data-v rows="3" spellcheck="false"></textarea>'
+                : '<input class="input mono dp-envval" data-v autocomplete="new-password">'}</td>
+    <td class="right"><button class="btn btn-sm btn-danger" data-del title="Quitar">✕</button></td>`;
+  tr.querySelector('[data-k]').value = k;
+  tr.querySelector('[data-v]').value = v;
+  $('#env-body').appendChild(tr);
+  applyShow();
+  if (!k) tr.querySelector('[data-k]').focus();
+}
+$('#env-body').addEventListener('click', e => { if (e.target.closest('[data-del]')) e.target.closest('tr').remove(); });
+function applyShow() {
+  const show = $('#env-show').checked;
+  $$('#env-body input[data-v]').forEach(i => i.type = show ? 'text' : 'password');
+  $$('#env-body textarea[data-v], #env-text').forEach(t => t.classList.toggle('dp-blur', !show));
+}
+$('#env-show').addEventListener('change', applyShow);
+$('#env-mode').addEventListener('click', async e => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.mode === envMode) return;
+  if (!await ui.confirm('Al cambiar de modo se recarga el .env guardado y se pierden los cambios sin guardar.', { title: 'Cambiar de modo', confirmText: 'Cambiar' })) return;
+  envMode = b.dataset.mode;
+  $$('#env-mode button').forEach(x => x.classList.toggle('active', x === b));
+  $('#env-table-wrap').hidden = envMode !== 'table';
+  $('#env-add').hidden = envMode !== 'table';
+  $('#env-text').hidden = envMode !== 'text';
+  loadEnv();
+});
+async function saveEnv() {
+  let body;
+  if (envMode === 'table') {
+    const pairs = [];
+    for (const tr of $$('#env-body tr')) {
+      const k = tr.querySelector('[data-k]').value.trim(), v = tr.querySelector('[data-v]').value;
+      if (!k && !v) continue;
+      if (!KEY_RE.test(k)) return ui.alert(`«${k}» no es un nombre válido: MAYÚSCULAS, números y _, sin empezar por número.`, { title: 'Nombre inválido', icon: 'error' });
+      pairs.push([k, v]);
+    }
+    body = { mode: 'pairs', pairs };
+  } else {
+    body = { mode: 'text', text: $('#env-text').value };
+  }
+  const d = await postJSON(appApi('env'), body);
+  if (!d.ok) return showError(d, 'No se guardó el .env');
+  ui.toast('.env guardado');
+  loadEnv();
+  if (INFO && INFO.config.active_slot)
+    applyNow('El .env se guardó. Los contenedores lo leen al arrancar: ¿recrearlos ahora con la misma imagen? Se hace sin cortes (versión nueva en el otro slot y cambio de Nginx).');
+}
+
+// Logs de contenedores
+function fillServices() {
+  if (!INFO) return;
+  const c = INFO.config, sel = $('#lg-svc'), cur = sel.value || 'app';
+  const opts = [['app', 'Aplicación'], c.worker && ['worker', 'Worker de colas'], c.scheduler && ['scheduler', 'Programador'],
+    c.database !== 'none' && ['db', 'Base de datos'], c.redis && ['redis', 'Redis']].filter(Boolean);
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('');
+}
+async function loadLogs() {
+  const pre = $('#lg-pre');
+  pre.textContent = 'Cargando…';
+  const d = await getJSON(appApi('logs') + '?service=' + encodeURIComponent($('#lg-svc').value || 'app') + '&tail=' + $('#lg-tail').value);
+  pre.textContent = d.ok ? (d.logs || '(sin líneas)') : (d.error || 'Error');
+  pre.scrollTop = pre.scrollHeight;
+}
+
+// Artisan
+$('#ar-common').addEventListener('change', e => { if (e.target.value) { $('#ar-cmd').value = e.target.value; e.target.value = ''; $('#ar-cmd').focus(); } });
+$('#ar-cmd').addEventListener('keydown', e => { if (e.key === 'Enter') runArtisan(); });
+async function runArtisan() {
+  const cmd = $('#ar-cmd').value.trim();
+  if (!cmd) return;
+  let confirm = false;
+  if (INFO && INFO.artisan_danger.includes(cmd.split(' ')[0])) {
+    if (!await ui.confirm(`«php artisan ${cmd}» puede borrar datos o dejar la aplicación fuera de servicio.`, { title: 'Comando destructivo', danger: true, typed: APP, confirmText: 'Ejecutar' })) return;
+    confirm = true;
+  }
+  const out = $('#ar-out'), btn = $('#ar-run');
+  out.hidden = false; out.textContent = '$ php artisan ' + cmd + '\nEjecutando…';
+  btn.disabled = true;
+  const d = await postJSON(appApi('artisan'), { command: cmd, confirm });
+  btn.disabled = false;
+  out.textContent = '$ php artisan ' + cmd + '\n' + (d.output !== undefined ? d.output : '') + (d.ok ? '' : '\n' + (d.error || 'Error'));
+}
+
+// Configuración
+function fillConfig() {
+  if (!INFO) return;
+  configFilled = true;
+  const c = INFO.config;
+  $('#cf-repo').value = c.repo; $('#cf-branch').value = c.branch; $('#cf-php').value = c.php;
+  $('#cf-port').value = c.port; $('#cf-cport').value = c.container_port || 8080; $('#cf-host').value = c.hostname || '';
+  $('#cf-ext').value = (c.php_ext || []).join(' ');
+  $('#cf-auto').checked = !!c.auto_deploy; $('#cf-migrate').checked = c.migrate !== false;
+  $('#cf-worker').checked = !!c.worker; $('#cf-scheduler').checked = !!c.scheduler; $('#cf-redis').checked = !!c.redis;
+  $('#cf-db').value = c.database; $('#cf-mem').value = c.mem_mb || ''; $('#cf-cpus').value = c.cpus || '';
+  $('#cf-key').value = INFO.pubkey;
+  $('#key-help').textContent = INFO.ssh
+    ? 'Debe estar en GitHub: repositorio → Settings → Deploy keys (solo lectura).'
+    : 'El repositorio es público por HTTPS: no se usa. Sirve si cambias a la URL SSH (git@github.com:…).';
+  $('#wh-url').value = location.origin + INFO.webhook_path;
+  $('#del-nginx').textContent = INFO.nginx_file;
+}
+async function saveConfig() {
+  const c = INFO.config;
+  const body = {
+    repo: $('#cf-repo').value.trim(), branch: $('#cf-branch').value.trim(), php: $('#cf-php').value,
+    port: $('#cf-port').value, container_port: $('#cf-cport').value, hostname: $('#cf-host').value.trim(),
+    php_ext: $('#cf-ext').value.trim(), auto_deploy: $('#cf-auto').checked, migrate: $('#cf-migrate').checked,
+    worker: $('#cf-worker').checked, scheduler: $('#cf-scheduler').checked, redis: $('#cf-redis').checked,
+    database: $('#cf-db').value, mem_mb: $('#cf-mem').value || 0, cpus: $('#cf-cpus').value || 0,
+  };
+  if (c.database !== 'none' && body.database !== c.database &&
+      !await ui.confirm('Cambiar el motor de base de datos crea una base vacía con el nuevo motor y cambia las variables DB_* del .env. Los datos actuales quedan en su volumen, pero la aplicación dejará de verlos.',
+        { title: 'Cambiar base de datos', danger: true, typed: APP, confirmText: 'Cambiar' })) return;
+  const d = await postJSON(appApi('config'), body);
+  if (!d.ok) return showError(d, 'No se guardó');
+  ui.toast('Configuración guardada');
+  configFilled = false;
+  await loadInfo();
+  if (d.needs_apply) applyNow('Cambiaste servicios o límites. ¿Recrear los contenedores ahora (sin cortes, con la misma imagen)?');
+  else if (d.needs_deploy && await ui.confirm('Los cambios de repositorio, rama o PHP se aplican al compilar. ¿Desplegar ahora?', { title: 'Desplegar', confirmText: 'Desplegar ahora', cancelText: 'Más tarde' })) deployNow();
+}
+async function testAccess() {
+  const out = $('#cf-access');
+  out.className = 'small muted'; out.textContent = 'Probando…';
+  const d = await postJSON(appApi('test-access'), {});
+  out.className = d.ok ? 'small dp-good' : 'small dp-bad';
+  out.textContent = d.ok ? `Acceso correcto (${d.branches.length} ramas${d.branches.includes(INFO.config.branch) ? '' : '; ¡la rama configurada no existe!'})` : d.error;
+}
+async function regenKey() {
+  if (!await ui.confirm('Se creará una clave nueva y la actual dejará de servir. Tendrás que reemplazarla en GitHub (Settings → Deploy keys) antes del próximo despliegue.', { title: 'Regenerar clave', danger: true, confirmText: 'Regenerar' })) return;
+  const d = await postJSON(appApi('regen-key'), {});
+  if (!d.ok) return showError(d);
+  $('#cf-key').value = d.pubkey; INFO.pubkey = d.pubkey;
+  ui.toast('Clave regenerada: actualízala en GitHub');
+}
+async function loadSecret() {
+  const d = await getJSON(appApi('secret'));
+  if (d.ok) $('#wh-secret').value = d.secret;
+}
+function toggleSecret() { const i = $('#wh-secret'); i.type = i.type === 'password' ? 'text' : 'password'; }
+async function regenSecret() {
+  if (!await ui.confirm('El secreto actual dejará de ser válido; tendrás que actualizarlo donde lo uses.', { title: 'Regenerar secreto', danger: true, confirmText: 'Regenerar' })) return;
+  const d = await postJSON(appApi('secret'), {});
+  if (!d.ok) return showError(d);
+  $('#wh-secret').value = d.secret;
+  ui.toast('Secreto regenerado');
+}
+
+// Eliminar
+async function deleteApp() {
+  const vols = $('#del-vols').checked;
+  if (!await ui.confirm(vols ? 'Se eliminará la aplicación Y SUS DATOS (base de datos y storage). No se puede deshacer.'
+    : 'Se eliminará la aplicación. Los volúmenes (base de datos y storage) se conservan en Docker.',
+    { title: 'Eliminar aplicación', danger: true, typed: APP, confirmText: 'Eliminar' })) return;
+  ui.toast('Eliminando…', 'info');
+  const d = await postJSON(appApi('delete'), { confirm: APP, volumes: vols });
+  if (!d.ok) return showError(d);
+  if (d.warnings && d.warnings.length) await ui.alert(d.warnings.join('\n'), { title: 'Eliminada con advertencias', icon: 'warning' });
+  location.href = BASE;
+}
+
+loadReq();
+loadInfo().then(() => {
+  const [tab, id] = location.hash.slice(1).split(':');
+  if (['summary', 'deploys', 'env', 'logs', 'artisan', 'config', 'delete'].includes(tab)) showTab(tab);
+  else loadContainers();
+  if (tab === 'deploys' && id && INFO) openLog(id);
+});
+{% endif %}
+</script>
+{% endblock %}

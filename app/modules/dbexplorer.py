@@ -193,10 +193,18 @@ def like_escape(v):
     return v.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
-def csv_line(vals, delim=","):
-    """Línea CSV: NULL → campo vacío; '' → "" (así se distinguen al reimportar)."""
+FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+NUMBER_RE = re.compile(r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
+
+
+def csv_line(vals, delim=",", excel_safe=False):
+    """Línea CSV: NULL → campo vacío; '' → "" (así se distinguen al reimportar).
+    excel_safe: antepone ' a las celdas que Excel/LibreOffice ejecutarían como fórmula
+    (=, +, -, @ …), salvo números; protege a quien abre la exportación en una hoja de cálculo."""
     out = []
     for v in vals:
+        if excel_safe and v and v.startswith(FORMULA_START) and not NUMBER_RE.fullmatch(v):
+            v = "'" + v
         if v is None:
             out.append("")
         elif v == "" or v != v.strip() or any(ch in v for ch in (delim, '"', "\n", "\r")):
@@ -1727,7 +1735,7 @@ def _export_stream(engine, meta, fmt):
             if engine == "mysql":
                 dec, rd = codecs.getincrementaldecoder("utf-8")("replace"), MyXml()
                 if fmt == "csv":
-                    yield csv_line(names).encode()
+                    yield csv_line(names, excel_safe=True).encode()
                 while True:
                     chunk = p.stdout.read(CHUNK)
                     events = rd.feed(dec.decode(chunk, final=not chunk)) if chunk else rd.close()
@@ -1736,7 +1744,7 @@ def _export_stream(engine, meta, fmt):
                         if ev != "row":
                             continue
                         if fmt == "csv":
-                            buf.append(csv_line(data[1]))
+                            buf.append(csv_line(data[1], excel_safe=True))
                         else:
                             buf.append(("" if first else ",\n") + json.dumps(dict(zip(names, data[1])), ensure_ascii=False))
                             first = False
@@ -2010,6 +2018,7 @@ if __name__ == "__main__":
         pass
     assert like_escape("50%_!") == "50!%!_!!"
     assert csv_line([None, "", "a,b", 'x"y', "ok", " s"]) == ',"","a,b","x""y",ok," s"\r\n'
+    assert csv_line(["=HYPERLINK(1)", "-5", "+3.2e4", "@x", "-"], excel_safe=True) == "'=HYPERLINK(1),-5,+3.2e4,'@x,'-\r\n"
     assert detect_delimiter("a,b,c\n1,2,3\n4,5,6") == ","
     assert detect_delimiter("a;b;c\n1,5;2;3\n4;5,5;6") == ";"
     assert detect_delimiter("a\tb\n1\t2") == "\t"
