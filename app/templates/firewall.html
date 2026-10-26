@@ -3,46 +3,71 @@
 {% block heading %}Firewall{% endblock %}
 
 {% block content %}
-<div class="card" style="margin-bottom:12px;">
-  <div class="toolbar" style="margin:0;">
-    <div id="fw-status" class="muted">Consultando estado…</div>
+<section class="health" id="fw-head" data-level="ok" style="margin-bottom:12px;">
+  <span class="led lg" id="fw-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="fw-title">Consultando el firewall…</h1>
+    <div class="health-sub" id="fw-sub"></div>
+  </div>
+  <div class="health-chips">
     <span id="fw-actions"></span>
     <button class="btn" onclick="load()">Refrescar</button>
   </div>
+</section>
+
+<div class="card" id="install-card" hidden>
+  <div class="card-head"><h3>Gestiona el firewall desde el panel con UFW</h3></div>
+  <p class="muted" style="margin-top:0;">UFW (<i>Uncomplicated Firewall</i>) permite abrir y cerrar puertos con un clic.
+    En Debian 13 funciona sobre nftables. Se instala <b>inactivo</b>: nada cambia hasta que pulses <b>Activar</b>,
+    y al activarlo el panel permite antes SSH y el puerto de MatiPanel para que no pierdas el acceso.</p>
+  <button class="btn btn-primary" id="install-btn" onclick="ufwInstall()">Instalar UFW</button>
 </div>
 
-{% if distro.fw == 'ufw' %}
-<div class="grid grid-2" id="ufw-panel" style="display:none;">
+<div id="ufw-section" hidden>
   <div class="card">
-    <h3>Agregar regla</h3>
-    <div class="grid grid-2" style="margin:0;">
-      <label class="form-row"><span>Acción</span>
-        <select id="r-action" class="input"><option>allow</option><option>deny</option><option>reject</option><option>limit</option></select></label>
-      <label class="form-row"><span>Protocolo</span>
-        <select id="r-proto" class="input"><option>tcp</option><option>udp</option><option value="any">tcp+udp</option></select></label>
-      <label class="form-row"><span>Puerto o rango (80 · 8000:8100)</span><input id="r-port" class="input mono"></label>
-      <label class="form-row"><span>Origen (IP/CIDR, vacío = cualquiera)</span><input id="r-from" class="input mono" placeholder="any"></label>
+    <div class="card-head"><h3>Permitir rápido</h3><span class="muted small">Abre el puerto de un servicio común (entrante, desde cualquier origen)</span></div>
+    <div class="quick" id="presets"></div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Agregar regla</h3>
+      <div class="grid grid-2" style="margin:0;">
+        <label class="form-row"><span>Acción</span>
+          <select id="r-action" class="input">
+            <option value="allow">Permitir (allow)</option><option value="deny">Bloquear (deny)</option>
+            <option value="reject">Rechazar (reject)</option><option value="limit">Limitar intentos (limit)</option></select></label>
+        <label class="form-row"><span>Protocolo</span>
+          <select id="r-proto" class="input"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="any">TCP y UDP</option></select></label>
+        <label class="form-row"><span>Puerto o rango</span><input id="r-port" class="input mono" placeholder="80 · 8000:8100"></label>
+        <label class="form-row"><span>Origen (vacío = cualquiera)</span><input id="r-from" class="input mono" placeholder="192.168.1.0/24"></label>
+      </div>
+      <label class="form-row"><span>Comentario (opcional)</span><input id="r-comment" class="input" maxlength="60" placeholder="Ej. Sitio web interno"></label>
+      <div class="form-actions"><button class="btn btn-primary" onclick="ufwAdd()">Agregar regla</button></div>
     </div>
-    <label class="form-row"><span>Comentario (opcional)</span><input id="r-comment" class="input" maxlength="60"></label>
-    <div class="form-actions"><button class="btn btn-primary" onclick="ufwAdd()">Agregar</button></div>
+    <div class="card">
+      <h3>Políticas por defecto</h3>
+      <p class="muted small" style="margin-top:0;">Qué pasa con el tráfico que no coincide con ninguna regla.</p>
+      <label class="form-row"><span>Entrante (recomendado: bloquear)</span>
+        <select id="p-incoming" class="input" onchange="ufwDefault('incoming', this.value)">
+          <option value="deny">Bloquear (deny)</option><option value="reject">Rechazar (reject)</option><option value="allow">Permitir (allow)</option></select></label>
+      <label class="form-row"><span>Saliente (recomendado: permitir)</span>
+        <select id="p-outgoing" class="input" onchange="ufwDefault('outgoing', this.value)">
+          <option value="allow">Permitir (allow)</option><option value="deny">Bloquear (deny)</option><option value="reject">Rechazar (reject)</option></select></label>
+      <p class="muted small">Al activar UFW se permiten antes SSH y el puerto del panel para no perder acceso.</p>
+    </div>
   </div>
+
   <div class="card">
-    <h3>Políticas por defecto</h3>
-    <label class="form-row"><span>Entrante</span>
-      <select id="p-incoming" class="input" onchange="ufwDefault('incoming', this.value)"><option>deny</option><option>reject</option><option>allow</option></select></label>
-    <label class="form-row"><span>Saliente</span>
-      <select id="p-outgoing" class="input" onchange="ufwDefault('outgoing', this.value)"><option>allow</option><option>deny</option><option>reject</option></select></label>
-    <p class="muted small">Al activar UFW se permiten antes SSH y el puerto del panel para no perder acceso.</p>
+    <div class="card-head"><h3>Reglas</h3><span class="muted small" id="rules-note"></span></div>
+    <div class="table-wrap">
+      <table class="lx" id="ufw-rules">
+        <thead><tr><th>#</th><th>Puerto / destino</th><th>Acción</th><th>Origen</th><th>Comentario</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 </div>
-<div class="card" id="ufw-rules" style="display:none; margin-bottom:12px;">
-  <h3>Reglas</h3>
-  <table class="lx">
-    <thead><tr><th>#</th><th>Destino</th><th>Acción</th><th>Origen</th><th>Comentario</th><th></th></tr></thead>
-    <tbody></tbody>
-  </table>
-</div>
-{% endif %}
 
 {% if distro.fw == 'firewalld' %}
 <div class="grid grid-2" id="fwd-panel" style="display:none;">
@@ -68,26 +93,20 @@
 {% endif %}
 
 {% if distro.fw == 'nftables' %}
-<div class="grid grid-2">
+<div id="nft-section">
   <div class="card">
     <h3>Configuración nftables</h3>
     <p class="muted small">Las reglas persistentes viven en <code>{{ nft_conf }}</code>. "Aplicar" valida con <code>nft -c -f</code> y, si es correcto, reinicia el servicio nftables (vacía el ruleset actual y carga el archivo; puede afectar reglas añadidas por Docker).</p>
     <a class="btn" href="{{ url_for('files.index') }}?edit={{ nft_conf | urlencode }}">editar {{ nft_conf }}</a>
     <button class="btn btn-primary" onclick="nftApply()">Aplicar</button>
   </div>
-  <div class="card">
-    <h3>Sugerencia</h3>
-    <p class="muted small">Para gestionar reglas desde el panel (agregar/eliminar puertos, políticas), instala UFW. MatiPanel lo detectará automáticamente al reiniciarse el servicio.</p>
-    <pre class="terminal">apt install ufw
-systemctl restart matipanel</pre>
-  </div>
 </div>
 {% endif %}
 
-<div class="card">
-  <h3>Estado detallado</h3>
-  <pre id="fw-output" class="terminal output">—</pre>
-</div>
+<details class="card">
+  <summary style="cursor:pointer; font-weight:600; font-size:13px;">Estado detallado (salida del firewall)</summary>
+  <pre id="fw-output" class="terminal output" style="margin-top:12px;">—</pre>
+</details>
 {% endblock %}
 
 {% block scripts %}
@@ -97,38 +116,69 @@ let st = {};
 function show(id, on) { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; }
 function done(d) { if (!d.ok) ui.alert(d.error, { title: 'Error', icon: 'error' }); load(); }
 
+const NAMES = { ufw: 'UFW', firewalld: 'firewalld', nftables: 'nftables', iptables: 'iptables' };
+const PRESETS = [
+  ['SSH', '22', 'tcp'], ['HTTP (web)', '80', 'tcp'], ['HTTPS (web)', '443', 'tcp'],
+  ['MatiPanel', '{{ request.host.rsplit(":", 1)[1] if ":" in request.host else "8443" }}', 'tcp'],
+  ['MySQL / MariaDB', '3306', 'tcp'], ['PostgreSQL', '5432', 'tcp'], ['FTP', '21', 'tcp'],
+  ['Correo SMTP', '25', 'tcp'], ['DNS', '53', 'any'], ['Samba', '445', 'tcp'], ['Webmin', '10000', 'tcp'],
+];
+
+function head(level, title, sub) {
+  document.getElementById('fw-head').dataset.level = level;
+  document.getElementById('fw-led').className = 'led lg ' + (level === 'ok' ? '' : level);
+  document.getElementById('fw-title').textContent = title;
+  document.getElementById('fw-sub').textContent = sub || '';
+}
+
 async function load() {
-  const r = await fetch("{{ url_for('firewall.status') }}");
-  st = await r.json();
-  const status = document.getElementById('fw-status');
+  try { st = await (await fetch("{{ url_for('firewall.status') }}")).json(); }
+  catch (e) { head('err', 'No se pudo consultar el firewall', String(e)); return; }
   const actions = document.getElementById('fw-actions');
-  const eng = escapeHtml(st.engine || 'firewall');
+  const name = NAMES[st.engine] || 'Firewall';
   actions.innerHTML = '';
   document.getElementById('fw-output').textContent = st.raw || st.error || '—';
+  const canInstall = st.can_install_ufw || st.engine === 'nftables' || st.engine === 'iptables';
+  document.getElementById('install-card').hidden = !(canInstall && st.engine !== 'ufw' && st.engine !== 'firewalld');
+  document.getElementById('ufw-section').hidden = st.engine !== 'ufw' || !!st.error;
+
   if (!st.installed) {
-    status.innerHTML = '<span class="pill mute">Ningún firewall detectado</span> &nbsp; <code>apt install ufw</code>';
+    head('warn', 'No hay ningún firewall instalado', 'El servidor acepta conexiones a todos sus puertos. Instala UFW para protegerlo.');
     return;
   }
-  status.innerHTML = (st.error ? '<span class="pill warn">' + eng + '</span> ' + escapeHtml(st.error)
-    : st.active ? '<span class="pill ok">' + eng + ' activo</span>' : '<span class="pill mute">' + eng + ' inactivo</span>');
+  if (st.error) { head('err', name + ': error al consultar', st.error); return; }
 
-  if (st.engine === 'ufw' && !st.error) {
+  if (st.engine === 'ufw') {
+    head(st.active ? 'ok' : 'warn',
+      st.active ? 'Firewall activo (UFW)' : 'Firewall instalado pero INACTIVO (UFW)',
+      st.active ? `Entrante: ${st.defaults.incoming || '?'} · Saliente: ${st.defaults.outgoing || '?'} · ${st.rules.length} regla(s)`
+                : 'Las reglas se guardan pero no se aplican hasta que lo actives.');
     actions.innerHTML = st.active
       ? '<button class="btn btn-danger" onclick="ufwToggle(false)">Desactivar</button>'
-      : '<button class="btn btn-primary" onclick="ufwToggle(true)">Activar</button>';
-    show('ufw-panel', true); show('ufw-rules', st.active);
+      : '<button class="btn btn-primary" onclick="ufwToggle(true)">Activar firewall</button>';
     if (st.defaults.incoming) document.getElementById('p-incoming').value = st.defaults.incoming;
     if (st.defaults.outgoing) document.getElementById('p-outgoing').value = st.defaults.outgoing;
-    document.querySelector('#ufw-rules tbody').innerHTML = st.rules.length ? st.rules.map(x => `
+    document.getElementById('rules-note').textContent = st.active ? 'Aplicadas ahora' : 'Guardadas (se aplicarán al activar)';
+    document.querySelector('#ufw-rules tbody').innerHTML = st.rules.length ? st.rules.map((x, i) => `
       <tr>
-        <td>${x.num}</td><td class="mono">${escapeHtml(x.to)}</td>
+        <td class="muted">${x.num ?? i + 1}</td><td class="mono">${escapeHtml(x.to)}</td>
         <td><span class="pill ${/ALLOW/.test(x.action) ? 'ok' : /LIMIT/.test(x.action) ? 'warn' : 'err'}">${escapeHtml(x.action)}</span></td>
         <td class="mono">${escapeHtml(x.from)}</td><td>${escapeHtml(x.comment)}</td>
-        <td><button class="btn btn-sm btn-danger" onclick="ufwDelete(${jsArg(x.num)}, ${jsArg(x.raw)})">Eliminar</button></td>
-      </tr>`).join('') : '<tr><td colspan="6" class="muted center">Sin reglas</td></tr>';
+        <td class="right"><button class="btn btn-sm btn-danger" onclick='ufwDelete(${jsArg({ num: x.num, spec: x.spec, raw: x.raw })})'>Eliminar</button></td>
+      </tr>`).join('') : '<tr><td colspan="6" class="muted center">Sin reglas todavía. Usa «Permitir rápido» o «Agregar regla».</td></tr>';
+    return;
+  }
+  if (st.engine === 'firewalld') {
+    head(st.active ? 'ok' : 'warn', st.active ? 'Firewall activo (firewalld)' : 'firewalld inactivo',
+      st.active ? 'Zona por defecto: ' + st.default_zone : 'Inícialo desde Servicios (firewalld.service).');
+  } else if (st.engine === 'nftables') {
+    head(st.active ? 'ok' : 'warn', st.active ? 'nftables con reglas cargadas' : 'nftables sin reglas',
+      'Solo lectura y edición del archivo. Para gestionar puertos con clics, instala UFW.');
+  } else {
+    head('warn', name, 'Solo lectura.');
   }
 
-  if (st.engine === 'firewalld' && st.active && !st.error) {
+  if (st.engine === 'firewalld' && st.active) {
     show('fwd-panel', true);
     document.getElementById('fwd-zone').textContent = '(zona ' + st.default_zone + ')';
     const chips = (list, fn) => list.length ? list.map(v =>
@@ -138,6 +188,30 @@ async function load() {
     document.getElementById('fwd-services').innerHTML = chips(st.services, 'fwdRemoveService');
     document.getElementById('fwd-avail').innerHTML = st.available_services.map(s => `<option value="${escapeHtml(s)}">`).join('');
   }
+}
+
+document.getElementById('presets').innerHTML = PRESETS.map(([n, port, proto]) =>
+  `<a href="#" onclick="ufwPreset(${jsArg(n)}, ${jsArg(port)}, ${jsArg(proto)}); return false;">
+     <span class="mono small muted">${escapeHtml(port)}</span>${escapeHtml(n)}</a>`).join('');
+
+async function ufwInstall() {
+  if (!await ui.confirm('Se instalará UFW con apt. Quedará inactivo hasta que lo actives; no cambia nada todavía.',
+      { title: 'Instalar UFW', confirmText: 'Instalar' })) return;
+  const b = document.getElementById('install-btn');
+  b.disabled = true; b.textContent = 'Instalando…';
+  const d = await postJSON("{{ url_for('firewall.ufw_install') }}", {});
+  b.disabled = false; b.textContent = 'Instalar UFW';
+  if (!d.ok) return ui.alert(d.error, { title: 'No se pudo instalar UFW', icon: 'error' });
+  ui.toast('UFW instalado. Agrega reglas y luego actívalo.');
+  location.reload();
+}
+
+async function ufwPreset(name, port, proto) {
+  if (!await ui.confirm(`Se permitirá el tráfico entrante al puerto ${port} (${proto === 'any' ? 'TCP y UDP' : proto.toUpperCase()}) desde cualquier origen.`,
+      { title: 'Permitir ' + name, confirmText: 'Permitir' })) return;
+  const d = await postJSON("{{ url_for('firewall.ufw_add_rule') }}", { action: 'allow', proto, port, from: '', comment: name.replace(/[^A-Za-z0-9 _.,:\/()-]/g, '') });
+  if (d.ok) ui.toast(name + ' permitido');
+  done(d);
 }
 
 /* UFW */
@@ -152,14 +226,17 @@ async function ufwToggle(enable) {
 async function ufwAdd() {
   const v = id => document.getElementById(id).value.trim();
   const data = { action: v('r-action'), proto: v('r-proto'), port: v('r-port'), from: v('r-from'), comment: v('r-comment') };
+  if (!data.port) return ui.alert('Escribe el puerto (ej. 80) o un rango (ej. 8000:8100).', { title: 'Falta el puerto', icon: 'warning' });
   const d = await postJSON("{{ url_for('firewall.ufw_add_rule') }}", data);
-  if (d.ok) { document.getElementById('r-port').value = ''; document.getElementById('r-comment').value = ''; }
+  if (d.ok) { document.getElementById('r-port').value = ''; document.getElementById('r-comment').value = ''; ui.toast('Regla agregada'); }
   done(d);
 }
 
-async function ufwDelete(num, raw) {
-  if (!await ui.confirm('¿Eliminar la regla?\n\n' + raw, { title: 'Eliminar regla', danger: true, confirmText: 'Eliminar' })) return;
-  done(await postJSON("{{ url_for('firewall.ufw_delete_rule') }}", { num }));
+async function ufwDelete(rule) {
+  if (!await ui.confirm('¿Eliminar la regla?\n\n' + rule.raw, { title: 'Eliminar regla', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON("{{ url_for('firewall.ufw_delete_rule') }}", rule.num ? { num: rule.num } : { spec: rule.spec });
+  if (d.ok) ui.toast('Regla eliminada');
+  done(d);
 }
 
 async function ufwDefault(direction, policy) {

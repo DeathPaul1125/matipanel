@@ -15,6 +15,7 @@ from .php import php_bp
 from .databases import databases_bp
 from .docker import docker_bp
 from .appearance import appearance_bp
+from .help import help_bp, CONTEXT as HELP_CONTEXT
 from .files import files_bp
 from .packages import packages_bp
 from .logs import logs_bp
@@ -31,9 +32,10 @@ def register_modules(app, sock):
         (webserver_bp, "/webserver"), (ssl_bp, "/ssl"), (php_bp, "/php"),
         (databases_bp, "/databases"), (docker_bp, "/docker"), (files_bp, "/files"),
         (packages_bp, "/packages"), (logs_bp, "/logs"), (terminal_bp, "/terminal"),
-        (appearance_bp, "/apariencia"),
+        (appearance_bp, "/apariencia"), (help_bp, "/ayuda"),
     ]:
         app.register_blueprint(bp, url_prefix=prefix)
 
+    app.jinja_env.globals["HELP_CONTEXT"] = HELP_CONTEXT  # botón "?" de cada pantalla
     register_terminal_ws(sock)
     register_logs_ws(sock)

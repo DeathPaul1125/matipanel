@@ -6,6 +6,7 @@ psutil>=5.9.0
 python-pam>=2.0.2
 pyotp>=2.9.0
 qrcode>=7.4.0
+markdown>=3.5
 gunicorn>=21.2.0
 packaging>=23.0  # gunicorn 23 la usa en el worker gevent pero no la declara
 gevent>=23.9.0

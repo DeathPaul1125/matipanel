@@ -54,6 +54,7 @@
         ("Cuenta", [
           ("auth.security", "Seguridad", '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
           ("appearance.index", "Apariencia", '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 2a10 10 0 0 0 0 20c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6h1.9A5.6 5.6 0 0 0 22 11c0-5-4.5-9-10-9z"/>'),
+          ("help.page", "Ayuda", '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/>'),
           ("dashboard.about", "Acerca de", '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/>'),
         ]),
       ] %}
@@ -87,6 +88,10 @@
         </div>
         <div class="topbar-meta">
           <span class="hide-sm mono">{{ request.host.split(':')[0] }}</span>
+          {% set help_slug = HELP_CONTEXT.get(request.blueprint) %}
+          <a class="icon-btn" href="{{ url_for('help.page', slug=help_slug) if help_slug else url_for('help.page') }}" title="Ayuda de esta pantalla" aria-label="Ayuda">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </a>
           {% include "_theme_toggle.html" %}
         </div>
       </header>

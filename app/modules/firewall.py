@@ -1,10 +1,12 @@
-"""Firewall: UFW y firewalld (gestión de reglas), nftables (Debian 12 por defecto) e iptables."""
+"""Firewall: UFW y firewalld (gestión de reglas), nftables (Debian 12+ por defecto) e iptables."""
 import ipaddress
 import os
 import re
+import shlex
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 from ..distro import detect
+from ..modules.packages import apt_get
 from ..util import run
 
 firewall_bp = Blueprint("firewall", __name__)
@@ -38,13 +40,16 @@ def _port(spec, sep):
 @firewall_bp.route("/")
 @login_required
 def index():
+    detect.cache_clear()
     return render_template("firewall.html", distro=detect(), nft_conf=NFT_CONF)
 
 
 @firewall_bp.route("/api/status")
 @login_required
 def status():
-    fw = detect()["fw"]
+    detect.cache_clear()
+    d = detect()
+    fw = d["fw"]
     if fw == "ufw":
         return jsonify(_ufw_status())
     if fw == "firewalld":
@@ -53,8 +58,21 @@ def status():
         return jsonify(_nft_status())
     if fw == "iptables":
         return jsonify(_iptables_status())
-    return jsonify({"installed": False, "engine": None,
+    return jsonify({"installed": False, "engine": None, "can_install_ufw": d["pkg"] == "apt",
                     "error": "Ningún firewall detectado (ufw/firewalld/nftables/iptables)"})
+
+
+@firewall_bp.route("/api/ufw/install", methods=["POST"])
+@login_required
+def ufw_install():
+    """Instala UFW (APT). Queda inactivo: se activa desde el panel, que antes permite SSH y el panel."""
+    if detect()["pkg"] != "apt":
+        return _err("La instalación automática de UFW solo está disponible en Debian/Ubuntu")
+    ok, out, msg = apt_get("install", "ufw", timeout=600)
+    detect.cache_clear()
+    if not ok:
+        return _err(msg or "apt-get falló", 500)
+    return jsonify({"ok": True, "output": out[-4000:]})
 
 
 # ── UFW ──────────────────────────────────────────────────────────────
@@ -75,7 +93,35 @@ def _ufw_status():
     if res["active"]:
         code, out, _ = run(["ufw", "status", "numbered"], timeout=10)
         res["rules"] = _parse_numbered(out) if code == 0 else []
+    else:
+        res["rules"] = _added_rules()
     return res
+
+
+def _added_rules():
+    """Reglas guardadas (sirve con UFW inactivo). Cada una con su `spec` para poder borrarla."""
+    code, out, _ = run(["ufw", "show", "added"], timeout=10)
+    rules = []
+    for line in out.splitlines() if code == 0 else []:
+        line = line.strip()
+        if not line.startswith("ufw "):
+            continue
+        spec = line[4:]
+        try:
+            tokens = shlex.split(spec)
+        except ValueError:
+            continue
+        action = tokens[0].upper() if tokens else ""
+        frm = tokens[tokens.index("from") + 1] if "from" in tokens[:-1] else "Anywhere"
+        comment = tokens[tokens.index("comment") + 1] if "comment" in tokens[:-1] else ""
+        to = tokens[1] if len(tokens) > 1 else ""
+        if "port" in tokens[:-1]:
+            to = tokens[tokens.index("port") + 1]
+            if "proto" in tokens[:-1]:
+                to += "/" + tokens[tokens.index("proto") + 1]
+        rules.append({"num": None, "spec": spec, "to": to,
+                      "action": action + " IN", "from": frm, "comment": comment, "raw": line})
+    return rules
 
 
 def _ufw_file_defaults():
@@ -192,10 +238,18 @@ def ufw_add_rule():
 def ufw_delete_rule():
     if not _engine_is("ufw"):
         return _err("UFW no es el firewall activo")
-    num = (request.get_json(silent=True) or {}).get("num")
-    if not isinstance(num, int) or isinstance(num, bool) or not 1 <= num <= 9999:
-        return _err("Número de regla inválido")
-    code, out, err = run(["ufw", "--force", "delete", str(num)], timeout=30)
+    d = request.get_json(silent=True) or {}
+    num, spec = d.get("num"), d.get("spec")
+    if spec:
+        # Solo se aceptan especificaciones que UFW mismo reporta como guardadas
+        if spec not in {r["spec"] for r in _added_rules()}:
+            return _err("La regla ya no existe; refresca la página")
+        cmd = ["ufw", "--force", "delete", *shlex.split(spec)]
+    elif isinstance(num, int) and not isinstance(num, bool) and 1 <= num <= 9999:
+        cmd = ["ufw", "--force", "delete", str(num)]
+    else:
+        return _err("Regla inválida")
+    code, out, err = run(cmd, timeout=30)
     if code != 0:
         return _err(err.strip() or out.strip() or "ufw falló", 500)
     return jsonify({"ok": True, "output": out})

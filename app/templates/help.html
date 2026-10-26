@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.title }} · Ayuda{% endblock %}
+{% block heading %}Ayuda{% endblock %}
+
+{% block content %}
+<div class="docs">
+  {# Índice + buscador #}
+  <aside class="docs-index">
+    <div class="docs-search">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" id="q" placeholder="Buscar en la ayuda…" autocomplete="off" aria-label="Buscar en la ayuda">
+      <kbd>Ctrl K</kbd>
+    </div>
+    <div id="results" class="docs-results" hidden></div>
+    <nav id="toc">
+      {% for g in groups %}
+      <div class="docs-group">{{ g.name }}</div>
+      {% for d in g.docs %}
+      <a class="docs-link {% if d.slug == doc.slug %}active{% endif %}" href="{{ url_for('help.page', slug=d.slug) }}">{{ d.title }}</a>
+      {% if d.slug == doc.slug %}
+        {% for s in doc.sections %}<a class="docs-sublink" href="#{{ s.id }}">{{ s.title }}</a>{% endfor %}
+      {% endif %}
+      {% endfor %}
+      {% endfor %}
+    </nav>
+  </aside>
+
+  {# Contenido #}
+  <article class="doc" id="doc">
+    {{ doc.html|safe }}
+    <nav class="doc-pager">
+      {% if nav.prev %}<a href="{{ url_for('help.page', slug=nav.prev.slug) }}"><small>← Anterior</small>{{ nav.prev.title }}</a>{% else %}<span></span>{% endif %}
+      {% if nav.next %}<a class="next" href="{{ url_for('help.page', slug=nav.next.slug) }}"><small>Siguiente →</small>{{ nav.next.title }}</a>{% endif %}
+    </nav>
+  </article>
+
+  {# En esta página #}
+  <aside class="doc-onpage">
+    {% if doc.sections %}
+    <div class="docs-group">En esta página</div>
+    {% for s in doc.sections %}
+      <a href="#{{ s.id }}" data-target="{{ s.id }}">{{ s.title }}</a>
+    {% endfor %}
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PAGE = "{{ url_for('help.page') }}";
+const q = document.getElementById('q'), results = document.getElementById('results'), toc = document.getElementById('toc');
+let index = null;
+
+// Normaliza para buscar sin importar mayúsculas ni acentos
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+async function loadIndex() {
+  if (!index) index = await (await fetch("{{ url_for('help.search_index') }}")).json();
+  return index;
+}
+
+function snippet(text, terms) {
+  const t = norm(text);
+  let pos = Math.min(...terms.map(w => t.indexOf(w)).filter(i => i >= 0));
+  if (!isFinite(pos)) pos = 0;
+  const start = Math.max(0, pos - 60), raw = text.slice(start, start + 180);
+  let html = escapeHtml((start ? '…' : '') + raw + (start + 180 < text.length ? '…' : ''));
+  for (const w of terms) {
+    // Resaltar respetando acentos: comparar sobre la versión normalizada, carácter a carácter
+    const n = norm(html);
+    let out = '', i = 0, k;
+    while ((k = n.indexOf(w, i)) >= 0) { out += html.slice(i, k) + '<mark>' + html.slice(k, k + w.length) + '</mark>'; i = k + w.length; }
+    html = out + html.slice(i);
+  }
+  return html;
+}
+
+async function search() {
+  const terms = norm(q.value.trim()).split(/\s+/).filter(w => w.length > 1);
+  if (!terms.length) { results.hidden = true; toc.hidden = false; return; }
+  const idx = await loadIndex();
+  const scored = [];
+  for (const it of idx) {
+    const hay = norm(it.doc + ' ' + it.section + ' ' + it.text), title = norm(it.section + ' ' + it.doc);
+    if (!terms.every(w => hay.includes(w))) continue;
+    const score = terms.reduce((a, w) => a + (title.includes(w) ? 10 : 0) + hay.split(w).length - 1, 0);
+    scored.push({ it, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  toc.hidden = true; results.hidden = false;
+  results.innerHTML = `<div class="docs-group">${scored.length} resultado(s)</div>` + (scored.slice(0, 40).map(({ it }) =>
+    `<a class="docs-hit" href="${PAGE}${encodeURIComponent(it.slug)}?q=${encodeURIComponent(q.value.trim())}${it.id ? '#' + encodeURIComponent(it.id) : ''}">
+       <b>${escapeHtml(it.section)}</b><small>${escapeHtml(it.doc)}</small><span>${snippet(it.text, terms)}</span></a>`).join('')
+    || '<div class="empty">Sin resultados. Prueba con otra palabra.</div>');
+}
+q.addEventListener('input', search);
+q.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { const first = results.querySelector('a'); if (first) location.href = first.href; }
+  if (e.key === 'Escape') { q.value = ''; search(); }
+});
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); q.focus(); q.select(); }
+});
+
+// Notas: dar estilo según la etiqueta en negrita ("Nota:", "Importante:", "Consejo:")
+document.querySelectorAll('.doc blockquote').forEach(b => {
+  const label = norm((b.querySelector('strong')?.textContent || ''));
+  b.classList.add(label.startsWith('importante') || label.startsWith('advertencia') ? 'callout-warn'
+    : label.startsWith('consejo') ? 'callout-tip' : 'callout-note');
+});
+// Tablas anchas con scroll
+document.querySelectorAll('.doc table').forEach(t => { t.classList.add('lx'); const w = document.createElement('div'); w.className = 'table-wrap'; t.replaceWith(w); w.appendChild(t); });
+
+// Venir desde una búsqueda: resaltar los términos en la página
+const fromQ = new URLSearchParams(location.search).get('q');
+if (fromQ) {
+  q.value = fromQ;
+  const terms = norm(fromQ).split(/\s+/).filter(w => w.length > 1);
+  const walker = document.createTreeWalker(document.getElementById('doc'), NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const text = node.nodeValue, n = norm(text);
+    const hits = [];
+    for (const w of terms) { let i = 0, k; while ((k = n.indexOf(w, i)) >= 0) { hits.push([k, k + w.length]); i = k + w.length; } }
+    if (!hits.length || node.parentElement.closest('pre, code')) continue;
+    hits.sort((a, b) => a[0] - b[0]);
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const [a, b] of hits) {
+      if (a < last) continue;
+      frag.append(text.slice(last, a));
+      const m = document.createElement('mark'); m.textContent = text.slice(a, b); frag.append(m);
+      last = b;
+    }
+    frag.append(text.slice(last));
+    node.replaceWith(frag);
+  }
+  const first = document.querySelector('.doc mark');
+  if (first && !location.hash) window.scrollTo(0, first.getBoundingClientRect().top + window.scrollY - 160);
+}
+
+// "En esta página": marcar la sección visible
+const links = [...document.querySelectorAll('.doc-onpage a')];
+if (links.length) {
+  const obs = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) {
+      links.forEach(l => l.classList.toggle('active', l.dataset.target === e.target.id));
+    }
+  }, { rootMargin: '-70px 0px -70% 0px' });
+  document.querySelectorAll('.doc h2[id]').forEach(h => obs.observe(h));
+}
+</script>
+{% endblock %}
