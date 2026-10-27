@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.10.0] - 2026-10-27
+
+### Añadido
+- ↔️ **Colapsar el menú a un clic** — botón en la barra superior (en cualquier pantalla) que deja el menú solo con iconos y lo vuelve a expandir; se recuerda por usuario.
+- ⛶ **Pantalla completa en el Explorador BD** — oculta el menú y la barra superior y usa toda la pantalla para el árbol, los datos, las consultas y el diagrama; se sale con **Salir** o **Esc**.
+
 ## [0.9.0] - 2026-10-27
 
 ### Añadido

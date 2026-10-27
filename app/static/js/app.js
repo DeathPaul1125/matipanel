@@ -42,6 +42,31 @@ document.addEventListener('keydown', e => {
 // ui.prompt(texto, {title, value, placeholder, type, confirmText, validate}) → Promise<string|null>
 // ui.form({title, text, fields:[{name,label,type,value,options,placeholder,required,help}], confirmText, danger}) → Promise<obj|null>
 // ui.toast(texto, tipo = 'success'|'error'|'info'|'warning', ms)
+// Modo enfocado: oculta menú y barra superior y pide pantalla completa al navegador.
+// Botones con data-focus-toggle lo activan; Esc (o salir de la pantalla completa) lo cierra.
+window.focusMode = on => {
+  const root = document.documentElement;
+  on = on ?? !root.classList.contains('mp-focus');
+  root.classList.toggle('mp-focus', on);
+  if (on && !document.fullscreenElement && root.requestFullscreen) root.requestFullscreen().catch(() => {});
+  if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  document.querySelectorAll('[data-focus-toggle]').forEach(b => {
+    b.classList.toggle('active', on);
+    b.title = on ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa';
+    const label = b.querySelector('.focus-label');
+    if (label) label.textContent = on ? 'Salir' : 'Pantalla completa';
+  });
+  window.dispatchEvent(new Event('resize'));  // gráficos y diagrama se reacomodan
+};
+document.addEventListener('click', e => { if (e.target.closest('[data-focus-toggle]')) focusMode(); });
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && document.documentElement.classList.contains('mp-focus')) focusMode(false);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.documentElement.classList.contains('mp-focus') && !document.fullscreenElement
+      && !document.querySelector('dialog[open], .modal.open')) focusMode(false);
+});
+
 window.ui = (() => {
   const ICON = {
     info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',

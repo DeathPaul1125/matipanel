@@ -192,6 +192,8 @@ code { font-family: var(--mono); font-size: 0.9em; padding: 1px 5px; background:
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
 .icon-btn:active { transform: scale(0.95); }
 .menu-btn { display: none; }
+@media (max-width: 900px) { .sb-btn { display: none; } }
+html[data-sbmini="1"] .sb-chev { transform: rotate(180deg); transform-origin: 14px 12px; }
 /* El icono visible indica el tema al que se cambia */
 .theme-btn .i-sun { display: none; }
 :root[data-theme="dark"] .theme-btn .i-sun { display: block; }
@@ -1156,7 +1158,16 @@ button.nav-group:hover { color: var(--sb-text, var(--text)); }
 .dbx-children { margin-left: 11px; padding-left: 6px; border-left: 1px solid var(--border); }
 
 .dbx-main { min-width: 0; }
-.dbx-head { padding: 10px 14px 0; }
+.dbx-head { padding: 10px 14px 0; position: relative; }
+.dbx-focus { position: absolute; top: 8px; right: 10px; z-index: 1; }
+.dbx-focus.active { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent); }
+.dbx-head .dbx-crumbs { padding-right: 170px; }
+/* Modo enfocado (ver focusMode en app.js): solo la herramienta, a todo lo alto */
+html.mp-focus .sidebar, html.mp-focus .topbar { display: none; }
+html.mp-focus .content { padding: 10px 12px; }
+html.mp-focus .dbx-side { top: 10px; max-height: calc(100vh - 20px); }
+html.mp-focus .dbx-gridwrap { max-height: calc(100vh - 210px); }
+html.mp-focus .erd-wrap { height: calc(100vh - 150px); }
 .dbx-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font: 13px var(--mono); padding-bottom: 8px; }
 .dbx-crumbs button { display: inline-flex; align-items: center; gap: 5px; border: none; background: none; padding: 3px 6px; border-radius: 4px; font: inherit; color: var(--text-muted); cursor: pointer; }
 .dbx-crumbs button:hover { background: var(--accent-bg); color: var(--accent-text); }

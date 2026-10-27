@@ -16,6 +16,14 @@ El explorador te deja ver y editar el contenido de tus bases de MariaDB/MySQL y 
 - La dirección del navegador guarda la base, la tabla y la pestaña. Puedes guardarla como marcador o usar los botones **atrás** y **adelante** del navegador.
 - **Refrescar** (abajo del árbol) vuelve a leer la lista de bases y tablas.
 
+### Pantalla completa
+
+Para trabajar con más espacio (tablas anchas, consultas largas o el diagrama), pulsa **Pantalla completa**, arriba a la derecha junto a las migas. Se ocultan el menú y la barra superior del panel y el navegador pasa a pantalla completa: el árbol, los datos y el diagrama usan todo el alto.
+
+Para salir pulsa **Salir** o la tecla **Esc**.
+
+> **Consejo:** Si solo quieres más ancho sin dejar de ver el menú, usa el botón de la barra superior que lo colapsa a iconos (ver [Apariencia](31-apariencia.md#usar-la-barra-compacta)).
+
 > **Nota:** El número de filas del árbol y de la lista de tablas es una **estimación** del motor (en MySQL puede tardar en actualizarse). El número exacto aparece en la pestaña **Datos**.
 
 ## Ver las tablas de una base

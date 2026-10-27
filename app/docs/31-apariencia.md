@@ -61,7 +61,9 @@ En la tarjeta **Barra lateral**, elige un estilo:
 
 ### Usar la barra compacta
 
-Marca **Barra compacta → Activar** para mostrar solo los iconos del menú. El nombre de cada sección aparece al pasar el mouse. Útil en pantallas pequeñas.
+Marca **Barra compacta → Activar** para mostrar solo los iconos del menú. El nombre de cada sección aparece al pasar el mouse. Útil en pantallas pequeñas o para dar más espacio a tablas y consultas.
+
+También puedes colapsarla y expandirla desde cualquier pantalla con el botón de la **barra superior**, a la izquierda del título (el icono de un panel con una flecha). El cambio se guarda igual que esta opción.
 
 ## Ajustar texto y espaciado
 
