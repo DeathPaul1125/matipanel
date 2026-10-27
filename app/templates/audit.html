@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Auditoría{% endblock %}
+{% block heading %}Registro de auditoría{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="au-filters">
+    <label class="form-row"><span>Periodo</span>
+      <select class="input" id="f-days">{% for d in days %}<option value="{{ d }}" {% if d == 7 %}selected{% endif %}>{{ 'Último día' if d == 1 else 'Últimos ' ~ d ~ ' días' }}</option>{% endfor %}</select></label>
+    <label class="form-row"><span>Usuario</span>
+      <select class="input" id="f-user"><option value="">Todos</option>{% for u in users %}<option>{{ u }}</option>{% endfor %}</select></label>
+    <label class="form-row"><span>Módulo</span>
+      <select class="input" id="f-module"><option value="">Todos</option>{% for m in modules %}<option value="{{ m.key }}">{{ m.label }}</option>{% endfor %}</select></label>
+    <label class="form-row"><span>Resultado</span>
+      <select class="input" id="f-result"><option value="">Todos</option><option value="ok">Correctos</option><option value="fail">Fallidos</option></select></label>
+    <label class="form-row au-q"><span>Buscar</span><input class="input" id="f-q" placeholder="acción, objetivo, IP o detalle…"></label>
+    <a class="btn" id="export" href="#">Exportar CSV</a>
+  </div>
+  <p class="small muted" id="au-count"></p>
+  <table class="lx" id="au-table" data-table data-table-filter="off">
+    <thead><tr><th>Fecha</th><th>Usuario</th><th>IP</th><th>Módulo</th><th>Acción</th><th>Objetivo</th><th>Resultado</th><th data-nosort>Detalle</th></tr></thead>
+    <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <p class="small muted">Se registra toda acción que cambia algo en el servidor, las descargas sensibles, los inicios de sesión y la apertura de terminales. Las contraseñas, claves y contenidos de archivos no se guardan. Se conserva un año.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = {{ url_for('audit.index')|tojson }} + 'api/';
+const $ = id => document.getElementById(id);
+const params = () => new URLSearchParams({days: $('f-days').value, user: $('f-user').value, module: $('f-module').value,
+                                           result: $('f-result').value, q: $('f-q').value.trim()});
+async function load() {
+  $('export').href = API + 'export?' + params();
+  let d;
+  try { d = await (await fetch(API + 'events?' + params())).json(); } catch (e) { d = {events: []}; }
+  const tb = $('au-table').tBodies[0];
+  $('au-count').textContent = d.events.length >= d.limit ? `Se muestran los ${d.limit} eventos más recientes; afina los filtros o exporta el CSV para ver todos.` : `${d.events.length} eventos`;
+  if (!d.events.length) { tb.innerHTML = '<tr><td colspan="8" class="muted center">Sin eventos con estos filtros</td></tr>'; return; }
+  tb.innerHTML = d.events.map(e => {
+    const det = Object.entries(e.detail).map(([k, v]) => `<span class="mono">${escapeHtml(k)}</span>=${escapeHtml(v)}`).join(' · ');
+    return `<tr>
+      <td class="small nowrap" data-sort="${e.t}">${escapeHtml(new Date(e.t * 1000).toLocaleString('es'))}</td>
+      <td class="mono">${escapeHtml(e.user || '—')}</td><td class="mono small">${escapeHtml(e.ip)}</td>
+      <td>${escapeHtml(e.module_label)}</td><td>${escapeHtml(e.action)}</td><td class="mono small">${escapeHtml(e.target || '')}</td>
+      <td>${e.ok ? '<span class="pill ok">Correcto</span>' : `<span class="pill err">Falló</span>`}${e.status ? ` <span class="small muted">${e.status}</span>` : ''}</td>
+      <td class="small au-det">${det}</td></tr>`;
+  }).join('');
+}
+let timer;
+['f-days', 'f-user', 'f-module', 'f-result'].forEach(id => $(id).addEventListener('change', load));
+$('f-q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 300); });
+load();
+setInterval(load, 30000);
+</script>
+{% endblock %}

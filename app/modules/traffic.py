@@ -119,7 +119,8 @@ def thresholds(name, cfg=None, stats=None):
 
 
 def health_issues():
-    """Avisos para la barra de salud: uso sostenido (1 min) sobre el umbral y errores por minuto."""
+    """Avisos para la barra de salud: uso sostenido (1 min) sobre el umbral y errores por minuto.
+    → [(nivel, mensaje, clave estable)]"""
     cfg, stats = load_config(), psutil.net_if_stats()
     with _lock:
         snap = {k: list(v) for k, v in _recent.items()}
@@ -132,15 +133,15 @@ def health_issues():
         if mbps:
             avg = sum(max(p["rx"], p["tx"]) for p in pts) / len(pts) * 8 / 1e6
             if avg >= mbps:
-                out.append(("warn", f"{name} al {avg:.0f} Mbit/s"))
+                out.append(("warn", f"{name} al {avg:.0f} Mbit/s", f"net:{name}:uso"))
         if errors:
             n = sum(p["errs"] * 5 for p in pts) / window_min
             if n >= errors:
-                out.append(("warn", f"{name}: {n:.0f} errores de red por minuto"))
+                out.append(("warn", f"{name}: {n:.0f} errores de red por minuto", f"net:{name}:errores"))
         if drops:
             n = sum(p["drops"] * 5 for p in pts) / window_min
             if n >= drops:
-                out.append(("warn", f"{name}: {n:.0f} paquetes descartados por minuto"))
+                out.append(("warn", f"{name}: {n:.0f} paquetes descartados por minuto", f"net:{name}:descartes"))
     return out
 
 

@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Respaldos de apps{% endblock %}
+{% block heading %}Respaldos de apps{% endblock %}
+
+{% block content %}
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Servidor de respaldos</h3>
+    <p class="small muted">Los respaldos se envían por SSH a otro servidor Linux. Nada queda en este servidor.</p>
+    <div class="dp-form2">
+      <label class="form-row"><span>Servidor (IP o nombre)</span><input class="input mono" id="d-host" placeholder="192.100.10.70" autocomplete="off"></label>
+      <label class="form-row"><span>Puerto SSH</span><input class="input mono" id="d-port" type="number" min="1" max="65535" placeholder="22"></label>
+      <label class="form-row"><span>Usuario</span><input class="input mono" id="d-user" placeholder="respaldos" autocomplete="off"></label>
+      <label class="form-row"><span>Carpeta</span><input class="input mono" id="d-path" placeholder="/srv/respaldos/matipanel" autocomplete="off"></label>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="testDest()">Probar conexión</button>
+      <button class="btn btn-primary" onclick="saveDest()">Guardar</button>
+    </div>
+    <div id="d-status" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h3>Preparar el servidor de respaldos</h3>
+    <p class="small muted">Una sola vez, como root en el <b>servidor de respaldos</b> (no en este):</p>
+    <pre class="terminal ab-cmd" id="setup-cmd"></pre>
+    <div class="toolbar"><button class="btn btn-sm" data-copy="#setup-cmd">Copiar comandos</button></div>
+    <p class="small muted">La clave solo sirve para respaldos: <span class="mono">restrict</span> le quita reenvío de puertos, terminal y agente.
+      La huella del servidor se fija en la primera conexión.</p>
+    <div class="small" id="fp"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Aplicaciones</h3>
+  <table class="lx" id="apps-table" data-table>
+    <thead><tr><th>Aplicación</th><th>Qué se respalda</th><th>Programación</th><th>Conservar</th><th>Activo</th><th>Último respaldo</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <p class="small muted">Cada respaldo incluye la base de datos (volcado comprimido), los volúmenes de datos de la app y su configuración (<span class="mono">.env</span> y credenciales).
+    Si uno falla se reintenta a la hora y, si lo activaste, te llega un correo (<a href="{{ url_for('notify.index') }}">Notificaciones</a>).</p>
+</div>
+
+<div class="card" id="detail" hidden>
+  <div class="card-head"><h3>Respaldos de <span class="mono" id="det-name"></span></h3>
+    <button class="btn btn-sm" onclick="closeDetail()">Cerrar</button></div>
+  <div id="det-busy" class="ab-busy" hidden></div>
+  <table class="lx" id="list-table" data-table>
+    <thead><tr><th>Fecha</th><th>Tamaño</th><th>Acciones</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <h4>Registro del último trabajo</h4>
+  <pre class="terminal ab-log" id="det-log">—</pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = {{ url_for('appbackup.index')|tojson }} + 'api/';
+const SCHEDULES = {{ schedules|tojson }};
+const $ = id => document.getElementById(id);
+const getJSON = async url => { try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; } };
+const fmtBytes = n => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + u[i]; };
+const fmtDate = t => new Date(t * 1000).toLocaleString('es', {dateStyle: 'medium', timeStyle: 'short'});
+let OV = null, DETAIL = null, filled = false;
+
+function setupCmd(pub, d) {
+  const user = d.user || 'respaldos', path = d.path || '/srv/respaldos/matipanel';
+  return `adduser --disabled-password --gecos "" ${user}
+mkdir -p ${path} && chown ${user}: ${path} && chmod 700 ${path}
+install -d -m 700 -o ${user} -g ${user} /home/${user}/.ssh
+echo 'restrict ${pub}' >> /home/${user}/.ssh/authorized_keys
+chown ${user}: /home/${user}/.ssh/authorized_keys && chmod 600 /home/${user}/.ssh/authorized_keys`;
+}
+
+async function load() {
+  const d = await getJSON(API + 'overview');
+  if (!d.apps) return;
+  OV = d;
+  if (!filled) {
+    filled = true;
+    $('d-host').value = d.dest.host; $('d-port').value = d.dest.port || 22; $('d-user').value = d.dest.user; $('d-path').value = d.dest.path;
+  }
+  $('setup-cmd').textContent = d.pubkey ? setupCmd(d.pubkey, {user: $('d-user').value.trim(), path: $('d-path').value.trim()}) : 'No se pudo generar la clave SSH (¿falta ssh-keygen?).';
+  $('fp').innerHTML = d.fingerprints.length
+    ? 'Huella fijada: ' + d.fingerprints.map(f => `<div class="mono small">${escapeHtml(f)}</div>`).join('') + ` <button class="btn btn-sm" onclick="forgetHost()">Olvidar huella</button>`
+    : '<span class="muted">Aún no hay huella fijada.</span>';
+  renderApps();
+  if (DETAIL) loadStatus();
+}
+
+function renderApps() {
+  const tb = $('apps-table').tBodies[0];
+  if (!OV.apps.length) { tb.innerHTML = '<tr><td colspan="7" class="muted center">No hay aplicaciones desplegadas</td></tr>'; return; }
+  // No repintar mientras el usuario edita una fila
+  if (tb.contains(document.activeElement) && document.activeElement.matches('input, select')) return;
+  tb.innerHTML = OV.apps.map(a => {
+    const s = a.settings, st = a.state;
+    const what = [a.database === 'mariadb' ? 'MariaDB' : a.database === 'postgres' ? 'PostgreSQL' : null,
+                  ...a.volumes.map(v => 'vol. ' + v), 'config'].filter(Boolean).join(' · ');
+    const last = a.busy.busy ? `<span class="pill warn">${escapeHtml(a.busy.busy)}…</span> <span class="small muted">${escapeHtml(a.busy.step || '')}</span>`
+      : st.last_t ? (st.last_ok ? `<span class="pill ok">Correcto</span> <span class="small">${escapeHtml(fmtDate(st.last_t))} · ${escapeHtml(fmtBytes(st.last_size || 0))}</span>`
+                                : `<span class="pill err">Falló</span> <span class="small" title="${escapeHtml(st.last_error || '')}">${escapeHtml(fmtDate(st.last_t))}</span>`)
+      : '<span class="small muted">Nunca</span>';
+    return `<tr data-app="${escapeHtml(a.name)}">
+      <td><b class="mono">${escapeHtml(a.name)}</b>${a.deployed ? '' : ' <span class="pill mute">sin desplegar</span>'}</td>
+      <td class="small">${escapeHtml(what)}</td>
+      <td><div class="ab-sched"><select class="input ab-in" data-k="schedule">${Object.entries(SCHEDULES).map(([k, v]) => `<option value="${k}" ${k === s.schedule ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select>
+        <input class="input ab-in ab-time" data-k="time" type="time" value="${escapeHtml(s.time)}" ${s.schedule === '6h' ? 'hidden' : ''}></div></td>
+      <td><input class="input ab-in ab-keep" data-k="keep" type="number" min="1" max="365" value="${s.keep}"></td>
+      <td><input type="checkbox" data-k="enabled" ${s.enabled ? 'checked' : ''}></td>
+      <td data-sort="${st.last_t || 0}">${last}</td>
+      <td><div class="ab-acts"><button class="btn btn-sm" onclick="saveApp(${jsArg(a.name)})">Guardar</button>
+        <button class="btn btn-sm btn-primary" onclick="backupNow(${jsArg(a.name)})" ${a.busy.busy || !OV.configured ? 'disabled' : ''}>Respaldar ahora</button>
+        <button class="btn btn-sm" onclick="openDetail(${jsArg(a.name)})" ${OV.configured ? '' : 'disabled'}>Ver respaldos</button></div></td></tr>`;
+  }).join('');
+  tb.querySelectorAll('select[data-k="schedule"]').forEach(sel => sel.addEventListener('change', () => {
+    sel.closest('td').querySelector('[data-k="time"]').hidden = sel.value === '6h';
+  }));
+}
+
+function destBody() {
+  return {host: $('d-host').value.trim(), port: $('d-port').value, user: $('d-user').value.trim(), path: $('d-path').value.trim()};
+}
+async function saveDest() {
+  const d = await postJSON(API + 'dest', destBody());
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  ui.toast('Servidor de respaldos guardado');
+  load();
+}
+async function testDest() {
+  const s = await postJSON(API + 'dest', destBody());
+  if (!s.ok) return ui.alert(s.error || 'Datos inválidos', {title: 'Error', icon: 'error'});
+  $('d-status').innerHTML = '<span class="muted">Conectando…</span>';
+  const d = await postJSON(API + 'test', {});
+  $('d-status').innerHTML = d.ok
+    ? `<span class="pill ok">Conexión correcta</span> La carpeta existe y se puede escribir${d.free != null ? ` · <b>${escapeHtml(fmtBytes(d.free))}</b> libres` : ''}.`
+    : `<span class="pill err">Falló</span> ${escapeHtml(d.error || '')}`;
+  load();
+}
+async function forgetHost() {
+  if (!await ui.confirm('Se olvidará la huella del servidor y se aceptará la que presente en la próxima conexión. Hazlo solo si reinstalaste ese servidor o cambiaste su clave.', {title: 'Olvidar huella', confirmText: 'Olvidar'})) return;
+  await postJSON(API + 'forget-host', {});
+  load();
+}
+async function saveApp(name) {
+  const tr = document.querySelector(`#apps-table tr[data-app="${CSS.escape(name)}"]`);
+  const v = k => tr.querySelector(`[data-k="${k}"]`);
+  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/settings`,
+    {schedule: v('schedule').value, time: v('time').value, keep: v('keep').value, enabled: v('enabled').checked});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  ui.toast(`Programación de «${name}» guardada`);
+  document.activeElement.blur(); load();
+}
+async function backupNow(name) {
+  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/backup`, {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo iniciar', {title: 'Error', icon: 'error'});
+  ui.toast(`Respaldo de «${name}» iniciado`, 'info');
+  openDetail(name);
+}
+
+// ── Detalle de una app ──
+async function openDetail(name) {
+  DETAIL = name;
+  $('detail').hidden = false;
+  $('det-name').textContent = name;
+  $('list-table').tBodies[0].innerHTML = '<tr><td colspan="3" class="muted center">Consultando el servidor de respaldos…</td></tr>';
+  $('detail').scrollIntoView({behavior: 'smooth', block: 'start'});
+  loadStatus(); loadList();
+}
+function closeDetail() { DETAIL = null; $('detail').hidden = true; }
+async function loadList() {
+  const name = DETAIL;
+  const d = await getJSON(API + `apps/${encodeURIComponent(name)}/list`);
+  if (name !== DETAIL) return;
+  const tb = $('list-table').tBodies[0];
+  if (!d.ok) { tb.innerHTML = `<tr><td colspan="3" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  if (!d.backups.length) { tb.innerHTML = '<tr><td colspan="3" class="muted center">Todavía no hay respaldos en el servidor</td></tr>'; return; }
+  tb.innerHTML = d.backups.map(b => `<tr><td data-sort="${b.t}">${escapeHtml(fmtDate(b.t))} <span class="small muted mono">${escapeHtml(b.name)}</span></td>
+    <td data-sort="${b.size}">${escapeHtml(fmtBytes(b.size))}</td>
+    <td class="nowrap"><button class="btn btn-sm" onclick="restoreDlg(${jsArg(name)}, ${jsArg(b.name)})">Restaurar…</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteBackup(${jsArg(name)}, ${jsArg(b.name)})">Eliminar</button></td></tr>`).join('');
+}
+let wasBusy = false;
+async function loadStatus() {
+  const name = DETAIL;
+  if (!name) return;
+  const d = await getJSON(API + `apps/${encodeURIComponent(name)}/status`);
+  if (name !== DETAIL || !d.ok) return;
+  const busy = d.busy && d.busy.busy;
+  $('det-busy').hidden = !busy;
+  if (busy) $('det-busy').innerHTML = `<span class="led sm warn live"></span> ${escapeHtml(d.busy.busy)} en curso: ${escapeHtml(d.busy.step || '')}`;
+  $('det-log').textContent = d.log.length ? d.log.join('\n') : (d.state.last_error ? 'Último error: ' + d.state.last_error : '—');
+  $('det-log').scrollTop = 1e9;
+  if (wasBusy && !busy) { loadList(); load(); }
+  wasBusy = busy;
+  if (busy) setTimeout(loadStatus, 1500);
+}
+async function restoreDlg(name, stamp) {
+  const m = await getJSON(API + `apps/${encodeURIComponent(name)}/manifest/${encodeURIComponent(stamp)}`);
+  if (!m.ok) return ui.alert(m.error || 'No se pudo leer el respaldo', {title: 'Error', icon: 'error'});
+  const files = Object.keys(m.manifest.files);
+  const hasDb = files.some(f => f.startsWith('db.')), hasVol = files.some(f => f.startsWith('vol-'));
+  const fields = [];
+  if (hasDb) fields.push({name: 'db', type: 'checkbox', label: 'Base de datos (reemplaza la actual por completo)', value: true});
+  if (hasVol) fields.push({name: 'volumes', type: 'checkbox', label: 'Volúmenes de datos: ' + files.filter(f => f.startsWith('vol-')).map(f => f.slice(4, -7)).join(', ') + ' (se vacían y se reemplazan)', value: true});
+  if (!fields.length) return ui.alert('Este respaldo no tiene base de datos ni volúmenes que restaurar.', {title: 'Nada que restaurar'});
+  fields.push({name: 'confirm', label: `Escribe «${name}» para confirmar`, required: true});
+  const r = await ui.form({title: `Restaurar ${name} · ${fmtDate(new Date(stamp.replace(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, '$1-$2-$3T$4:$5:$6')) / 1000)}`,
+    text: 'La aplicación se detiene mientras se restaura y vuelve a arrancar al terminar. Los datos actuales que elijas se pierden.',
+    fields, confirmText: 'Restaurar', danger: true});
+  if (!r) return;
+  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/restore`, {stamp, db: !!r.db, volumes: !!r.volumes, confirm: r.confirm});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo iniciar', {title: 'Error', icon: 'error'});
+  ui.toast('Restauración iniciada', 'info');
+  setTimeout(loadStatus, 500);
+}
+async function deleteBackup(name, stamp) {
+  if (!await ui.confirm(`¿Eliminar el respaldo ${stamp} de «${name}» del servidor de respaldos?`, {title: 'Eliminar respaldo', danger: true, confirmText: 'Eliminar'})) return;
+  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/delete/${encodeURIComponent(stamp)}`, {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
+  loadList();
+}
+['d-user', 'd-path'].forEach(id => $(id).addEventListener('input', () => { if (OV && OV.pubkey) $('setup-cmd').textContent = setupCmd(OV.pubkey, {user: $('d-user').value.trim(), path: $('d-path').value.trim()}); }));
+load();
+setInterval(load, 15000);
+</script>
+{% endblock %}

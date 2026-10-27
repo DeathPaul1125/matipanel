@@ -1654,7 +1654,30 @@ def process_next():
                 update_dep(name, dep_id, status=status, error=error, finished=time.time())
             queue_save([i for i in queue_load() if not (i["app"] == name and i["id"] == dep_id)])
             _current.update(app=None, id=None, cancel=False, proc=None)
+        _notify_deploy(name, dep, status, error)
     return True
+
+
+def _notify_deploy(name, dep, status, error):
+    if status not in ("success", "failed"):
+        return
+    try:
+        from . import notify
+        d = find_dep(name, dep["id"]) or dep
+        commit = f"{(d.get('sha') or '')[:7]} {d.get('message') or ''}".strip() or "—"
+        origin = {"manual": "manual", "poll": "push detectado", "webhook": "webhook", "rollback": "reversión",
+                  "config": "cambio de configuración"}.get(dep.get("trigger"), dep.get("trigger") or "")
+        if status == "failed":
+            notify.event("deploy_fail", f"Falló el despliegue de «{name}»",
+                         f"El despliegue {dep['id']} de «{name}» ({origin}) falló:\n\n{error}\n\nCommit: {commit}\n"
+                         "La versión anterior sigue en línea. Revisa el log en Despliegues.",
+                         key=f"deploy:{dep['id']}", cooldown=0)
+        else:
+            notify.event("deploy_ok", f"«{name}» desplegada",
+                         f"El despliegue {dep['id']} de «{name}» ({origin}) terminó bien.\n\nCommit: {commit}",
+                         key=f"deploy:{dep['id']}", cooldown=0)
+    except Exception:  # un fallo del correo no debe afectar al despliegue
+        pass
 
 
 def _worker_loop():

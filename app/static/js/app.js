@@ -395,3 +395,23 @@ window.enhanceTable = (() => {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   return enhance;
 })();
+
+// ── Copiar al portapapeles: <button data-copy="#id"> copia el valor (o el texto) de ese elemento ──
+window.copyText = function (text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => ui.toast('Copiado'), () => ui.toast('No se pudo copiar', 'error'));
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); ui.toast('Copiado'); } catch (e) { ui.toast('No se pudo copiar', 'error'); }
+  ta.remove();
+};
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  const el = document.querySelector(b.dataset.copy);
+  const text = el && ('value' in el && el.tagName !== 'PRE' ? el.value : el.textContent);
+  if (text) copyText(text);
+});

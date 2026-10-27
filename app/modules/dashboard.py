@@ -11,6 +11,7 @@ from ..util import bytes_to_human as _bytes_to_human, run
 from ..distro import detect
 from .. import metrics
 from . import traffic
+from .. import audit
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -54,6 +55,7 @@ def _sample_loop():
             traffic.sample(t)  # velocidad por interfaz (Tráfico de red y alertas)
             if t - last_prune > 3600:
                 metrics.prune(t)
+                audit.prune(t)
                 last_prune = t
             net0, io0, t0 = net, io, t
         except Exception:  # el muestreo nunca debe morir por un error puntual
@@ -184,35 +186,50 @@ def overview():
 _health_cache = {"at": 0.0, "data": None}
 
 
+def compute_issues():
+    """Problemas actuales: ([(nivel, mensaje, clave estable)], servicios caídos).
+
+    La clave identifica el problema aunque cambie el número (las notificaciones por correo la usan
+    para avisar una vez al aparecer y otra al resolverse)."""
+    issues = []
+    failed = _failed_units()
+    for u in failed:
+        issues.append(("err", f"El servicio {u} falló", f"unit:{u}"))
+    for p in _partitions():
+        if p["percent"] >= 80:
+            issues.append(("err" if p["percent"] >= 90 else "warn", f"Disco {p['mount']} al {round(p['percent'])} %",
+                           f"disk:{p['mount']}"))
+    mem = psutil.virtual_memory().percent
+    if mem >= 85:
+        issues.append(("err" if mem >= 95 else "warn", f"Memoria al {round(mem)} %", "mem"))
+    recent = [p["cpu"] for p in list(_history)[-6:]]
+    if len(recent) >= 6 and sum(recent) / len(recent) >= 90:
+        issues.append(("warn", f"CPU sostenida al {round(sum(recent) / len(recent))} %", "cpu"))
+    load1, cores = psutil.getloadavg()[0], psutil.cpu_count() or 1
+    if load1 / cores >= 1.5:
+        issues.append(("warn", f"Carga alta ({load1:.2f})", "load"))
+    try:
+        issues += traffic.health_issues()
+    except Exception:  # la barra de salud no debe caerse por las alertas de red
+        pass
+    issues.sort(key=lambda i: i[0] != "err")
+    return issues, failed
+
+
 @dashboard_bp.route("/api/health")
 @login_required
 def health():
     now = time.time()
     if _health_cache["data"] and now - _health_cache["at"] < 10:
         return jsonify(_health_cache["data"])
-    issues = []
-    failed = _failed_units()
-    if failed:
-        issues.append(("err", f"El servicio {failed[0]} falló" if len(failed) == 1 else f"{len(failed)} servicios fallaron"))
-    for p in _partitions():
-        if p["percent"] >= 80:
-            issues.append(("err" if p["percent"] >= 90 else "warn", f"Disco {p['mount']} al {round(p['percent'])} %"))
-    mem = psutil.virtual_memory().percent
-    if mem >= 85:
-        issues.append(("err" if mem >= 95 else "warn", f"Memoria al {round(mem)} %"))
-    recent = [p["cpu"] for p in list(_history)[-6:]]
-    if len(recent) >= 6 and sum(recent) / len(recent) >= 90:
-        issues.append(("warn", f"CPU sostenida al {round(sum(recent) / len(recent))} %"))
-    load1, cores = psutil.getloadavg()[0], psutil.cpu_count() or 1
-    if load1 / cores >= 1.5:
-        issues.append(("warn", f"Carga alta ({load1:.2f})"))
-    try:
-        issues += traffic.health_issues()
-    except Exception:  # la barra de salud no debe caerse por las alertas de red
-        pass
-    issues.sort(key=lambda i: i[0] != "err")
-    level = "err" if any(l == "err" for l, _ in issues) else "warn" if issues else "ok"
-    data = {"level": level, "issues": [m for _, m in issues], "failed": failed,
+    issues, failed = compute_issues()
+    # Varios servicios caídos se resumen en una sola línea en la barra
+    units = [i for i in issues if i[2].startswith("unit:")]
+    shown = [i for i in issues if not i[2].startswith("unit:")]
+    if units:
+        shown.insert(0, units[0] if len(units) == 1 else ("err", f"{len(units)} servicios fallaron", "units"))
+    level = "err" if any(i[0] == "err" for i in shown) else "warn" if shown else "ok"
+    data = {"level": level, "issues": [i[1] for i in shown], "failed": failed,
             "updates": _pending_updates(), "sessions": len(psutil.users())}
     _health_cache.update(at=now, data=data)
     return jsonify(data)

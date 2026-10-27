@@ -101,6 +101,20 @@ def _too_many_attempts(*keys):
     return False
 
 
+def _notify_block(username, second_factor=False):
+    """Correo cuando una IP queda bloqueada por intentos fallidos (una vez por IP cada 15 min)."""
+    ip = request.remote_addr or "?"
+    if not limiter.blocked(ip):
+        return
+    from . import notify
+    what = "códigos 2FA incorrectos" if second_factor else "contraseñas incorrectas"
+    notify.event("login_block", f"Bloqueado el acceso desde {ip}",
+                 f"La IP {ip} quedó bloqueada 5 minutos en el panel por {what}.\n"
+                 f"Último usuario intentado: {username[:64] or '—'}\n\n"
+                 "Si no fuiste tú, revisa el registro de Auditoría y considera bloquear esa IP en el Firewall.",
+                 key=f"login:{ip}", cooldown=900)
+
+
 def _start_session(username):
     """Sesión nueva tras autenticar del todo: nada de la sesión previa (pending_2fa_user,
     datos plantados por un atacante, etc.) sobrevive al login."""
@@ -133,6 +147,7 @@ def login():
         if not ok or not _user_is_allowed(username):
             # Mismo mensaje en todos los casos para no revelar qué usuarios existen.
             flash("Usuario o contraseña incorrectos, o sin permiso para el panel.", "error")
+            _notify_block(username)
             return render_template("login.html"), 401
 
         if totp.is_enabled(username):
@@ -182,6 +197,7 @@ def login_2fa():
                       "info" if left > 2 else "error")
             return redirect(url_for("dashboard.index"))
         flash("Código inválido.", "error")
+        _notify_block(username, second_factor=True)
         return render_template("login_2fa.html"), 401
 
     return render_template("login_2fa.html")

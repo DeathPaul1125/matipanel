@@ -406,21 +406,6 @@ function commitHtml(c) {
   if (!c || !c.sha) return '<span class="muted">—</span>';
   return `<span class="mono">${escapeHtml(c.sha.slice(0, 7))}</span> <span class="small muted truncate dp-msg" title="${escapeHtml(c.message || '')}">${escapeHtml(c.message || '')}</span>`;
 }
-function copyText(text) {
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(() => ui.toast('Copiado'), () => ui.toast('No se pudo copiar', 'error'));
-    return;
-  }
-  const ta = document.createElement('textarea');
-  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-  document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); ui.toast('Copiado'); } catch (e) { ui.toast('No se pudo copiar', 'error'); }
-  ta.remove();
-}
-document.addEventListener('click', e => {
-  const b = e.target.closest('[data-copy]');
-  if (b) { const el = $(b.dataset.copy); if (el && el.value) copyText(el.value); }
-});
 function showError(d, title) {
   ui.alert(d.error || 'Error desconocido', { title: title || 'Error', icon: 'error' });
 }

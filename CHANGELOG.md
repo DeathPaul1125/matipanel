@@ -3,6 +3,9 @@
 ## [Sin publicar]
 
 ### Añadido
+- 🧾 **Auditoría** — registro de quién hizo qué, cuándo y desde dónde (acciones, descargas sensibles, inicios de sesión, terminales), sin secretos, con filtros y exportación CSV; se conserva un año.
+- ✉️ **Notificaciones por correo** — SMTP propio; avisos de problemas del servidor (y cuando se resuelven), despliegues, respaldos y bloqueos de inicio de sesión, con recordatorios opcionales.
+- 🗄️ **Respaldos de apps** — base de datos, volúmenes y configuración de cada app desplegada a otro servidor Linux por SSH, programados (diario/semanal/6 h), con retención, verificación SHA-256 y restauración.
 - 📶 **Tráfico de red** — ancho de banda por interfaz en vivo y con historial de 7 días, quién consume (equipos, servicios, procesos y conversaciones con tcpdump), capturas .pcap para Wireshark y alertas de uso y errores en la barra de estado.
 - 📋 **Tablas** — filtro, orden por columna y paginador (10 por página por defecto) en las tablas del panel.
 - 🐳 **Docker por proyecto** — contenedores agrupados por aplicación o proyecto de Compose (app, base de datos, Redis…), con nombres propios para grupos y contenedores.

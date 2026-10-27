@@ -1254,3 +1254,20 @@ th.tbl-sortable:focus-visible { outline: 2px solid var(--accent); outline-offset
 .input-num { max-width: 140px; }
 .nowrap { white-space: nowrap; }
 .tr-row .led { display: inline-block; vertical-align: middle; margin: 0 8px 2px 2px; }
+
+/* ── Auditoría ── */
+.au-filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 4px; }
+.au-filters .form-row { margin: 0; min-width: 150px; }
+.au-filters .au-q { flex: 1; min-width: 220px; }
+.au-det { max-width: 420px; color: var(--text-muted); word-break: break-word; }
+
+/* ── Respaldos de apps ── */
+.ab-cmd { font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
+.ab-log { font-size: 12px; max-height: 280px; overflow: auto; white-space: pre-wrap; }
+.ab-in { height: 30px; display: inline-block; width: auto; }
+.ab-time { width: 110px; margin-left: 4px; }
+.ab-keep { width: 80px; }
+.ab-busy { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn); }
+.ab-acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.ab-sched { display: flex; gap: 4px; flex-wrap: wrap; }
+.ab-sched .ab-time { margin-left: 0; }

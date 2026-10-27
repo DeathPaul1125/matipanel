@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Notificaciones{% endblock %}
+{% block heading %}Notificaciones por correo{% endblock %}
+
+{% block content %}
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-head"><h3>Servidor de correo (SMTP)</h3>
+      <label class="dlg-check nt-switch"><input type="checkbox" id="n-enabled"> <b>Notificaciones activas</b></label></div>
+    <div class="dp-form2">
+      <label class="form-row"><span>Servidor SMTP</span><input class="input mono" id="n-host" placeholder="mail.empresa.gob.gt" autocomplete="off"></label>
+      <label class="form-row"><span>Puerto</span><input class="input mono" id="n-port" type="number" min="1" max="65535" placeholder="587"></label>
+      <label class="form-row"><span>Seguridad</span>
+        <select class="input" id="n-security"><option value="starttls">STARTTLS (puerto 587)</option><option value="ssl">SSL/TLS (puerto 465)</option><option value="none">Sin cifrar (puerto 25, solo red interna)</option></select></label>
+      <label class="form-row"><span>Remitente</span><input class="input mono" id="n-from" placeholder="matipanel@empresa.gob.gt" autocomplete="off"></label>
+      <label class="form-row"><span>Usuario (si pide autenticación)</span><input class="input mono" id="n-user" autocomplete="off"></label>
+      <label class="form-row"><span>Contraseña</span><input class="input" id="n-pass" type="password" autocomplete="new-password">
+        <span class="dlg-help" id="n-pass-help">Vacío = sin cambios.</span></label>
+    </div>
+    <label class="dlg-check"><input type="checkbox" id="n-verify"> Verificar el certificado del servidor de correo (desmárcalo si usa un certificado propio)</label>
+    <label class="form-row"><span>Destinatarios</span><input class="input mono" id="n-to" placeholder="soporte@empresa.gob.gt, jefe@empresa.gob.gt" autocomplete="off">
+      <span class="dlg-help">Separados por coma; hasta 10.</span></label>
+    <div class="form-actions">
+      <button class="btn" onclick="sendTest()">Enviar correo de prueba</button>
+      <button class="btn btn-primary" onclick="saveCfg()">Guardar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Qué avisar</h3>
+    <div class="nt-events">
+      {% for key, (label, _) in events.items() %}
+      <label class="dlg-check"><input type="checkbox" data-ev="{{ key }}"> {{ label }}</label>
+      {% endfor %}
+    </div>
+    <label class="form-row"><span>Si un problema sigue activo, recordarlo cada</span>
+      <select class="input" id="n-repeat"><option value="0">No recordar</option><option value="30">30 minutos</option><option value="60">1 hora</option><option value="120">2 horas</option><option value="360">6 horas</option><option value="1440">1 día</option></select></label>
+    <p class="small muted">Los problemas son los mismos de la barra de estado (servicios caídos, disco, memoria, CPU, carga y alertas de <a href="{{ url_for('traffic.index') }}#alerts">Tráfico de red</a>). Se revisan cada minuto, aunque nadie tenga el panel abierto: se avisa una vez al aparecer y otra al resolverse.</p>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Últimos envíos</h3>
+  <table class="lx" id="h-table" data-table>
+    <thead><tr><th>Fecha</th><th>Asunto</th><th>Resultado</th></tr></thead>
+    <tbody><tr><td colspan="3" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <p class="small muted">Se muestran los últimos 50 desde que arrancó el panel.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = {{ url_for('notify.index')|tojson }} + 'api/';
+const $ = id => document.getElementById(id);
+let CFG = null;
+
+function fill(c) {
+  CFG = c;
+  $('n-enabled').checked = c.enabled; $('n-host').value = c.smtp.host; $('n-port').value = c.smtp.port;
+  $('n-security').value = c.smtp.security; $('n-from').value = c.smtp.from; $('n-user').value = c.smtp.user;
+  $('n-verify').checked = c.smtp.verify !== false; $('n-pass').value = '';
+  $('n-pass-help').textContent = c.smtp.has_password ? 'Hay una contraseña guardada. Vacío = sin cambios.' : 'Sin contraseña guardada.';
+  $('n-to').value = c.to.join(', '); $('n-repeat').value = String(c.repeat_minutes || 0);
+  document.querySelectorAll('[data-ev]').forEach(el => { el.checked = !!c.events[el.dataset.ev]; });
+}
+function fillHistory(h) {
+  const tb = $('h-table').tBodies[0];
+  if (!h.length) { tb.innerHTML = '<tr><td colspan="3" class="muted center">Todavía no se ha enviado nada</td></tr>'; return; }
+  tb.innerHTML = h.map(x => `<tr><td class="small nowrap" data-sort="${x.t}">${escapeHtml(new Date(x.t * 1000).toLocaleString('es'))}</td>
+    <td>${escapeHtml(x.subject)}</td>
+    <td>${x.ok ? '<span class="pill ok">Enviado</span>' : `<span class="pill err">Falló</span> <span class="small muted">${escapeHtml(x.error)}</span>`}</td></tr>`).join('');
+}
+async function load() {
+  const d = await (await fetch(API + 'config')).json();
+  if (!CFG) fill(d.config);
+  fillHistory(d.history);
+}
+$('n-security').addEventListener('change', e => {
+  const def = {starttls: 587, ssl: 465, none: 25}[e.target.value];
+  if (['25', '465', '587', ''].includes($('n-port').value)) $('n-port').value = def;
+});
+async function saveCfg() {
+  const events = {};
+  document.querySelectorAll('[data-ev]').forEach(el => { events[el.dataset.ev] = el.checked; });
+  const body = {enabled: $('n-enabled').checked, to: $('n-to').value, repeat_minutes: $('n-repeat').value, events,
+    smtp: {host: $('n-host').value.trim(), port: $('n-port').value, security: $('n-security').value, verify: $('n-verify').checked,
+           from: $('n-from').value.trim(), user: $('n-user').value.trim(), password: $('n-pass').value}};
+  const d = await postJSON(API + 'config', body);
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  fill(d.config);
+  ui.toast('Configuración guardada');
+}
+async function sendTest() {
+  const d = await postJSON(API + 'test', {});
+  load();
+  if (!d.ok) return ui.alert(d.error || 'No se pudo enviar', {title: 'El correo de prueba falló', icon: 'error'});
+  ui.alert('Revisa la bandeja de ' + d.to.join(', ') + ' (y la carpeta de spam).', {title: 'Correo enviado', icon: 'success'});
+}
+load();
+setInterval(load, 20000);
+</script>
+{% endblock %}

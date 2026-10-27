@@ -16,6 +16,7 @@ import time
 from flask import Blueprint, render_template
 from flask_login import login_required, current_user
 from ..util import same_origin
+from .. import audit
 
 terminal_bp = Blueprint("terminal", __name__)
 MAX_MSG = 1 << 20  # 1 MB por mensaje del navegador (un pegado grande cabe de sobra)
@@ -43,6 +44,7 @@ def register_websockets(sock):
             ws.close()
             return
 
+        audit.log("terminal", "abrir terminal", username)
         pid, fd = pty.fork()
         if pid == 0:
             # Hijo: NUNCA debe volver al código del panel (es una copia del servidor, con root).
