@@ -2,6 +2,17 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.12.0] - 2026-10-27
+
+### Añadido
+- 💽 **Qué ocupa más espacio** — en Discos: carpetas y archivos ordenados por tamaño con su porcentaje, navegables carpeta por carpeta (sin pasar a otras particiones, con prioridad baja y guardado 10 min), enlace a Archivos y lista de archivos de más de 50 MB.
+- 🧹 **Qué se puede limpiar** — tamaño y botón para cada limpieza segura: caché de APT/DNF, journal (deja 200 MB), logs rotados, volcados de memoria, caché de compilación e imágenes de Docker, paquetes huérfanos y kernels viejos, caché de root y papeleras; volúmenes de Docker y respaldos locales solo se informan. Dice cuánto espacio se liberó.
+- 🧠 **¿En qué se usa la memoria?** — en Procesos: reparto entre programas, caché (que se libera sola), disponible y swap; memoria por programa agrupando sus procesos (PSS, sin contar dos veces la compartida) con consejos para MariaDB, PHP-FPM, Apache, Java y otros; memoria de cada contenedor de Docker con su proyecto y límite.
+
+### Cambiado
+- La lista de procesos muestra la memoria en MB/GB, se puede ordenar por ella y ya no se corta en 200 procesos.
+- Los correos de memoria, CPU y carga llevan a Procesos, y los de disco e inodos a Discos.
+
 ## [0.11.0] - 2026-10-27
 
 ### Añadido

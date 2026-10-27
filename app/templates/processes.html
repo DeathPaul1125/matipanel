@@ -3,6 +3,21 @@
 {% block heading %}Procesos{% endblock %}
 
 {% block content %}
+<div class="card" id="mem-card">
+  <div class="card-head"><h3>¿En qué se usa la memoria?</h3><button class="btn btn-sm" onclick="loadMemory()">Actualizar</button></div>
+  <div id="mem-overview"><div class="muted small">Cargando…</div></div>
+  <div class="grid grid-2 mem-cols">
+    <div>
+      <h4 class="mem-h4">Por programa</h4>
+      <div id="mem-programs"><div class="muted small">Cargando…</div></div>
+    </div>
+    <div>
+      <h4 class="mem-h4">Contenedores de Docker</h4>
+      <div id="mem-docker"><div class="muted small">Cargando…</div></div>
+    </div>
+  </div>
+</div>
+
 <div class="toolbar">
   <input type="text" id="filter" placeholder="Filtrar por nombre, usuario o PID…" class="input">
   <button class="btn" onclick="loadProcesses()">Refrescar</button>
@@ -11,7 +26,7 @@
 <div class="card">
   <table class="lx" id="proc-table" data-table data-table-filter="off">
     <thead>
-      <tr><th>PID</th><th>Usuario</th><th>CMD</th><th>CPU%</th><th>MEM%</th><th>Estado</th><th>Tiempo</th><th></th></tr>
+      <tr><th>PID</th><th>Usuario</th><th>CMD</th><th>CPU%</th><th>Memoria</th><th>Estado</th><th>Tiempo</th><th data-nosort></th></tr>
     </thead>
     <tbody><tr><td colspan="8" class="muted center">Cargando procesos…</td></tr></tbody>
   </table>
@@ -46,7 +61,7 @@ function render() {
       <td>${escapeHtml(p.user)}</td>
       <td class="mono truncate" title="${escapeHtml(p.cmd)}">${escapeHtml(p.cmd)}</td>
       <td>${escapeHtml(p.cpu)}</td>
-      <td>${escapeHtml(p.mem)}</td>
+      <td data-sort="${p.rss}" class="nowrap">${fmtB(p.rss)} <span class="small muted">${escapeHtml(p.mem)} %</span></td>
       <td><span class="pill mute">${escapeHtml(p.status)}</span></td>
       <td class="mono">${escapeHtml(p.running)}</td>
       <td><button class="btn btn-sm btn-danger" onclick="killProc(${jsArg(p.pid)}, ${jsArg(p.cmd)})">Kill</button></td>
@@ -69,6 +84,52 @@ async function killProc(pid, cmd) {
   setTimeout(loadProcesses, 500);
 }
 
+const MEM_API = {{ url_for('processes.memory')|tojson }};
+const fmtB = n => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + u[i]; };
+
+async function loadMemory() {
+  let d;
+  try { d = await (await fetch(MEM_API)).json(); } catch (e) { d = {ok: false}; }
+  if (!d.ok) { document.getElementById('mem-overview').innerHTML = '<div class="flash flash-error">No se pudo leer la memoria</div>'; return; }
+  const o = d.overview, pct = n => (n / o.total * 100);
+  const lvl = o.percent >= 95 ? 'err' : o.percent >= 85 ? 'warn' : 'ok';
+  document.getElementById('mem-overview').innerHTML = `
+    <div class="mem-stack" role="img" aria-label="Reparto de la memoria">
+      <span class="ms-apps" style="width:${pct(o.apps)}%" title="Programas"></span>
+      <span class="ms-cache" style="width:${pct(o.cache)}%" title="Caché"></span>
+    </div>
+    <div class="mem-legend">
+      <div><i class="ms-apps"></i><b>${fmtB(o.apps)}</b> en uso por programas <span class="pill ${lvl}">${Math.round(o.percent)} %</span></div>
+      <div><i class="ms-cache"></i><b>${fmtB(o.cache)}</b> caché de archivos</div>
+      <div><i class="ms-free"></i><b>${fmtB(o.available)}</b> disponibles de ${fmtB(o.total)}</div>
+      ${o.swap_total ? `<div><i class="ms-swap"></i><b>${fmtB(o.swap_used)}</b> de swap usada de ${fmtB(o.swap_total)} (${Math.round(o.swap_percent)} %)</div>` : '<div class="muted">Sin swap</div>'}
+    </div>
+    <p class="small muted">La <b>caché</b> guarda archivos leídos para que la próxima vez sea rápido; Linux la libera sola cuando un programa necesita memoria, así que no es un problema.
+      Lo que importa es lo que usan los <b>programas</b> y lo <b>disponible</b>.${o.swap_percent >= 50 ? ' <b>La swap está muy usada:</b> el servidor se quedó corto de memoria en algún momento y puede ir lento; revisa los programas de abajo.' : ''}</p>`;
+  const rows = d.programs.map(g => `<tr>
+      <td><b class="mono">${escapeHtml(g.name)}</b>${g.count > 1 ? ` <span class="small muted">× ${g.count}</span>` : ''}
+        <div class="small muted">${escapeHtml(g.users.join(', '))}</div>
+        ${g.hint ? `<div class="small mem-hint">${escapeHtml(g.hint)}</div>` : ''}</td>
+      <td class="nowrap" data-sort="${g.mem}"><b>${fmtB(g.mem)}</b><div class="bar"><span style="width:${Math.min(100, g.percent)}%"></span></div><span class="small muted">${g.percent} % de la RAM</span></td></tr>`).join('');
+  document.getElementById('mem-programs').innerHTML = `<table class="lx mem-table"><thead><tr><th>Programa</th><th>Memoria</th></tr></thead><tbody>${rows}</tbody></table>` +
+    (d.rest.count ? `<p class="small muted">… y ${d.rest.count} proceso(s) más que usan ${fmtB(d.rest.mem)} en total.</p>` : '') +
+    `<p class="small muted">${d.pss ? 'Memoria real de cada programa (PSS): la memoria compartida se reparte entre los procesos que la comparten.' : 'Memoria residente (RSS): la memoria compartida puede contarse más de una vez.'}
+      Para terminar un proceso concreto, búscalo en la tabla de abajo.</p>`;
+  loadDockerMem();
+}
+async function loadDockerMem() {
+  let d;
+  try { d = await (await fetch(MEM_API + '/docker')).json(); } catch (e) { d = {ok: false}; }
+  const box = document.getElementById('mem-docker');
+  if (!d.ok) { box.innerHTML = '<div class="muted small">Docker no está instalado o no responde.</div>'; return; }
+  if (!d.containers.length) { box.innerHTML = '<div class="muted small">No hay contenedores en marcha.</div>'; return; }
+  box.innerHTML = `<table class="lx mem-table"><thead><tr><th>Contenedor</th><th>Memoria</th></tr></thead><tbody>` + d.containers.map(c => `<tr>
+      <td><b class="mono">${escapeHtml(c.name)}</b>${c.project ? `<div class="small muted">Proyecto ${escapeHtml(c.project)}</div>` : ''}</td>
+      <td class="nowrap"><b>${fmtB(c.mem)}</b><div class="bar ${c.percent >= 90 ? 'err' : c.percent >= 75 ? 'warn' : ''}"><span style="width:${Math.min(100, c.percent)}%"></span></div>
+        <span class="small muted">${c.percent.toFixed(1)} % de ${c.limit ? fmtB(c.limit) : 'su límite'}</span></td></tr>`).join('') + '</tbody></table>' +
+    '<p class="small muted">Si un contenedor llega a su límite, Docker lo reinicia. El límite de las apps se cambia en Despliegues → Configuración.</p>';
+}
+loadMemory();
 document.getElementById('filter').addEventListener('input', render);
 loadProcesses();
 </script>

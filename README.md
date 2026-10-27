@@ -4,7 +4,7 @@
 
 Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.11.0-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.12.0-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -45,10 +45,10 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 |---|---|
 | **Dashboard** | Estado del servidor siempre visible en la barra superior, tacómetros de CPU/memoria/swap/disco, historial persistente de 7 días (CPU, memoria, red, E/S de disco, carga, procesos), procesos top, almacenamiento y servicios con fallo |
 | **Sistema** | Resumen del equipo (SO, virtualización, carga, arranque), reloj en vivo, zona horaria/NTP, aviso de reinicio pendiente, reiniciar/apagar al momento o **programado**, sesiones e intentos fallidos de SSH por IP, procesador y dispositivos, configuraciones clave |
-| **Procesos** | Lista estilo `htop`, filtro, terminar o forzar |
+| **Procesos** | En qué se usa la memoria (reparto, por programa con consejos y por contenedor) y lista estilo `htop` con filtro, terminar o forzar |
 | **Servicios** | systemd: iniciar, detener, reiniciar, habilitar al arranque, ver estado |
 | **Tareas (cron)** | Crontabs por usuario: crear, editar, activar/desactivar, borrar |
-| **Discos** | Particiones y uso |
+| **Discos** | Particiones, **qué ocupa más espacio** carpeta por carpeta, archivos más grandes y **limpieza segura** (caché de APT, journal, logs rotados, Docker, paquetes huérfanos…) |
 | **Almacenamiento** | LVM (PV, VG, LV, snapshots), RAID con mdadm y cuotas de disco |
 | **Respaldos** | Respaldos `.tar.gz` de carpetas, descarga, restauración y programación con retención |
 | **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otros servidores: Linux por SSH o Windows/NAS por carpeta compartida con cuenta del AD** (varios a la vez, cada app elige el suyo): programados, con retención, verificación SHA-256, restauración y **recuperación ante desastres** en un servidor nuevo |

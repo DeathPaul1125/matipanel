@@ -425,6 +425,13 @@ def preview(cfg, kind):
 
 # ── Salud del servidor ───────────────────────────────────────────────────
 
+def _link(key):
+    """Pantalla del panel donde se ve el detalle de un problema (botón del correo)."""
+    kind = key.split(":", 1)[0]
+    return {"mem": "/processes/", "swap": "/processes/", "cpu": "/processes/", "load": "/processes/", "disk": "/disk/",
+            "inodes": "/disk/", "unit": "/services/", "docker": "/docker/", "net": "/trafico/"}.get(kind, "/")
+
+
 def check_health(issues, now=None):
     """issues: [(nivel, mensaje, clave)] actuales → envía avisos de los nuevos y de los resueltos."""
     now = now or time.time()
@@ -452,24 +459,24 @@ def check_health(issues, now=None):
             _active[key] = [msg, now, now, level]
             event("health", ("Problema: " if level == "err" else "Aviso: ") + msg,
                   f"{msg}.\n\nSe revisa cada minuto: te avisaremos cuando se resuelva.",
-                  key=f"health:{key}", cooldown=0, level=level, link="/",
+                  key=f"health:{key}", cooldown=0, level=level, link=_link(key),
                   sections=rows(key, [("Problema", msg, level), ("Detectado", fmt_time(now))]))
         elif level == "err" and prev[3] != "err":  # el aviso empeoró a grave: se avisa aparte
             prev[0], prev[2], prev[3] = msg, now, level
             event("health", "Empeoró: " + msg, f"{msg}: pasó de aviso a problema grave.",
-                  key=f"health:{key}", cooldown=0, level="err", link="/",
+                  key=f"health:{key}", cooldown=0, level="err", link=_link(key),
                   sections=rows(key, [("Problema", msg, "err"), ("Activo desde", fmt_time(prev[1]))]))
         else:
             prev[0], prev[3] = msg, level
             if repeat and now - prev[2] >= repeat:
                 prev[2] = now
                 event("health", "Sigue: " + msg, f"{msg}: el problema sigue activo.",
-                      key=f"health:{key}", cooldown=0, level=level, link="/",
+                      key=f"health:{key}", cooldown=0, level=level, link=_link(key),
                       sections=rows(key, [("Problema", msg, level), ("Activo desde", fmt_time(prev[1]))]))
     for key in [k for k in _active if k not in current]:
         msg, since = _active.pop(key)[:2]
         mins = max(1, round((now - since) / 60))
-        event("resolved", "Resuelto: " + msg, f"Se resolvió: {msg}.", key=f"resolved:{key}", cooldown=0, link="/",
+        event("resolved", "Resuelto: " + msg, f"Se resolvió: {msg}.", key=f"resolved:{key}", cooldown=0, link=_link(key),
               sections=[{"rows": [("Duró", f"unos {mins} min", "ok"), ("Desde", fmt_time(since)), ("Resuelto", fmt_time(now))]}])
 
 

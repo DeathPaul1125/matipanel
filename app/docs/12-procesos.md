@@ -1,6 +1,23 @@
 # Procesos
 
-El módulo Procesos lista los programas que se están ejecutando en el servidor, ordenados por consumo de CPU, y te permite terminar los que estén colgados o consumiendo demasiado. Lo encuentras en **Menú → Sistema → Procesos**.
+El módulo Procesos muestra **en qué se usa la memoria** del servidor y lista los programas que se están ejecutando, ordenados por consumo de CPU, para que puedas terminar los que estén colgados o consumiendo demasiado. Lo encuentras en **Menú → Sistema → Procesos**.
+
+## En qué se usa la memoria
+
+La tarjeta **¿En qué se usa la memoria?**, arriba de la lista, responde qué está consumiendo la RAM:
+
+- **La barra de reparto**:
+  - **en uso por programas**: lo que de verdad ocupan las aplicaciones (en color, con el porcentaje);
+  - **caché de archivos**: archivos leídos que Linux guarda para la próxima vez. Se libera sola cuando un programa necesita memoria, así que **no es un problema** aunque sea grande;
+  - **disponibles**: lo que pueden usar los programas sin que el servidor se quede corto;
+  - **swap usada**: si está muy usada, el servidor se quedó corto de memoria en algún momento y puede ir lento.
+- **Por programa**: los procesos agrupados por nombre y sumados, de mayor a menor. Por ejemplo, «php-fpm8.3 × 12» con la memoria de los 12 procesos juntos, el porcentaje de la RAM y los usuarios que los ejecutan. Se usa la memoria **real** de cada proceso (PSS): la memoria que comparten varios procesos se reparte entre ellos en lugar de contarse varias veces.
+- **Consejos**: para programas conocidos aparece por qué usan memoria y qué se puede ajustar. Por ejemplo, MariaDB reserva su caché (`innodb_buffer_pool_size`), PHP-FPM depende de `pm.max_children`, Apache de `MaxRequestWorkers` y Java de `-Xmx`.
+- **Contenedores de Docker**: la memoria de cada contenedor en marcha, su proyecto (app de [Despliegues](56-despliegues.md) o [stack](59-stacks.md)) y su límite. Si un contenedor llega a su límite, Docker lo reinicia; el límite de las apps se cambia en **Despliegues → Configuración**.
+
+**Actualizar** vuelve a leer los valores (se guardan unos segundos para no cargar al servidor).
+
+> **Consejo:** Para terminar un proceso concreto, búscalo por nombre en la tabla de abajo y ordénala por **Memoria**.
 
 ## Ver la lista de procesos
 
@@ -12,13 +29,11 @@ Al abrir la página se carga la tabla de procesos. Cada fila muestra:
 | **Usuario** | Usuario del sistema que lo ejecuta |
 | **CMD** | Comando completo con sus argumentos (recortado a 120 caracteres; pasa el ratón encima para verlo) |
 | **CPU%** | Uso de CPU medido durante unos 0,2 segundos |
-| **MEM%** | Porcentaje de la memoria RAM total que usa |
+| **Memoria** | Memoria residente del proceso (MB o GB) y su porcentaje de la RAM total. Haz clic en el encabezado para ordenar por memoria |
 | **Estado** | Estado del proceso según el kernel (ver tabla abajo) |
 | **Tiempo** | Tiempo desde que arrancó: `hh:mm:ss`, o `Nd hh:mm` si lleva días |
 
 La lista se ordena de mayor a menor CPU.
-
-> **Importante:** Solo se muestran los **200 procesos** con más CPU. En servidores con muchos procesos, los que están inactivos pueden no aparecer. Si buscas uno concreto y no lo ves, usa la [Terminal](29-terminal.md) con `ps aux | grep nombre`.
 
 > **Nota:** La tabla no se actualiza sola. Usa **Refrescar** para obtener valores nuevos.
 
@@ -73,7 +88,7 @@ En esos casos verás el error "No se puede matar init ni el propio panel". Si el
 ## Identificar qué consume recursos
 
 - **CPU alta sostenida**: haz clic en **Refrescar** varias veces. Si el mismo proceso sigue arriba, es el responsable. Compara con la gráfica de CPU del [Dashboard](10-dashboard.md).
-- **Memoria alta**: la tabla se ordena por CPU, no por memoria. Revisa la columna **MEM%** de arriba hacia abajo, o filtra por el nombre del programa sospechoso.
+- **Memoria alta**: mira la tarjeta **¿En qué se usa la memoria?**, que agrupa por programa, u ordena la tabla por **Memoria**.
 - **Muchos procesos iguales**: es normal en servidores web y bases de datos (PHP-FPM, Apache y PostgreSQL usan varios procesos trabajadores).
 
 ## Preguntas frecuentes

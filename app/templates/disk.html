@@ -6,39 +6,149 @@
 <div class="card">
   <table class="lx" id="disk-table">
     <thead>
-      <tr><th>Dispositivo</th><th>Mount</th><th>FS</th><th>Tamaño</th><th>Usado</th><th>Uso</th></tr>
+      <tr><th>Dispositivo</th><th>Montaje</th><th>FS</th><th>Tamaño</th><th>Usado</th><th>Libre</th><th>Uso</th><th></th></tr>
     </thead>
-    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+    <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card" id="clean-card">
+  <div class="card-head"><h3>Qué se puede limpiar</h3><button class="btn btn-sm" onclick="loadCleanup()">Revisar de nuevo</button></div>
+  <p class="small muted">Cosas que el sistema vuelve a generar o que ya no se usan. Cada limpieza usa el comando estándar para eso; tus archivos y datos no se tocan.</p>
+  <div id="clean-list"><div class="muted small">Revisando…</div></div>
+</div>
+
+<div class="card" id="du-card">
+  <div class="card-head"><h3>Qué ocupa más espacio</h3>
+    <div class="ab-acts">
+      <button class="btn btn-sm" onclick="analyze(DU_PATH, true)">Volver a analizar</button>
+      <a class="btn btn-sm" id="du-files" href="#">Abrir en Archivos</a>
+    </div></div>
+  <nav class="du-crumbs" id="du-crumbs" aria-label="Carpeta analizada"></nav>
+  <div id="du-summary" class="small muted"></div>
+  <div id="du-body"><div class="muted small">Elige una partición y pulsa <b>Analizar</b>, o empieza por la raíz.</div></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h3>Archivos más grandes</h3>
+    <button class="btn btn-sm" id="bf-btn" onclick="bigFiles(true)">Buscar en esta partición</button></div>
+  <p class="small muted">Archivos de más de 50 MB dentro de la carpeta analizada (sin pasar a otras particiones): instaladores, imágenes de discos, volcados, logs enormes, copias olvidadas…</p>
+  <table class="lx" id="bf-table" data-table>
+    <thead><tr><th>Archivo</th><th>Tamaño</th><th>Modificado</th><th data-nosort></th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">Pulsa «Buscar en esta partición».</td></tr></tbody>
   </table>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-async function load() {
-  const r = await fetch("{{ url_for('disk.partitions') }}");
-  const d = await r.json();
-  const tbody = document.querySelector('#disk-table tbody');
-  if (!d.partitions || d.partitions.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="muted center">Sin particiones</td></tr>';
-    return;
-  }
-  tbody.innerHTML = d.partitions.map(p => {
-    const cls = p.percent >= 85 ? 'err' : p.percent >= 65 ? 'warn' : '';
-    return `
-      <tr>
-        <td class="mono">${escapeHtml(p.device)}</td>
-        <td class="mono">${escapeHtml(p.mountpoint)}</td>
-        <td>${escapeHtml(p.fstype)}</td>
-        <td>${escapeHtml(p.total_h)}</td>
-        <td>${escapeHtml(p.used_h)}</td>
-        <td>
-          <div class="bar ${cls}"><span style="width:${p.percent}%"></span></div>
-          <span class="muted small">${p.percent}%</span>
-        </td>
-      </tr>`;
+const API = {{ url_for('disk.index')|tojson }} + 'api/';
+const FILES = {{ url_for('files.index')|tojson }};
+const $ = id => document.getElementById(id);
+const getJSON = async url => { try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; } };
+const fmtBytes = n => { if (n == null) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + u[i]; };
+const filesUrl = p => FILES + '?path=' + encodeURIComponent(p);
+const ICON_DIR = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+const ICON_FILE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+let DU_PATH = '/', DU_REQ = 0;
+
+async function loadParts() {
+  const d = await getJSON(API + 'partitions');
+  const tb = $('disk-table').tBodies[0];
+  if (!d.partitions || !d.partitions.length) { tb.innerHTML = '<tr><td colspan="8" class="muted center">Sin particiones</td></tr>'; return; }
+  tb.innerHTML = d.partitions.map(p => {
+    const cls = p.percent >= 90 ? 'err' : p.percent >= 80 ? 'warn' : '';
+    return `<tr>
+      <td class="mono">${escapeHtml(p.device)}</td><td class="mono">${escapeHtml(p.mountpoint)}</td><td>${escapeHtml(p.fstype)}</td>
+      <td>${escapeHtml(p.total_h)}</td><td>${escapeHtml(p.used_h)}</td><td>${escapeHtml(p.free_h)}</td>
+      <td style="min-width:120px"><div class="bar ${cls}"><span style="width:${p.percent}%"></span></div><span class="muted small">${p.percent}%</span></td>
+      <td><button class="btn btn-sm" onclick="analyze(${jsArg(p.mountpoint)})">Analizar</button></td></tr>`;
   }).join('');
 }
-load();
+
+function crumbs(path) {
+  const parts = path.split('/').filter(Boolean);
+  let acc = '';
+  $('du-crumbs').innerHTML = `<button onclick="analyze('/')">/</button>` + parts.map(p => {
+    acc += '/' + p;
+    return `<span class="sep">›</span><button onclick="analyze(${jsArg(acc)})">${escapeHtml(p)}</button>`;
+  }).join('');
+}
+
+async function analyze(path, fresh) {
+  DU_PATH = path;
+  const req = ++DU_REQ;
+  crumbs(path);
+  $('du-files').href = filesUrl(path);
+  $('du-summary').textContent = '';
+  $('du-body').innerHTML = `<div class="du-wait"><span class="led sm warn live"></span> Analizando ${escapeHtml(path)}… En discos grandes puede tardar uno o dos minutos.</div>`;
+  if (path !== '/' || fresh) $('du-card').scrollIntoView({behavior: 'smooth', block: 'start'});
+  const d = await getJSON(API + 'usage?path=' + encodeURIComponent(path) + (fresh ? '&fresh=1' : ''));
+  if (req !== DU_REQ) return;  // el usuario ya pidió otra carpeta
+  if (!d.ok) { $('du-body').innerHTML = `<div class="flash flash-error">${escapeHtml(d.error || 'Error')}</div>`; return; }
+  const part = d.partition;
+  $('du-summary').innerHTML = `Esta carpeta ocupa <b>${fmtBytes(d.total)}</b>` +
+    (part ? ` · la partición tiene <b>${fmtBytes(part.free)}</b> libres de ${fmtBytes(part.total)} (${part.percent} % usado)` : '') +
+    (d.age ? ` · analizado hace ${Math.max(1, Math.round(d.age / 60))} min` : '') +
+    (d.warnings ? ` · ${d.warnings} elemento(s) sin acceso o que desaparecieron durante el análisis` : '');
+  if (!d.entries.length) { $('du-body').innerHTML = '<div class="muted small">La carpeta está vacía.</div>'; return; }
+  const max = d.entries[0].size || 1;
+  $('du-body').innerHTML = `<div class="table-wrap"><table class="lx du-table"><thead><tr><th>Nombre</th><th>Tamaño</th><th>Del total</th><th></th></tr></thead><tbody>` +
+    d.entries.map(e => {
+      const pct = d.total ? e.size / d.total * 100 : 0;
+      const name = e.dir ? `<button class="linklike du-dir" onclick="analyze(${jsArg(e.path)})">${ICON_DIR} ${escapeHtml(e.name)}</button>`
+                         : `<span class="du-file">${ICON_FILE} ${escapeHtml(e.name)}</span>`;
+      return `<tr><td>${name}</td><td class="nowrap"><b>${fmtBytes(e.size)}</b></td>
+        <td class="du-pct"><div class="bar ${pct >= 50 ? 'warn' : ''}"><span style="width:${Math.max(0.5, e.size / max * 100)}%"></span></div><span class="small muted">${pct.toFixed(pct < 1 ? 1 : 0)} %</span></td>
+        <td class="nowrap"><a class="btn btn-sm" href="${escapeHtml(filesUrl(e.dir ? e.path : e.path.replace(/\/[^\/]+$/, '') || '/'))}">Abrir</a></td></tr>`;
+    }).join('') +
+    (d.more.count ? `<tr><td class="muted small" colspan="4">… y ${d.more.count} elemento(s) más pequeños (${fmtBytes(d.more.size)})</td></tr>` : '') +
+    '</tbody></table></div>' +
+    '<p class="small muted">Haz clic en una carpeta para ver qué hay dentro. Para borrar, usa <b>Abrir</b> (te lleva al administrador de Archivos en esa carpeta).</p>';
+}
+
+async function bigFiles(fresh) {
+  const tb = $('bf-table').tBodies[0];
+  $('bf-btn').disabled = true;
+  tb.innerHTML = `<tr><td colspan="4" class="muted center">Buscando archivos grandes en ${escapeHtml(DU_PATH)}…</td></tr>`;
+  const d = await getJSON(API + 'bigfiles?path=' + encodeURIComponent(DU_PATH) + (fresh ? '&fresh=1' : ''));
+  $('bf-btn').disabled = false;
+  if (!d.ok) { tb.innerHTML = `<tr><td colspan="4" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  if (!d.files.length) { tb.innerHTML = `<tr><td colspan="4" class="muted center">No hay archivos de más de 50 MB en ${escapeHtml(d.path)}</td></tr>`; return; }
+  tb.innerHTML = d.files.map(f => `<tr><td class="mono small du-path">${escapeHtml(f.path)}</td>
+    <td data-sort="${f.size}" class="nowrap"><b>${fmtBytes(f.size)}</b></td>
+    <td data-sort="${f.mtime}" class="small nowrap">${escapeHtml(new Date(f.mtime * 1000).toLocaleDateString('es'))}</td>
+    <td><a class="btn btn-sm" href="${escapeHtml(filesUrl(f.path.replace(/\/[^\/]+$/, '') || '/'))}">Abrir carpeta</a></td></tr>`).join('');
+}
+
+const RISK = {seguro: ['ok', 'Seguro'], cuidado: ['warn', 'Con cuidado'], revisar: ['mute', 'Revísalo tú']};
+async function loadCleanup() {
+  $('clean-list').innerHTML = '<div class="muted small">Revisando…</div>';
+  const d = await getJSON(API + 'cleanup');
+  if (!d.ok) { $('clean-list').innerHTML = `<div class="flash flash-error">${escapeHtml(d.error || 'Error')}</div>`; return; }
+  if (!d.items.length) { $('clean-list').innerHTML = '<div class="empty"><span class="led sm"></span> No hay nada importante que limpiar.</div>'; return; }
+  const total = d.items.filter(i => i.action).reduce((a, i) => a + (i.size || 0), 0);
+  $('clean-list').innerHTML = (total ? `<p class="small">Se pueden liberar cerca de <b>${fmtBytes(total)}</b>.</p>` : '') + d.items.map(i => {
+    const [cls, label] = RISK[i.risk] || RISK.revisar;
+    const amount = i.size != null ? fmtBytes(i.size) : `${i.count} paquete(s)`;
+    const btn = i.action ? `<button class="btn btn-sm ${i.risk === 'seguro' ? 'btn-primary' : ''}" onclick="doClean(${jsArg(i.id)}, ${jsArg(i.title)}, ${jsArg(i.warn || '')})">${escapeHtml(i.action)}</button>`
+                         : (i.link ? `<a class="btn btn-sm" href="${escapeHtml(i.link)}">Ver</a>` : '');
+    return `<div class="cl-item"><div class="cl-size">${escapeHtml(amount)}</div>
+      <div class="cl-text"><b>${escapeHtml(i.title)}</b> <span class="pill ${cls}">${label}</span><div class="small muted">${escapeHtml(i.desc)}</div>
+        ${i.warn ? `<div class="small cl-warn">⚠ ${escapeHtml(i.warn)}</div>` : ''}</div>
+      <div class="cl-act">${btn}</div></div>`;
+  }).join('');
+}
+async function doClean(id, title, warn) {
+  if (!await ui.confirm((warn ? warn + '\n\n' : '') + '¿Continuar con la limpieza?', {title, confirmText: 'Limpiar', danger: !!warn})) return;
+  const d = await postJSON(API + 'cleanup/' + encodeURIComponent(id), {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo limpiar', {title: 'Error', icon: 'error'});
+  ui.toast(`${d.message}${d.freed ? ' · liberados ' + fmtBytes(d.freed) : ''}`, 'success', 5000);
+  loadCleanup(); loadParts();
+}
+
+loadParts();
+loadCleanup();
+analyze('/');
 </script>
 {% endblock %}
