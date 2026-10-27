@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+{% block title %}Stacks{% endblock %}
+{% block heading %}Stacks{% endblock %}
+
+{% block content %}
+<div class="card" id="nocompose" hidden>
+  <h3>Docker Compose no está instalado</h3>
+  <p class="small muted">Los stacks necesitan Docker Engine y Docker Compose v2. Instálalos desde
+    <a href="{{ url_for('deploy.index') }}">Despliegues → Requisitos del servidor</a>.</p>
+</div>
+
+{% if not stack_name %}
+<!-- ── Lista ── -->
+<div class="card">
+  <div class="toolbar">
+    <h3 style="margin:0;">Stacks de Docker Compose</h3>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="loadStacks()">Refrescar</button>
+    <button class="btn btn-sm btn-primary" onclick="openNew()">+ Nuevo stack</button>
+  </div>
+  <div id="st-empty" class="dp-empty" hidden>
+    <h3>Publica cualquier aplicación con Docker Compose</h3>
+    <p class="muted">Pega un <span class="mono">compose.yaml</span> (o elige una plantilla), revisa las advertencias y
+      ponlo en marcha. El panel guarda el archivo, valida la sintaxis antes de cada cambio y te deja iniciar, detener,
+      actualizar imágenes y ver los logs de cada servicio.</p>
+    <button class="btn btn-primary" onclick="openNew()">+ Nuevo stack</button>
+  </div>
+  <div class="table-wrap" id="st-wrap">
+    <table class="lx" id="st-table" data-table>
+      <thead><tr><th>Stack</th><th>Servicios</th><th>Puertos</th><th>Avisos</th><th class="right" data-nosort>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="small muted" style="margin:10px 0 0;">Archivos en <span class="mono" id="st-dir"></span> · proyecto de Compose
+    <span class="mono">stack-&lt;nombre&gt;</span> (así aparecen agrupados en el módulo Docker).</p>
+</div>
+
+<!-- ── Nuevo stack ── -->
+<div class="modal" id="new-dlg">
+  <div class="modal-box wide">
+    <h3>Nuevo stack</h3>
+    <div class="dp-form2">
+      <label class="form-row"><span>Nombre</span>
+        <input class="input mono" id="nw-name" placeholder="monitor" maxlength="31" autocomplete="off">
+        <span class="dlg-help">Minúsculas, números y guiones; empieza con letra. No se puede cambiar después.</span></label>
+      <label class="form-row"><span>Plantilla</span>
+        <select class="input" id="nw-tpl"><option value="">Vacío / pegar el mío…</option>
+          {% for key, t in templates.items() %}<option value="{{ key }}">{{ t.label }}</option>{% endfor %}
+        </select>
+        <span class="dlg-help">Las imágenes se descargan de Docker Hub al iniciar.</span></label>
+    </div>
+    <label class="form-row"><span>compose.yaml
+        <a href="#" class="small" style="float:right;" onclick="event.preventDefault(); $('#nw-file').click()">Subir archivo…</a></span>
+      <textarea class="input" id="nw-compose" rows="16" spellcheck="false" placeholder="services:&#10;  web:&#10;    image: nginx:alpine&#10;    ports:&#10;      - &quot;8080:80&quot;"></textarea></label>
+    <input type="file" id="nw-file" accept=".yaml,.yml,text/yaml,text/plain" hidden>
+    <label class="form-row"><span>.env (opcional)</span>
+      <textarea class="input" id="nw-env" rows="4" spellcheck="false" placeholder="PUERTO=8080"></textarea>
+      <span class="dlg-help">Variables para <span class="mono">${VARIABLE}</span> dentro del compose.yaml.</span></label>
+    <div id="nw-result"></div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeNew()">Cancelar</button>
+      <button class="btn" onclick="newValidate()">Validar</button>
+      <button class="btn" id="nw-create" onclick="newCreate(false)">Crear</button>
+      <button class="btn btn-primary" id="nw-start" onclick="newCreate(true)">Crear e iniciar</button>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<!-- ── Detalle ── -->
+<p class="small dp-back"><a href="{{ url_for('stacks.index') }}">← Todos los stacks</a></p>
+<section class="health" id="st-head" style="margin-bottom:12px;">
+  <span class="led lg mute" id="st-led"></span>
+  <div class="health-main">
+    <h1 class="health-verdict" id="st-title">{{ stack_name }}</h1>
+    <div class="health-sub" id="st-sub">Cargando…</div>
+  </div>
+  <div class="health-chips">
+    <button class="btn btn-sm btn-primary" onclick="stackAction('start')">Iniciar</button>
+    <button class="btn btn-sm" onclick="stackAction('restart')">Reiniciar</button>
+    <button class="btn btn-sm" onclick="stackAction('pull')">Actualizar imágenes</button>
+    <button class="btn btn-sm btn-danger" onclick="stackAction('stop')">Detener</button>
+    <button class="btn btn-sm btn-danger" onclick="stackAction('down')">Bajar</button>
+  </div>
+</section>
+
+<div class="tabs" id="st-tabs">
+  <button class="tab active" data-tab="services">Servicios</button>
+  <button class="tab" data-tab="logs">Logs</button>
+  <button class="tab" data-tab="compose">compose.yaml</button>
+  <button class="tab" data-tab="env">.env</button>
+  <button class="tab" data-tab="delete">Eliminar</button>
+</div>
+
+<div data-panel="services">
+  <div id="sv-warn"></div>
+  <div class="card">
+    <div class="card-head"><h3>Servicios y contenedores</h3><button class="btn btn-sm" onclick="loadInfo()">Refrescar</button></div>
+    <div class="table-wrap">
+      <table class="lx" id="sv-table" data-table data-table-filter="off">
+        <thead><tr><th>Servicio</th><th>Estado</th><th>Puertos</th><th>Imagen</th><th>Contenedor</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div data-panel="logs" hidden>
+  <div class="card">
+    <div class="toolbar">
+      <select class="input dp-narrow" id="lg-svc" onchange="loadLogs()" style="flex:0 1 220px;"><option value="">Todos los servicios</option></select>
+      <select class="input dp-narrow" id="lg-tail" onchange="loadLogs()" style="flex:0 0 90px;min-width:0;"><option>100</option><option selected>300</option><option>1000</option></select>
+      <span class="small muted">últimas líneas de <span class="mono">docker compose logs</span></span>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="loadLogs()">Refrescar</button>
+    </div>
+    <pre class="terminal output dp-log" id="lg-pre">Cargando…</pre>
+  </div>
+</div>
+
+<div data-panel="compose" hidden>
+  <div class="card">
+    <div class="toolbar">
+      <span class="mono small" id="cp-path"></span>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="$('#cp-file').click()">Subir archivo…</button>
+      <button class="btn btn-sm" onclick="resetEditors()">Descartar cambios</button>
+      <button class="btn btn-sm" onclick="editValidate()">Validar</button>
+      <button class="btn btn-sm btn-primary" onclick="editSave('compose')">Guardar</button>
+      <button class="btn btn-sm btn-primary" onclick="editSave('compose', true)">Guardar y aplicar</button>
+    </div>
+    <input type="file" id="cp-file" accept=".yaml,.yml,text/yaml,text/plain" hidden>
+    <div id="cp-result"></div>
+    <textarea class="input dp-envtext" id="cp-text" spellcheck="false" style="min-height:58vh;"></textarea>
+  </div>
+</div>
+
+<div data-panel="env" hidden>
+  <div class="card">
+    <div class="toolbar">
+      <label class="small"><input type="checkbox" id="env-show"> Mostrar valores</label>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="resetEditors()">Descartar cambios</button>
+      <button class="btn btn-sm btn-primary" onclick="editSave('env')">Guardar</button>
+      <button class="btn btn-sm btn-primary" onclick="editSave('env', true)">Guardar y aplicar</button>
+    </div>
+    <p class="small muted">Compose lee este <span class="mono">.env</span> para reemplazar <span class="mono">${VARIABLE}</span>
+      en el compose.yaml. Para pasar variables al contenedor, nómbralas en <span class="mono">environment:</span> o usa
+      <span class="mono">env_file: .env</span>. Los cambios se aplican al recrear los contenedores («Aplicar»).</p>
+    <div id="env-result"></div>
+    <textarea class="input dp-envtext dp-blur" id="env-text" spellcheck="false" style="min-height:40vh;"></textarea>
+  </div>
+</div>
+
+<div data-panel="delete" hidden>
+  <div class="card dp-danger">
+    <h3>Eliminar stack</h3>
+    <p class="muted">Se bajan los contenedores y las redes del stack (<span class="mono">docker compose down</span>) y se borra
+      la carpeta <span class="mono" id="del-dir"></span> con su compose.yaml y su .env. Las imágenes descargadas se conservan
+      (puedes borrarlas desde el módulo Docker).</p>
+    <label class="dlg-check"><input type="checkbox" id="del-vols"> Borrar también los volúmenes con nombre del stack
+      (<span class="mono">-v</span>). <b>Los datos no se pueden recuperar.</b></label>
+    <p class="small muted">Las carpetas montadas desde el servidor (bind mounts) nunca se borran.</p>
+    <button class="btn btn-danger-solid" onclick="deleteStack()">Eliminar stack</button>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = {{ url_for('stacks.index')|tojson }};
+const NAME = {{ (stack_name or '')|tojson }};
+const TEMPLATES = {{ templates|tojson }};
+const api = p => BASE + 'api/' + p;
+const stApi = (p, name) => BASE + 'api/stacks/' + encodeURIComponent(name || NAME) + (p ? '/' + p : '');
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const LED = { running: '', partial: 'warn', stopped: 'err', empty: 'mute', unknown: 'mute' };
+const STATE_TEXT = { running: 'En marcha', partial: 'Parcialmente en marcha', stopped: 'Detenido',
+                     empty: 'Sin contenedores', unknown: 'No se pudo consultar Docker' };
+
+async function getJSON(url) {
+  try { const r = await fetch(url); return await r.json(); }
+  catch (e) { return { ok: false, error: String(e) }; }
+}
+function showError(d, title) { return ui.alert(d.error || 'Error desconocido', { title: title || 'Error', icon: 'error' }); }
+function fmtDate(ts) { return ts ? new Date(ts * 1000).toLocaleString('es') : '—'; }
+
+// Editor: Tab inserta dos espacios (YAML no admite tabuladores)
+function yamlEditor(ta) {
+  ta.addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    ta.setRangeText('  ', ta.selectionStart, ta.selectionEnd, 'end');
+  });
+}
+// «Subir archivo»: se lee en el navegador y llena el editor (no se guarda hasta pulsar Guardar/Crear)
+function fileLoader(input, target) {
+  input.addEventListener('change', async () => {
+    const f = input.files[0];
+    input.value = '';
+    if (!f) return;
+    if (f.size > 256 * 1024) return ui.alert('El archivo supera 256 KB.', { title: 'Archivo demasiado grande', icon: 'error' });
+    target.value = await f.text();
+    ui.toast('Archivo cargado en el editor', 'info');
+  });
+}
+// Resultado de una validación: error, advertencias de seguridad y puertos expuestos
+function resultHtml(d) {
+  if (!d.ok) return `<div class="dlg-error" style="margin:0 0 12px;white-space:pre-wrap;font-family:var(--mono);">${escapeHtml(d.error || 'Error')}</div>`;
+  return warnHtml(d, true);
+}
+function warnHtml(d, okLine) {
+  const w = d.warnings || [], p = d.public_ports || [];
+  let h = '';
+  if (okLine) h += `<p class="small dp-good" style="margin:0 0 10px;">✓ Configuración válida · ${escapeHtml((d.services || []).length)} servicio(s): <span class="mono">${escapeHtml((d.services || []).join(', '))}</span></p>`;
+  if (w.length) h += `<div class="dlg-error" style="margin:0 0 12px;background:var(--warn-bg);color:var(--warn);">
+      <b>Ajustes peligrosos</b> (no se bloquean; revisa que sean intencionales):
+      <ul style="margin:6px 0 0;padding-left:18px;">${w.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`;
+  if (p.length) h += `<div class="dlg-error" style="margin:0 0 12px;background:var(--surface-2);color:var(--text-muted);">
+      <b>Puertos publicados en todas las interfaces</b> (Docker los abre aunque el firewall del panel no los permita):
+      <span class="mono">${p.map(escapeHtml).join(' · ')}</span></div>`;
+  return h;
+}
+
+{% if not stack_name %}
+// ── Lista ──
+async function loadStacks() {
+  const d = await getJSON(api('stacks'));
+  const tbody = $('#st-table tbody');
+  if (!d.ok) { tbody.innerHTML = `<tr><td colspan="5" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  $('#nocompose').hidden = d.compose;
+  $('#st-dir').textContent = d.dir;
+  $('#st-empty').hidden = d.stacks.length > 0;
+  $('#st-wrap').hidden = d.stacks.length === 0;
+  tbody.innerHTML = d.stacks.map(s => {
+    const url = BASE + 's/' + encodeURIComponent(s.name);
+    const up = s.state === 'running' || s.state === 'partial';
+    return `<tr>
+      <td data-sort="${escapeHtml(s.name)}"><span class="dp-state"><span class="led sm ${LED[s.state] ?? 'mute'}" title="${escapeHtml(STATE_TEXT[s.state] || s.state)}"></span>
+        <a href="${escapeHtml(url)}" class="mono"><b>${escapeHtml(s.name)}</b></a></span>
+        <div class="small muted">${escapeHtml(STATE_TEXT[s.state] || s.state)}${s.busy ? ' · acción en curso…' : ''}</div></td>
+      <td data-sort="${Number(s.running) || 0}"><span class="mono">${escapeHtml(s.running)} / ${escapeHtml(s.total)}</span> <span class="small muted">en marcha</span></td>
+      <td>${s.ports.length ? s.ports.map(p => `<span class="mono small nowrap">${escapeHtml(p)}</span>`).join('<br>') : '<span class="muted">—</span>'}</td>
+      <td data-sort="${Number(s.warnings) || 0}">${s.warnings ? `<span class="pill warn">${escapeHtml(s.warnings)} ajuste(s) peligroso(s)</span>` : '<span class="muted">—</span>'}</td>
+      <td class="right dp-nowrap">
+        <a class="btn btn-sm" href="${escapeHtml(url)}">Abrir</a>
+        ${up ? `<button class="btn btn-sm btn-danger" data-act="stop" data-name="${escapeHtml(s.name)}">Detener</button>`
+             : `<button class="btn btn-sm btn-primary" data-act="start" data-name="${escapeHtml(s.name)}">Iniciar</button>`}
+      </td></tr>`;
+  }).join('');
+}
+$('#st-table').addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const name = b.dataset.name, act = b.dataset.act;
+  if (act === 'stop' && !await ui.confirm(`Se detendrán todos los contenedores del stack «${name}».`, { title: 'Detener stack', danger: true, confirmText: 'Detener' })) return;
+  b.disabled = true;
+  const d = await postJSON(stApi('action', name), { action: act });
+  b.disabled = false;
+  if (!d.ok) showError(d, 'No se pudo ' + (act === 'stop' ? 'detener' : 'iniciar'));
+  else ui.toast(act === 'stop' ? 'Stack detenido' : 'Stack iniciado');
+  loadStacks();
+});
+
+// ── Nuevo stack ──
+function openNew() {
+  $('#nw-name').value = ''; $('#nw-tpl').value = ''; $('#nw-compose').value = ''; $('#nw-env').value = '';
+  $('#nw-result').innerHTML = '';
+  $('#new-dlg').classList.add('open');
+  $('#nw-name').focus();
+}
+function closeNew() { $('#new-dlg').classList.remove('open'); }
+$('#new-dlg').addEventListener('keydown', e => { if (e.key === 'Escape') closeNew(); });
+$('#nw-tpl').addEventListener('change', async e => {
+  const t = TEMPLATES[e.target.value];
+  if (!t) return;
+  if ($('#nw-compose').value.trim() && !await ui.confirm('Se reemplazará el contenido del editor.', { title: 'Usar plantilla', confirmText: 'Reemplazar' })) return;
+  $('#nw-compose').value = t.compose;
+  $('#nw-env').value = t.env || '';
+  if (!$('#nw-name').value.trim()) $('#nw-name').value = e.target.value;
+  $('#nw-result').innerHTML = '';
+});
+const newBody = () => ({ name: $('#nw-name').value.trim(), compose_text: $('#nw-compose').value, env_text: $('#nw-env').value });
+async function newValidate() {
+  $('#nw-result').innerHTML = '<p class="small muted">Validando…</p>';
+  $('#nw-result').innerHTML = resultHtml(await postJSON(api('validate'), newBody()));
+}
+async function newCreate(start) {
+  const btns = [$('#nw-create'), $('#nw-start')];
+  btns.forEach(b => b.disabled = true);
+  const d = await postJSON(api('stacks'), { ...newBody(), start });
+  btns.forEach(b => b.disabled = false);
+  if (!d.ok) { $('#nw-result').innerHTML = resultHtml(d); return; }
+  if (d.start_error) await ui.alert('El stack se guardó, pero no arrancó:\n\n' + d.start_error, { title: 'No se pudo iniciar', icon: 'error' });
+  else if ((d.warnings || []).length) await ui.alert('Revisa estos ajustes:\n\n• ' + d.warnings.join('\n• '), { title: 'Stack creado con advertencias', icon: 'warning' });
+  location.href = d.url;
+}
+yamlEditor($('#nw-compose'));
+fileLoader($('#nw-file'), $('#nw-compose'));
+
+loadStacks();
+setInterval(() => { if (!$('#new-dlg').classList.contains('open')) loadStacks(); }, 10000);
+{% else %}
+// ── Detalle ──
+let INFO = null, infoTimer = null, edited = false;
+
+function showTab(tab) {
+  $$('#st-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  $$('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== tab);
+  history.replaceState(null, '', '#' + tab);
+  if (tab === 'logs') loadLogs();
+}
+$('#st-tabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
+
+async function loadInfo() {
+  clearTimeout(infoTimer);
+  const d = await getJSON(stApi(''));
+  if (!d.ok) { $('#st-sub').textContent = d.error || 'No se pudo cargar el stack'; infoTimer = setTimeout(loadInfo, 10000); return; }
+  INFO = d;
+  if (!edited) resetEditors(true);
+  renderHead(); renderServices();
+  infoTimer = setTimeout(loadInfo, d.busy ? 3000 : 10000);
+}
+function renderHead() {
+  const d = INFO;
+  $('#st-led').className = 'led lg ' + (LED[d.state] ?? 'mute');
+  $('#st-title').textContent = d.name + ' — ' + (STATE_TEXT[d.state] || d.state);
+  const parts = [`${escapeHtml(d.running)} de ${escapeHtml(d.total)} servicio(s) en marcha`,
+    `proyecto <span class="mono small">${escapeHtml(d.project)}</span>`];
+  if (d.meta.updated) parts.push('modificado ' + escapeHtml(fmtDate(d.meta.updated)));
+  if (d.busy) parts.push('<b>acción en curso…</b>');
+  $('#st-sub').innerHTML = parts.join(' · ');
+  $('#cp-path').textContent = d.dir + '/compose.yaml';
+  $('#del-dir').textContent = d.dir;
+}
+function renderServices() {
+  const d = INFO, tbody = $('#sv-table tbody');
+  $('#sv-warn').innerHTML = warnHtml(d.meta);
+  const sel = $('#lg-svc'), cur = sel.value;
+  const names = [...new Set([...(d.meta.services || []), ...(d.containers || []).map(c => c.service)])].sort();
+  sel.innerHTML = '<option value="">Todos los servicios</option>' + names.map(n => `<option value="${escapeHtml(n)}" ${n === cur ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('');
+  if (d.containers === null) { tbody.innerHTML = `<tr><td colspan="5" class="muted center">${escapeHtml(d.error || 'No se pudo consultar Docker')}</td></tr>`; return; }
+  const rows = d.containers.map(c => {
+    const cls = c.state === 'running' ? (c.health && c.health !== 'healthy' ? 'warn' : 'ok') : c.state === 'restarting' ? 'warn' : c.state === 'exited' || c.state === 'dead' ? 'err' : 'mute';
+    return `<tr><td class="mono" data-sort="${escapeHtml(c.service)}"><b>${escapeHtml(c.service)}</b></td>
+      <td><span class="pill ${cls}">${escapeHtml(c.state)}${c.health ? ' · ' + escapeHtml(c.health) : ''}</span>
+        <div class="small muted">${escapeHtml(c.status)}</div></td>
+      <td>${c.ports.length ? c.ports.map(p => `<span class="mono small nowrap">${escapeHtml(p)}</span>`).join('<br>') : '<span class="muted">—</span>'}</td>
+      <td class="mono small">${escapeHtml(c.image)}</td>
+      <td class="mono small muted">${escapeHtml(c.name)}</td></tr>`;
+  });
+  // Servicios del compose.yaml que todavía no tienen contenedor
+  for (const s of d.meta.services || []) if (!d.containers.some(c => c.service === s))
+    rows.push(`<tr><td class="mono" data-sort="${escapeHtml(s)}"><b>${escapeHtml(s)}</b></td><td><span class="pill mute">sin contenedor</span></td><td><span class="muted">—</span></td><td></td><td></td></tr>`);
+  tbody.innerHTML = rows.join('') || '<tr><td colspan="5" class="muted center">Sin contenedores. Pulsa «Iniciar».</td></tr>';
+}
+
+const ACTIONS = {
+  start: { verb: 'Iniciar', text: 'Se crearán y arrancarán los contenedores (docker compose up -d). Las imágenes que falten se descargan.' },
+  apply: { verb: 'Aplicar', text: 'Se recrearán los contenedores cuya configuración cambió (docker compose up -d).' },
+  restart: { verb: 'Reiniciar', text: 'Se reiniciarán todos los contenedores del stack. Habrá un corte de unos segundos.', danger: true },
+  pull: { verb: 'Actualizar imágenes', text: 'Se descargarán las versiones más recientes de las imágenes (docker compose pull) y se recrearán los contenedores que cambiaron.' },
+  stop: { verb: 'Detener', text: 'Se detendrán todos los contenedores del stack (se conservan; «Iniciar» los vuelve a arrancar).', danger: true },
+  down: { verb: 'Bajar', text: 'Se detendrán y eliminarán los contenedores y las redes del stack. Los volúmenes y el compose.yaml se conservan.', danger: true },
+};
+async function stackAction(act, skipConfirm) {
+  const a = ACTIONS[act];
+  if (!skipConfirm && !await ui.confirm(a.text, { title: a.verb + ' stack', danger: !!a.danger, confirmText: a.verb })) return;
+  const d = await postJSON(stApi('action'), { action: act });
+  if (!d.ok) showError(d, 'No se pudo ' + a.verb.toLowerCase());
+  else ui.toast('Listo');
+  loadInfo();
+}
+
+// Editores
+function resetEditors(silent) {
+  if (!INFO) return;
+  $('#cp-text').value = INFO.compose_text;
+  $('#env-text').value = INFO.env_text;
+  edited = false;
+  if (!silent) { $('#cp-result').innerHTML = ''; $('#env-result').innerHTML = ''; }
+}
+['#cp-text', '#env-text'].forEach(s => $(s).addEventListener('input', () => { edited = true; }));
+yamlEditor($('#cp-text'));
+fileLoader($('#cp-file'), $('#cp-text'));
+$('#cp-file').addEventListener('change', () => { edited = true; });
+$('#env-show').addEventListener('change', e => $('#env-text').classList.toggle('dp-blur', !e.target.checked));
+
+async function editValidate() {
+  $('#cp-result').innerHTML = '<p class="small muted">Validando…</p>';
+  $('#cp-result').innerHTML = resultHtml(await postJSON(api('validate'), { name: NAME, compose_text: $('#cp-text').value, env_text: $('#env-text').value }));
+}
+async function editSave(which, apply) {
+  const box = which === 'env' ? $('#env-result') : $('#cp-result');
+  const d = await postJSON(stApi('save'), { compose_text: $('#cp-text').value, env_text: $('#env-text').value });
+  box.innerHTML = resultHtml(d);
+  if (!d.ok) return;
+  edited = false;
+  ui.toast('Guardado');
+  await loadInfo();
+  if (apply) return stackAction('apply', true);
+  if (await ui.confirm('Los cambios se guardaron. ¿Aplicarlos ahora? Se recrean solo los contenedores cuya configuración cambió.',
+      { title: 'Aplicar cambios', confirmText: 'Aplicar', cancelText: 'Más tarde' })) stackAction('apply', true);
+}
+
+// Logs
+async function loadLogs() {
+  const pre = $('#lg-pre');
+  pre.textContent = 'Cargando…';
+  const d = await getJSON(stApi('logs') + '?service=' + encodeURIComponent($('#lg-svc').value) + '&tail=' + $('#lg-tail').value);
+  pre.textContent = d.ok ? (d.logs || '(sin líneas)') : (d.error || 'Error');
+  pre.scrollTop = pre.scrollHeight;
+}
+
+// Eliminar
+async function deleteStack() {
+  const vols = $('#del-vols').checked;
+  if (!await ui.confirm(vols ? 'Se eliminará el stack Y SUS VOLÚMENES. Los datos no se pueden recuperar.'
+      : 'Se eliminará el stack. Sus volúmenes con nombre se conservan en Docker.',
+      { title: 'Eliminar stack', danger: true, typed: NAME, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(stApi('delete'), { confirm: NAME, volumes: vols });
+  if (!d.ok) return showError(d, 'No se pudo eliminar');
+  if (d.warnings && d.warnings.length) await ui.alert(d.warnings.join('\n'), { title: 'Eliminado con advertencias', icon: 'warning' });
+  location.href = BASE;
+}
+
+window.addEventListener('beforeunload', e => { if (edited) e.preventDefault(); });
+function tabFromHash() {
+  const tab = location.hash.slice(1);
+  if (['services', 'logs', 'compose', 'env', 'delete'].includes(tab)) showTab(tab);
+}
+window.addEventListener('hashchange', tabFromHash);
+loadInfo().then(tabFromHash);
+{% endif %}
+</script>
+{% endblock %}

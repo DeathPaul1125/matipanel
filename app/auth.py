@@ -23,7 +23,9 @@ class User(UserMixin):
 
 def load_user(user_id):
     # Revalida en cada request: sacar al usuario del grupo revoca su sesión.
-    return User(user_id) if _user_is_allowed(user_id) else None
+    # Revalida también el rol del panel: «Sin acceso» cierra la sesión en la siguiente petición.
+    from . import roles
+    return User(user_id) if _user_is_allowed(user_id) and roles.can_login(user_id) else None
 
 
 def _user_is_allowed(username):
@@ -144,6 +146,9 @@ def login():
         # así el tiempo de respuesta no revela qué cuentas son administradoras.
         ok = _valid_credentials_format(username, password)
         ok = _authenticate_pam(username, password) if ok else False
+        if ok:
+            from . import roles
+            ok = roles.can_login(username)
         if not ok or not _user_is_allowed(username):
             # Mismo mensaje en todos los casos para no revelar qué usuarios existen.
             flash("Usuario o contraseña incorrectos, o sin permiso para el panel.", "error")

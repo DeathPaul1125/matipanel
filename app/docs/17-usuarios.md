@@ -132,6 +132,21 @@ La lista marcada **reemplaza** todos los grupos adicionales del usuario.
 
 > **Nota:** Si el usuario tiene sesiones SSH abiertas, los grupos nuevos se aplican cuando vuelva a iniciar sesión. El acceso al panel sí cambia al instante.
 
+## Claves SSH de un usuario
+
+Permite que una persona entre por SSH como ese usuario con su **clave** en lugar de (o además de) la contraseña. Es más seguro y es necesario si desactivas el acceso por contraseña en [Seguridad del servidor](34-seguridad-servidor.md).
+
+1. Haz clic en **Claves SSH** en la fila del usuario.
+2. La ventana muestra las claves autorizadas (archivo `~/.ssh/authorized_keys`) con su **tipo**, **huella** (`SHA256:…`, la misma que muestra `ssh-keygen -lf`) y **comentario**. Las que tienen restricciones en el archivo muestran «con opciones».
+3. Para **agregar** una, pega en el cuadro la **clave pública** de quien va a entrar: una sola línea que empieza con `ssh-ed25519`, `ssh-rsa` o `ecdsa-…`. En su equipo la obtiene con `cat ~/.ssh/id_ed25519.pub` (o la genera con `ssh-keygen -t ed25519`). Pulsa **Agregar clave**.
+4. Para **quitar** una, pulsa **Quitar** en su fila y confirma.
+
+El panel valida la clave (formato, tipo y, en RSA, un mínimo de 2048 bits), evita duplicados y escribe el archivo con dueño el usuario y permisos `600`, creando `~/.ssh` (`700`) si no existe.
+
+> **Importante:** Pega solo la clave **pública** (`.pub`). La privada nunca debe salir del equipo de su dueño.
+
+> **Nota:** Por seguridad, el panel no escribe a través de enlaces simbólicos: si `~/.ssh` o `authorized_keys` son enlaces, o `~/.ssh` pertenece a otro usuario, verás un error y deberás revisarlo a mano.
+
 ## Eliminar un usuario
 
 1. Haz clic en **Eliminar** en la fila del usuario.
@@ -154,6 +169,10 @@ El panel evita que te quites el acceso a ti mismo por accidente:
 - No se pueden eliminar los grupos `matipanel`, `sudo`, `wheel` ni `admin`, ni ningún grupo del sistema (GID menor de 1000).
 
 > **Importante:** Estas protecciones solo cubren tu propia cuenta. Otro administrador sí puede quitarte el acceso, y tú se lo puedes quitar a él. Mantén siempre al menos dos cuentas con acceso al panel.
+
+## Permisos dentro del panel
+
+Estar en `matipanel`, `sudo`, `wheel` o `admin` permite **entrar** al panel. Qué puede **hacer** cada uno dentro (administrador, solo lectura, módulos concretos o sin acceso) se elige en [Permisos del panel](35-permisos.md).
 
 ## Ver y crear grupos
 

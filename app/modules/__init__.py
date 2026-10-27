@@ -12,6 +12,10 @@ from .traffic import traffic_bp
 from .auditlog import audit_bp
 from .notifications import notify_bp
 from .appbackups import appbackup_bp
+from .roles_page import roles_bp
+from .stacks import stacks_bp
+from .hardening import hardening_bp
+from .monitor import monitor_bp
 from .firewall import firewall_bp
 from .webserver import webserver_bp
 from .ssl import ssl_bp
@@ -46,14 +50,15 @@ def register_modules(app, sock):
         (appearance_bp, "/apariencia"), (help_bp, "/ayuda"),
         (mail_bp, "/correo"), (dns_bp, "/dns"), (shares_bp, "/compartidos"),
         (storage_bp, "/almacenamiento"), (dbexplorer_bp, "/bd"), (deploy_bp, "/despliegues"),
-        (audit_bp, "/auditoria"), (notify_bp, "/notificaciones"), (appbackup_bp, "/respaldos-apps"),
+        (audit_bp, "/auditoria"), (notify_bp, "/notificaciones"), (appbackup_bp, "/respaldos-apps"), (roles_bp, "/permisos"), (stacks_bp, "/stacks"), (hardening_bp, "/seguridad-servidor"), (monitor_bp, "/monitor"),
         (remote_bp, "/servidores"),  # ruta fija: los paneles se consultan entre sí en /servidores/api/remote/summary
     ]:
         app.register_blueprint(bp, url_prefix=prefix)
 
-    from .. import jobs, audit
+    from .. import jobs, audit, roles
     jobs.init_app(app)
-    audit.init_app(app)  # registro de auditoría de toda acción que cambia algo  # salida en vivo de los botones (ventana de terminal)
+    audit.init_app(app)  # registro de auditoría de toda acción que cambia algo
+    roles.init_app(app)  # permisos por usuario (antes de cada vista)  # salida en vivo de los botones (ventana de terminal)
     app.jinja_env.globals["HELP_CONTEXT"] = HELP_CONTEXT  # botón "?" de cada pantalla
     app.jinja_env.globals["VIEW_FUNCS"] = app.view_functions  # el menú oculta módulos no registrados
     register_terminal_ws(sock)

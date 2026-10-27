@@ -8,6 +8,7 @@ from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required, current_user
 from ..auth import ALLOWED_GROUPS
 from ..util import run
+from .. import sshkeys
 
 users_bp = Blueprint("users", __name__)
 
@@ -328,3 +329,51 @@ def group_member():
         if not _keeps_panel_access(u, after):
             return _err("Perderías el acceso al panel (" + ", ".join(ALLOWED_GROUPS) + ")", 403)
     return _cmd(["gpasswd", "-a" if act == "add" else "-d", u.pw_name, "--", g.gr_name])
+
+
+# ── Claves SSH autorizadas ───────────────────────────────────────────────
+
+@users_bp.route("/api/user/keys")
+@login_required
+def user_keys():
+    pw = _user(request.args.get("user", ""))
+    if not pw:
+        return _err("Usuario inexistente", 404)
+    try:
+        _, keys = sshkeys.read(pw)
+    except (sshkeys.KeyError_, OSError) as e:
+        return _err(str(e), 409)
+    return jsonify({"ok": True, "keys": keys, "home": pw.pw_dir})
+
+
+@users_bp.route("/api/user/keys/add", methods=["POST"])
+@login_required
+def user_keys_add():
+    data = request.get_json(silent=True) or {}
+    pw = _user(data.get("user", ""))
+    if not pw:
+        return _err("Usuario inexistente", 404)
+    try:
+        k = sshkeys.add(pw, data.get("key", ""))
+    except sshkeys.KeyError_ as e:
+        return _err(str(e))
+    except OSError as e:
+        return _err(f"No se pudo escribir: {e.strerror or e}", 500)
+    return jsonify({"ok": True, "key": k})
+
+
+@users_bp.route("/api/user/keys/delete", methods=["POST"])
+@login_required
+def user_keys_delete():
+    data = request.get_json(silent=True) or {}
+    pw = _user(data.get("user", ""))
+    line = data.get("line")
+    if not pw or not isinstance(line, int) or line < 0:
+        return _err("Datos inválidos")
+    try:
+        sshkeys.remove(pw, line, str(data.get("fingerprint", "")))
+    except sshkeys.KeyError_ as e:
+        return _err(str(e), 409)
+    except OSError as e:
+        return _err(f"No se pudo escribir: {e.strerror or e}", 500)
+    return jsonify({"ok": True})

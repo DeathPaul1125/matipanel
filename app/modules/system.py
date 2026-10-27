@@ -57,14 +57,71 @@ def _read(path, limit=200_000):
 def _timedate():
     code, out, err = run(["timedatectl", "show"], timeout=10)
     if code != 0:
-        return {"error": err.strip() or "timedatectl no disponible"}
+        return {"error": err.strip() or "timedatectl no disponible", "epoch": time.time()}
     kv = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    _, ts, _ = run(["timedatectl", "show-timesync", "--property=ServerName", "--value"], timeout=10)
     return {
         "timezone": kv.get("Timezone", ""),
         "ntp": kv.get("NTP") == "yes",
         "can_ntp": kv.get("CanNTP") == "yes",
         "synced": kv.get("NTPSynchronized") == "yes",
         "local_time": kv.get("TimeUSec", ""),
+        "rtc_local": kv.get("LocalRTC") == "yes",
+        "ntp_server": ts.strip(),
+        "epoch": time.time(),  # el navegador calcula su desfase y muestra el reloj del servidor en vivo
+        "utc_offset": -time.altzone if time.localtime().tm_isdst > 0 else -time.timezone,
+    }
+
+
+def _dmi(name):
+    v = (_read(f"/sys/class/dmi/id/{name}", 200) or "").strip()
+    return "" if v.startswith("(") or v in ("To be filled by O.E.M.", "Default string", "System Product Name") else v
+
+
+def _os_release():
+    kv = {}
+    for line in (_read("/etc/os-release") or "").splitlines():
+        k, _, v = line.partition("=")
+        kv[k] = v.strip().strip('"')
+    return kv
+
+
+def _scheduled_shutdown():
+    """Apagado o reinicio programado con «shutdown» (systemd lo deja en /run/systemd/shutdown/scheduled)."""
+    kv = dict(line.split("=", 1) for line in (_read("/run/systemd/shutdown/scheduled", 4000) or "").splitlines()
+              if "=" in line)
+    if not kv.get("USEC", "").isdigit():
+        return None
+    return {"at": int(kv["USEC"]) / 1e6, "mode": kv.get("MODE", ""), "message": kv.get("WALL_MESSAGE", "")}
+
+
+def _locale():
+    code, out, _ = run(["localectl", "status"], timeout=10)
+    kv = {}
+    for line in out.splitlines() if code == 0 else []:
+        k, _, v = line.partition(":")
+        kv[k.strip()] = v.strip()
+    return {"lang": kv.get("System Locale", "").replace("LANG=", ""), "keymap": kv.get("VC Keymap", "") or kv.get("X11 Layout", "")}
+
+
+def _overview():
+    osr = _os_release()
+    _, virt, _ = run(["systemd-detect-virt"], timeout=10)
+    try:
+        load = os.getloadavg()
+    except (OSError, AttributeError):
+        load = (0.0, 0.0, 0.0)
+    reboot = os.path.exists("/var/run/reboot-required")
+    pkgs = [p for p in (_read("/var/run/reboot-required.pkgs", 20000) or "").split() if p] if reboot else []
+    vendor, product = _dmi("sys_vendor"), _dmi("product_name")
+    return {
+        "os_name": osr.get("PRETTY_NAME") or detect()["name"], "os_id": osr.get("ID", ""),
+        "os_version": osr.get("VERSION", ""), "codename": osr.get("VERSION_CODENAME", ""),
+        "virt": virt.strip() if virt.strip() and virt.strip() != "none" else "",
+        "machine": " ".join(x for x in (vendor, product) if x),
+        "boot": psutil.boot_time(), "load": [round(x, 2) for x in load], "procs": len(psutil.pids()),
+        "users": len(psutil.users()), "reboot_required": reboot, "reboot_pkgs": sorted(set(pkgs))[:30],
+        "scheduled": _scheduled_shutdown(), "locale": _locale(), "python": platform.python_version(),
     }
 
 
@@ -97,6 +154,7 @@ def info():
         "lsblk_error": "" if code == 0 else err.strip(),
         "fstab": _read("/etc/fstab") or "",
         "time": _timedate(),
+        "overview": _overview(),
         "configs": [{"path": p, "desc": d, "exists": os.path.exists(p)} for p, d in CONFIG_FILES],
     })
 
@@ -117,11 +175,66 @@ def sessions():
         code, out, err = run(cmd, timeout=10)
         return out if code == 0 else (err.strip() or f"{cmd[0]} falló")
 
-    last = out_of(["last", "-n", "50", "-F"])
-    if "invalid option" in last or "unrecognized" in last:
-        last = out_of(["last", "-n", "50"])
-    lastb = out_of(["lastb", "-n", "30", "-F"]) if shutil.which("lastb") else "lastb no disponible"
-    return jsonify({"who": out_of(["who"]) or "(nadie conectado)", "last": last, "lastb": lastb})
+    last = out_of(["last", "-n", "60", "-F", "-w", "-i"])
+    if "invalid option" in last or "unrecognized" in last or "unknown option" in last:
+        last = out_of(["last", "-n", "60", "-F"])
+    lastb = out_of(["lastb", "-n", "30", "-F", "-w", "-i"]) if shutil.which("lastb") else ""
+    _, who, _ = run(["who", "-u"], timeout=10)
+    return jsonify({"who": parse_who(who), "last": parse_last(last), "lastb": parse_last(lastb) if lastb else [],
+                    "has_lastb": bool(shutil.which("lastb")), "last_raw": last if not parse_last(last) else "",
+                    "ssh_failed": ssh_failures()})
+
+
+WHO_RE = re.compile(r"^(\S+)\s+(\S+)\s+(\d{4}-\d\d-\d\d \d\d:\d\d|\w{3}\s+\d+\s+\d\d:\d\d)\s+(\S+)?\s*(\d+)?\s*(?:\((.*)\))?")
+DATE = r"\w{3} \w{3} [ \d]\d \d\d:\d\d:\d\d \d{4}"
+LAST_RE = re.compile(rf"^(\S+)\s+(system boot|\S+)\s+(.*?)\s*({DATE})\s*(?:-\s*({DATE}|crash|down)\s*\(([^)]*)\)|(.*))$")
+
+
+def parse_who(out):
+    rows = []
+    for line in out.splitlines():
+        m = WHO_RE.match(line)
+        if m:
+            rows.append({"user": m[1], "tty": m[2], "since": m[3], "idle": m[4] or "", "pid": m[5] or "", "from": m[6] or ""})
+    return rows
+
+
+def parse_last(out):
+    """Salida de `last -F` (util-linux o wtmpdb) → filas; las líneas que no encajan se ignoran."""
+    rows = []
+    for line in out.splitlines():
+        m = LAST_RE.match(line.rstrip())
+        if not m or m[1] in ("wtmp", "btmp", "wtmpdb"):
+            continue
+        boot = m[2] == "system boot"
+        rows.append({"user": m[1], "tty": m[2], "from": "" if boot else m[3].strip(), "kernel": m[3].strip() if boot else "",
+                     "start": m[4], "end": m[5] or "", "duration": m[6] or "", "status": (m[7] or "").strip(),
+                     "boot": boot})
+    return rows
+
+
+SSH_FAIL_RE = re.compile(r"(?:Failed \S+ for (?:invalid user )?(\S+)|Invalid user (\S*)) from (\S+) port")
+
+
+def ssh_failures(days=7):
+    """Intentos fallidos de SSH de los últimos días, por IP (del journal: Debian 13 ya no trae lastb)."""
+    code, out, _ = run(["journalctl", "--no-pager", "-o", "short-iso", "--since", f"-{days}d", "-g",
+                        "Failed password|Failed publickey|Invalid user", "_COMM=sshd", "_COMM=sshd-session"], timeout=30)
+    if code not in (0, 1):
+        return {"error": "No se pudo leer el journal", "ips": []}
+    ips = {}
+    for line in out.splitlines()[-20000:]:
+        m = SSH_FAIL_RE.search(line)
+        if not m:
+            continue
+        ip, user = m[3], m[1] or m[2] or "?"
+        e = ips.setdefault(ip, {"ip": ip, "count": 0, "users": set(), "last": ""})
+        e["count"] += 1
+        e["users"].add(user)
+        e["last"] = line.split(" ", 1)[0]
+    top = sorted(ips.values(), key=lambda e: -e["count"])[:50]
+    return {"days": days, "total": sum(e["count"] for e in ips.values()), "ips": [
+        {**e, "users": sorted(e["users"])[:8]} for e in top]}
 
 
 def _update_hosts(new):
@@ -203,6 +316,63 @@ def power():
     if code != 0:
         return _err(err.strip() or "systemd-run falló", 500)
     return jsonify({"ok": True})
+
+
+@system_bp.route("/api/power/schedule", methods=["POST"])
+@login_required
+def power_schedule():
+    """Reinicio o apagado programado con «shutdown» (avisa a los usuarios conectados y se puede cancelar)."""
+    data = request.get_json(silent=True) or {}
+    act, when, msg = data.get("action"), str(data.get("when", "")).strip(), " ".join(str(data.get("message", "")).split())
+    if act not in ("reboot", "poweroff"):
+        return _err("Acción no permitida")
+    if data.get("confirm") != socket.gethostname():
+        return _err("La confirmación no coincide con el hostname")
+    if re.fullmatch(r"\d{1,4}", when) and 1 <= int(when) <= 10080:
+        spec = f"+{int(when)}"
+    elif re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", when):
+        spec = when
+    else:
+        return _err("Indica minutos (1 a 10080) o una hora HH:MM")
+    if len(msg) > 200 or not all(c.isprintable() for c in msg):
+        return _err("Mensaje inválido (hasta 200 caracteres)")
+    code, out, err = run(["shutdown", "-r" if act == "reboot" else "-P", spec, *([msg] if msg else [])], timeout=15)
+    if code != 0:
+        return _err(err.strip() or out.strip() or "shutdown falló", 500)
+    return jsonify({"ok": True, "scheduled": _scheduled_shutdown()})
+
+
+@system_bp.route("/api/power/cancel", methods=["POST"])
+@login_required
+def power_cancel():
+    code, out, err = run(["shutdown", "-c"], timeout=15)
+    if code != 0:
+        return _err(err.strip() or "No se pudo cancelar", 500)
+    return jsonify({"ok": True})
+
+
+@system_bp.route("/api/hardware")
+@login_required
+def hardware():
+    """Detalle del procesador (lscpu) y dispositivos PCI/USB si las herramientas existen."""
+    code, out, _ = run(["lscpu", "-J"], timeout=10)
+    cpu = {}
+    try:
+        for item in json.loads(out).get("lscpu", []) if code == 0 else []:
+            cpu[item.get("field", "").rstrip(":")] = item.get("data", "")
+            for ch in item.get("children", []) or []:
+                cpu[ch.get("field", "").rstrip(":")] = ch.get("data", "")
+    except (ValueError, AttributeError):
+        cpu = {}
+    keys = ["Model name", "Vendor ID", "Architecture", "CPU(s)", "Socket(s)", "Core(s) per socket", "Core(s) per cluster",
+            "Thread(s) per core", "CPU max MHz", "CPU min MHz", "BogoMIPS", "Virtualization", "Hypervisor vendor",
+            "Virtualization type", "L1d", "L1i", "L2", "L3", "NUMA node(s)"]
+    def lines(cmd):
+        if not shutil.which(cmd[0]):
+            return None
+        c, o, _ = run(cmd, timeout=15)
+        return o.splitlines()[:200] if c == 0 else []
+    return jsonify({"cpu": [[k, cpu[k]] for k in keys if cpu.get(k)], "pci": lines(["lspci"]), "usb": lines(["lsusb"])})
 
 
 @system_bp.route("/api/ssh-restart", methods=["POST"])

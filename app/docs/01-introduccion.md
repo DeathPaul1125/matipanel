@@ -8,11 +8,12 @@ Esta ayuda explica cada pantalla del panel. Usa el buscador de la izquierda (o *
 
 | Área | Pantallas | Para qué sirve |
 |---|---|---|
-| Sistema | [Dashboard](10-dashboard.md), [Sistema](11-sistema.md), [Procesos](12-procesos.md), [Servicios](13-servicios.md), [Tareas (cron)](14-cron.md), [Discos](15-discos.md), [Respaldos](16-respaldos.md) | Ver el estado del servidor, reiniciarlo, programar tareas, revisar discos y sacar respaldos |
-| Acceso | [Usuarios y grupos](17-usuarios.md) | Crear cuentas, cambiar contraseñas, administrar grupos |
-| Red | [Interfaces](18-red.md), [Firewall](20-firewall.md) | Ver la red y abrir o cerrar puertos |
-| Servidores | [Servidor web](21-servidor-web.md), [SSL / Let's Encrypt](22-ssl.md), [PHP](23-php.md), [Bases de datos](24-bases-de-datos.md), [Docker](25-docker.md) | Publicar sitios, certificados HTTPS, PHP, MariaDB/PostgreSQL y contenedores |
-| Herramientas | [Archivos](26-archivos.md), [Paquetes](27-paquetes.md), [Logs](28-logs.md), [Terminal](29-terminal.md) | Explorar y editar archivos, instalar software, revisar registros y usar la consola |
+| Sistema | [Dashboard](10-dashboard.md), [Sistema](11-sistema.md), [Procesos](12-procesos.md), [Servicios](13-servicios.md), [Tareas (cron)](14-cron.md), [Paquetes](27-paquetes.md) | Ver el estado del servidor, reiniciarlo (también programado), procesos, servicios, tareas e instalar software |
+| Archivos y discos | [Archivos](26-archivos.md), [Discos](15-discos.md), [Almacenamiento](53-almacenamiento.md), [Respaldos](16-respaldos.md), [Respaldos de apps](57-respaldos-apps.md), [Compartidos](52-compartidos.md) | Explorar y editar archivos, discos, LVM/RAID, respaldos locales y remotos, Samba/NFS |
+| Red y acceso | [Usuarios y grupos](17-usuarios.md), [Permisos del panel](35-permisos.md), [Interfaces](18-red.md), [Tráfico de red](19-trafico.md), [Firewall](20-firewall.md), [DNS](51-dns.md), [Multi-servidor](54-multiservidor.md), [Seguridad del servidor](34-seguridad-servidor.md) | Cuentas y claves SSH, quién puede hacer qué en el panel, red y su tráfico, puertos, DNS, otros servidores y endurecimiento |
+| Web y aplicaciones | [Servidor web](21-servidor-web.md), [SSL / Let's Encrypt](22-ssl.md), [PHP](23-php.md), [Despliegues](56-despliegues.md), [Stacks](59-stacks.md), [Docker](25-docker.md), [Correo](50-correo.md) | Sitios, certificados, PHP, apps desde GitHub, proyectos de Docker Compose, contenedores y correo |
+| Bases de datos | [Bases de datos](24-bases-de-datos.md), [Explorador BD](55-explorador-bd.md) | MariaDB/PostgreSQL y un explorador estilo phpMyAdmin (también para las bases de las apps) |
+| Herramientas | [Terminal](29-terminal.md), [Logs](28-logs.md), [Monitor](58-monitor.md), [Notificaciones](33-notificaciones.md), [Auditoría](32-auditoria.md) | Consola, registros, vigilancia de servicios de tu red, avisos por correo y quién hizo qué |
 | Cuenta | [Seguridad (2FA)](30-seguridad-2fa.md), [Apariencia](31-apariencia.md) | Proteger tu acceso y personalizar el panel |
 
 ## Cómo funciona por dentro
@@ -37,11 +38,14 @@ Entras con **tu usuario y contraseña de Linux** del servidor; no hay cuentas ap
 
 Si sacas a alguien de esos grupos, su sesión se cierra en la siguiente acción que haga en el panel.
 
+Qué puede **hacer** cada persona dentro del panel (todo, solo mirar, solo algunos módulos) se elige en [Permisos del panel](35-permisos.md).
+
 ## Seguridad del panel
 
 - **Bloqueo por intentos:** tras 5 intentos fallidos de inicio de sesión (o de código 2FA) desde la misma IP, el acceso se bloquea 5 minutos.
 - **Doble factor (2FA):** puedes exigir un código de Google Authenticator, Aegis, Authy, etc. Ver [Seguridad (2FA)](30-seguridad-2fa.md).
 - **Protección contra sitios maliciosos:** el panel rechaza peticiones que vengan de otras páginas web (CSRF) y conexiones de terminal desde otros orígenes.
+- **Permisos y auditoría:** cada usuario tiene un rol (administrador, solo lectura, módulos concretos) y todo lo que se hace queda en la [Auditoría](32-auditoria.md).
 - **Terminal sin privilegios:** la terminal web abre una sesión con tu propio usuario, nunca como root.
 - **Confirmaciones:** las acciones destructivas piden confirmación, y las más delicadas (borrar una base de datos, reiniciar el servidor) te piden escribir el nombre para habilitar el botón.
 

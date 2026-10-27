@@ -1,107 +1,99 @@
 # Sistema
 
-El módulo Sistema reúne la configuración básica del servidor: nombre del host, fecha y hora, reinicio y apagado, sesiones de usuarios, hardware y los archivos de configuración más comunes. Lo encuentras en **Menú → Sistema → Sistema**.
+El módulo Sistema reúne la información y la configuración básica del servidor: qué equipo es, cuánto lleva encendido, el nombre, la fecha y hora, el reinicio y apagado (también programado), quién se conecta, el hardware y los archivos de configuración más comunes. Lo encuentras en **Menú → Sistema → Sistema**.
 
-## Qué muestra el resumen superior
+## Resumen superior
 
-Arriba de las pestañas hay cuatro recuadros:
+Arriba de las pestañas hay cuatro recuadros que se actualizan cada 30 segundos:
 
 | Recuadro | Valor principal | Detalle inferior |
 |---|---|---|
-| **Hostname** | nombre del servidor | sistema operativo |
-| **Kernel** | versión del kernel | arquitectura y tiempo encendido (`arriba 3d 4h 10m`) |
-| **CPU** | número de núcleos | modelo del procesador |
-| **Memoria** | usada / total | uso de swap |
+| **Servidor** | nombre del servidor (hostname) | sistema operativo |
+| **Encendido desde hace** | tiempo encendido (`3 d 4 h 10 min`) | fecha y hora del último arranque |
+| **CPU** | número de núcleos | carga promedio de 1, 5 y 15 minutos |
+| **Memoria** | usada / total, con barra (verde, ámbar desde 80 %, roja desde 90 %) | uso de swap |
 
-Debajo están las pestañas **General**, **Sesiones**, **Hardware** y **Configuración**.
+Debajo pueden aparecer dos avisos:
 
-## Cambiar el nombre del servidor (hostname)
+- **Reinicio pendiente** (ámbar): las actualizaciones instaladas (por ejemplo un kernel nuevo) necesitan reiniciar para aplicarse. Muestra los paquetes y un botón **Programar reinicio…**.
+- **Reinicio/Apagado programado** (azul): hay uno programado; muestra la fecha, el mensaje y **Cancelar**.
 
-1. Abre la pestaña **General**.
-2. En la tarjeta **Hostname**, escribe el nuevo nombre.
-3. Haz clic en **Cambiar**.
-4. Confirma en el diálogo **Cambiar hostname** con el botón **Cambiar**.
+## Pestaña General
 
-Verás el aviso "Hostname actualizado". El panel hace dos cosas:
+### Resumen
 
-- Ejecuta `hostnamectl set-hostname`.
-- Reescribe la línea `127.0.1.1` de `/etc/hosts` con el nombre nuevo (y su forma corta, si usas un nombre con puntos). Antes guarda una copia en `/etc/hosts.matipanel.bak`.
+| Dato | Qué significa |
+|---|---|
+| **Sistema operativo** | Distribución y versión (por ejemplo `Debian GNU/Linux 13 (trixie)`). |
+| **Kernel** | Versión del kernel y arquitectura (`x86_64`, `aarch64`…). |
+| **Equipo** | Fabricante y modelo del hardware, y si es **virtual** (`kvm`, `vmware`, `microsoft`…) o **físico**. |
+| **Procesador** | Modelo de la CPU. |
+| **Carga (1 · 5 · 15 min)** | Procesos esperando CPU. Verde si es menor que los núcleos, ámbar si los iguala, rojo si los supera en 1,5 veces. |
+| **Procesos** | Procesos en ejecución. |
+| **Sesiones abiertas** | Usuarios conectados ahora (SSH, consola). |
+| **Idioma y teclado** | Idioma del sistema (`LANG`) y distribución del teclado. |
 
-### Reglas del nombre
+### Fecha y hora
 
-- Solo letras, números, guiones (`-`) y puntos (`.`).
-- Cada parte entre puntos tiene de 1 a 63 caracteres y no puede empezar ni terminar en guion.
-- Máximo 253 caracteres en total.
-- Ejemplos válidos: `srv-web01`, `srv-web01.senabed.gob.gt`.
+El reloj grande muestra la **hora del servidor en vivo** (en su zona horaria), aunque tu equipo esté en otra zona o con otra hora. Debajo:
 
-> **Nota:** Si el cambio de hostname funciona pero `/etc/hosts` no se puede escribir, verás un diálogo **Atención** que lo explica. El nombre sí quedó cambiado; revisa `/etc/hosts` a mano desde [Archivos](26-archivos.md).
+- **Zona horaria**: escribe para buscar (por ejemplo `America/Guatemala`), pulsa **Cambiar** y confirma. Debe existir en `timedatectl list-timezones`.
+- **Sincronización (NTP)**: `activa` + `sincronizada` es lo correcto. **Activar/Desactivar** cambia la sincronización automática.
+- **Servidor de hora**: el servidor NTP que se está usando.
+- **Hora UTC**: la hora universal, útil para comparar con logs de otros sistemas.
 
-> **Consejo:** La línea de comandos de las sesiones SSH abiertas sigue mostrando el nombre anterior hasta que vuelvas a conectarte.
+> **Importante:** La zona horaria afecta a cron, a los respaldos programados y a las fechas de los logs.
 
-## Cambiar la zona horaria
+> **Nota:** Si **Activar** aparece deshabilitado, falta un servicio NTP compatible con `timedatectl`. En Debian se instala con el paquete `systemd-timesyncd` (ver [Paquetes](27-paquetes.md)). Si queda `sin sincronizar` varios minutos, revisa que el servidor tenga salida por UDP 123.
 
-1. En la pestaña **General**, ubica la tarjeta **Fecha y hora**.
-2. En el campo de zona (ejemplo: `America/Guatemala`), empieza a escribir. El navegador te sugiere las zonas válidas.
-3. Haz clic en **Cambiar zona**.
-4. Confirma con **Cambiar**.
+### Nombre del servidor
 
-La zona debe existir en la lista de `timedatectl list-timezones`. Si escribes una zona que no existe, verás "Zona horaria desconocida". Para Guatemala usa `America/Guatemala`.
+1. Escribe el nuevo nombre y pulsa **Cambiar**.
+2. Confirma.
 
-> **Importante:** La zona horaria afecta a cron. Las tareas programadas y los respaldos automáticos se ejecutan según la hora local del servidor.
+El panel ejecuta `hostnamectl set-hostname` y reescribe la línea `127.0.1.1` de `/etc/hosts` (antes guarda una copia en `/etc/hosts.matipanel.bak`).
 
-> **Nota:** El valor de **Hora local** se lee al abrir la página; no avanza en vivo. Recarga la página para verlo actualizado.
+**Reglas:** letras, números, guiones y puntos; cada parte de 1 a 63 caracteres sin empezar ni terminar en guion; máximo 253. Ejemplos: `srv-web01`, `srv-web01.senabed.gob.gt`.
 
-## Activar o desactivar la sincronización NTP
+> **Nota:** Si el nombre cambia pero `/etc/hosts` no se puede escribir, verás un aviso **Atención**; revisa el archivo a mano desde [Archivos](26-archivos.md). Las sesiones SSH abiertas siguen mostrando el nombre anterior hasta reconectarse.
 
-NTP mantiene el reloj del servidor en hora usando servidores de internet.
+### Encendido
 
-1. En la tarjeta **Fecha y hora**, revisa la línea **NTP**:
-   - `activo` + `sincronizado`: todo bien.
-   - `activo` + `sin sincronizar`: el servicio está encendido pero aún no logra sincronizar (revisa la conexión o el firewall, puerto UDP 123 de salida).
-   - `inactivo`: el reloj no se sincroniza.
-2. Haz clic en **Activar NTP** o **Desactivar NTP**.
-3. Confirma en el diálogo **Sincronización NTP**.
+| Botón | Qué hace |
+|---|---|
+| **Reiniciar ahora** / **Apagar ahora** | Se ejecuta a los 3 segundos. |
+| **Programar…** | Reinicio o apagado en **N minutos** (1 a 10080, es decir hasta 7 días) o a una **hora HH:MM** (la próxima vez que llegue esa hora). Puedes escribir un **mensaje** que verán los usuarios conectados por SSH. |
+| **Cancelar programado** | Anula el reinicio o apagado programado. |
 
-> **Nota:** Si el botón aparece deshabilitado, el sistema no tiene un servicio NTP compatible con `timedatectl`. En Debian se instala con el paquete `systemd-timesyncd` (ver [Paquetes](27-paquetes.md)).
+Todas piden escribir el **nombre del servidor** para confirmar (cópialo del recuadro **Servidor**).
 
-## Reiniciar o apagar el servidor
+> **Consejo:** Para aplicar un kernel nuevo sin cortar a nadie en horario laboral, usa **Programar…** con una hora nocturna, por ejemplo `23:00`.
 
-1. En la pestaña **General**, ve a la tarjeta **Encendido**.
-2. Haz clic en **Reiniciar servidor** o **Apagar servidor**.
-3. En el diálogo, escribe el **hostname exacto** del servidor en el campo "Escribe … para confirmar". El botón **Reiniciar** o **Apagar** se habilita solo cuando el texto coincide.
-4. Confirma.
+> **Importante:** Si apagas el servidor no podrás encenderlo desde el panel: necesitarás acceso físico, la consola del hipervisor o la gestión remota (iLO, iDRAC…). Tras un reinicio espera uno o dos minutos y recarga la página.
 
-La acción se ejecuta 3 segundos después. Verás el aviso "El servidor se reiniciará en unos segundos." (o "se apagará").
+## Pestaña Sesiones
 
-> **Importante:** Si apagas el servidor, no podrás encenderlo desde el panel. Necesitarás acceso físico, a la consola del hipervisor o al sistema de gestión remota (iLO, iDRAC, etc.).
+Se carga al abrirla; **Refrescar** vuelve a consultar. Todas las tablas se pueden filtrar, ordenar y paginar.
 
-> **Consejo:** Tras un reinicio, espera uno o dos minutos y recarga la página. El panel vuelve a estar disponible cuando arranca el servicio `matipanel`.
+- **Conectados ahora**: usuario, terminal, desde qué IP (`local` si es la consola), cuándo entró y cuánto lleva inactivo.
+- **Intentos fallidos por SSH**: los últimos 7 días, agrupados por **IP**, con el número de intentos, los **usuarios que probaron** y el último intento. Se lee del journal de `sshd` (en Debian 13 ya no existe `lastb`).
+- **Últimos accesos y arranques**: los últimos 60 inicios de sesión con inicio, fin y duración (`conectado` si sigue dentro, `caída` si el servidor se cayó con la sesión abierta) y los **arranques** del servidor con su kernel.
+- **Accesos fallidos (lastb)**: solo en sistemas que todavía guardan ese registro.
 
-## Ver quién está conectado y los últimos accesos
+> **Consejo:** Muchos intentos desde la misma IP probando `root`, `admin` u otros nombres son un ataque de fuerza bruta. Bloquéala en el [Firewall](20-firewall.md) y considera instalar fail2ban desde [Seguridad del servidor](34-seguridad-servidor.md).
 
-1. Abre la pestaña **Sesiones**. Los datos se cargan al entrar.
-2. Revisa las tres tarjetas:
-   - **Usuarios conectados (who)**: sesiones abiertas ahora mismo (SSH, consola).
-   - **Últimos accesos (last)**: los últimos 50 inicios de sesión, con fecha y hora completas.
-   - **Accesos fallidos (lastb)**: los últimos 30 intentos de inicio de sesión fallidos.
-3. Usa **Refrescar** para volver a consultar.
+## Pestaña Hardware
 
-> **Nota:** Si una tarjeta muestra "lastb no disponible" o un mensaje de error, el comando no está instalado o el sistema no guarda ese registro. En versiones recientes de Debian el registro clásico de accesos puede no estar disponible. Revisa los intentos fallidos de SSH en [Logs](28-logs.md) (unidad `ssh`).
+- **Procesador**: modelo, fabricante, arquitectura, CPU lógicas, zócalos, núcleos e hilos, frecuencias, virtualización y cachés (de `lscpu`).
+- **Dispositivos de bloque**: discos y particiones (`lsblk`) con tamaño, tipo, sistema de archivos, montaje y modelo.
+- **Dispositivos PCI** y **USB**: listado de `lspci` y `lsusb` (si faltan, instala los paquetes `pciutils` y `usbutils`).
+- **/etc/fstab**: los montajes al arranque, con **editar** para abrirlo en [Archivos](26-archivos.md).
 
-> **Consejo:** Muchos accesos fallidos desde la misma IP indican un ataque de fuerza bruta. Considera bloquear esa IP en [Firewall](20-firewall.md).
+> **Importante:** Un error en `/etc/fstab` puede impedir que el servidor arranque. Antes de reiniciar tras editarlo, prueba con `mount -a` en la [Terminal](29-terminal.md).
 
-## Ver los discos y el archivo fstab
+## Pestaña Configuración
 
-La pestaña **Hardware** tiene dos tarjetas:
-
-- **Dispositivos de bloque**: salida de `lsblk` con **Nombre**, **Tamaño**, **Tipo** (`disk`, `part`, `lvm`, `rom`…), **FS** (sistema de archivos), **Montaje** y **Modelo**. Las particiones aparecen sangradas bajo su disco con `└`.
-- **/etc/fstab**: el contenido actual del archivo de montajes al arranque. El botón **editar** lo abre en el editor de [Archivos](26-archivos.md).
-
-> **Importante:** Un error en `/etc/fstab` puede impedir que el servidor arranque. Antes de reiniciar tras editarlo, prueba con `mount -a` desde la [Terminal](29-terminal.md). Si no muestra errores, el archivo está bien.
-
-## Editar archivos de configuración del sistema
-
-La pestaña **Configuración** muestra accesos directos a seis archivos clave:
+Accesos directos para editar archivos clave en [Archivos](26-archivos.md):
 
 | Archivo | Para qué sirve |
 |---|---|
@@ -112,56 +104,38 @@ La pestaña **Configuración** muestra accesos directos a seis archivos clave:
 | `/etc/fstab` | Montajes al arranque |
 | `/etc/sysctl.conf` | Parámetros del kernel |
 
-1. Haz clic en **editar** en la tarjeta del archivo.
-2. Se abre el editor de [Archivos](26-archivos.md) con ese archivo cargado.
-3. Guarda los cambios desde el editor.
+Si un archivo no existe verás `no existe`. Editar no aplica el cambio por sí solo: por ejemplo, tras `/etc/sysctl.conf` ejecuta `sysctl -p`, y tras `/etc/network/interfaces` reinicia `networking` en [Servicios](13-servicios.md).
 
-Si el archivo no existe en el servidor, verás la etiqueta `no existe` en lugar del botón.
+### Probar y reiniciar SSH
 
-> **Nota:** Editar un archivo no aplica el cambio por sí solo. Por ejemplo, tras editar `/etc/network/interfaces` debes reiniciar el servicio `networking` en [Servicios](13-servicios.md), y tras editar `/etc/sysctl.conf` debes ejecutar `sysctl -p` en la [Terminal](29-terminal.md).
+En la tarjeta de `sshd_config`, **Probar y reiniciar SSH** valida el archivo con `sshd -t`: si hay un error no reinicia nada y muestra el detalle; si es válido reinicia el servicio. Para cambios habituales de SSH (acceso de root, contraseñas, puerto) es más seguro usar [Seguridad del servidor](34-seguridad-servidor.md).
 
-> **Nota:** En algunos servidores `/etc/resolv.conf` lo genera otro programa (por ejemplo, `systemd-resolved` o NetworkManager). En ese caso tus cambios se pierden al reiniciar.
-
-## Probar y reiniciar SSH tras editar sshd_config
-
-En la tarjeta de `/etc/ssh/sshd_config` hay un botón extra: **Probar y reiniciar SSH**.
-
-1. Edita y guarda `sshd_config`.
-2. Vuelve a **Menú → Sistema → Sistema → Configuración**.
-3. Haz clic en **Probar y reiniciar SSH**.
-4. Confirma con **Reiniciar**.
-
-El panel primero valida el archivo con `sshd -t`:
-
-- Si hay un error, verás "sshd -t falló, NO se reinició SSH" con el detalle. SSH sigue funcionando con la configuración anterior.
-- Si es válido, reinicia el servicio `ssh` y verás "Configuración válida. SSH reiniciado."
-
-> **Importante:** Una configuración válida puede igual dejarte fuera (por ejemplo, si cambias el puerto o desactivas el acceso por contraseña sin tener llaves). Mantén abierta tu sesión SSH actual y prueba una conexión nueva antes de cerrarla. Si cambias el puerto, ábrelo antes en [Firewall](20-firewall.md).
+> **Importante:** Mantén abierta tu sesión SSH actual y prueba una conexión nueva antes de cerrarla. Si cambias el puerto, ábrelo antes en el [Firewall](20-firewall.md).
 
 ## Preguntas frecuentes
 
-### Cambié el hostname, ¿tengo que reiniciar?
+### Cambié el nombre, ¿tengo que reiniciar?
 
-No. El cambio es inmediato. Solo las sesiones SSH abiertas y algunos servicios que leen el nombre al arrancar (por ejemplo, el correo) siguen con el nombre anterior hasta que se reinician.
+No. El cambio es inmediato; solo las sesiones abiertas y algunos servicios que leen el nombre al arrancar (por ejemplo el correo) siguen con el anterior hasta reiniciarse.
 
-### ¿Por qué no puedo confirmar el reinicio?
+### ¿Por qué el reloj del panel no coincide con el de mi computadora?
 
-El botón se habilita solo cuando escribes el hostname exactamente igual, respetando mayúsculas y puntos. Cópialo del recuadro **Hostname** de la parte superior.
+Porque muestra la hora del **servidor** en su zona horaria. Si el servidor está mal, activa NTP.
 
-### Me equivoqué al editar /etc/hosts. ¿Cómo lo recupero?
+### Programé un reinicio y me arrepentí
 
-Si el último cambio lo hizo el panel al cambiar el hostname, hay una copia en `/etc/hosts.matipanel.bak`. Ábrela desde [Archivos](26-archivos.md) y copia su contenido. La copia se reemplaza cada vez que cambias el hostname.
+Pulsa **Cancelar** en el aviso azul o **Cancelar programado** en **Encendido**.
 
-### La hora del servidor está atrasada. ¿Qué hago?
+### Me equivoqué al editar /etc/hosts
 
-Activa NTP con **Activar NTP**. Si aparece `sin sincronizar` durante varios minutos, verifica que el servidor tenga salida a internet por el puerto UDP 123 y que el servicio `systemd-timesyncd` esté activo en [Servicios](13-servicios.md).
+Si el último cambio lo hizo el panel al cambiar el nombre, hay una copia en `/etc/hosts.matipanel.bak`. La copia se reemplaza cada vez que cambias el nombre.
 
 ## Ver también
 
 - [Dashboard](10-dashboard.md)
 - [Servicios](13-servicios.md)
+- [Seguridad del servidor](34-seguridad-servidor.md)
 - [Discos](15-discos.md)
-- [Red (Interfaces)](18-red.md)
 - [Archivos](26-archivos.md)
 - [Terminal](29-terminal.md)
 - [Firewall](20-firewall.md)

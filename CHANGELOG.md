@@ -3,6 +3,13 @@
 ## [Sin publicar]
 
 ### Añadido
+- 📡 **Monitor de servicios** — comprueba URLs (HTTP/HTTPS con código y palabra clave), puertos TCP y equipos (ping) de tu red; disponibilidad 24 h/7 d/30 d, latencia, incidentes, aviso por correo y en la barra de estado.
+- 🛡️ **Seguridad del servidor** — chequeo con semáforo y puntuación (SSH, firewall, actualizaciones de seguridad, reinicio pendiente, puertos expuestos, cuentas) con correcciones validadas y gestión de fail2ban (jaula SSH, bloquear y desbloquear IPs).
+- 🔐 **Permisos del panel** — roles por usuario: administrador, solo lectura (sin terminal, archivos ni datos), módulos concretos o sin acceso; el menú muestra solo lo permitido.
+- 🔑 **Claves SSH** — en Usuarios y grupos: ver, agregar y quitar las claves autorizadas de cada usuario, con huella SHA-256 y escritura segura frente a enlaces simbólicos.
+- 🧱 **Stacks** — proyectos de Docker Compose propios con plantillas, validación, avisos de configuraciones peligrosas, logs y acciones.
+- 🖥️ **Sistema renovado** — resumen del equipo, reloj en vivo, servidor NTP, aviso de reinicio pendiente, reinicio/apagado programado y cancelable, sesiones en tablas, intentos fallidos de SSH por IP y detalle de procesador y dispositivos.
+- 🧪 **Pruebas en el repositorio** — `python tests/run.py` corre todas las pruebas y auto-pruebas (Windows y Linux, nunca como root).
 - 🧾 **Auditoría** — registro de quién hizo qué, cuándo y desde dónde (acciones, descargas sensibles, inicios de sesión, terminales), sin secretos, con filtros y exportación CSV; se conserva un año.
 - ✉️ **Notificaciones por correo** — SMTP propio; avisos de problemas del servidor (y cuando se resuelven), despliegues, respaldos y bloqueos de inicio de sesión, con recordatorios opcionales.
 - 🗄️ **Respaldos de apps** — base de datos, volúmenes y configuración de cada app desplegada a otro servidor Linux por SSH, programados (diario/semanal/6 h), con retención, verificación SHA-256 y restauración.

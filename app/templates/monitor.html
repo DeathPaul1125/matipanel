@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}Monitor de servicios{% endblock %}
+{% block heading %}Monitor de servicios{% endblock %}
+
+{% block content %}
+<div class="card" id="mon-worker-off" hidden>
+  <b>El planificador está desactivado</b> <span class="muted">(MATIPANEL_MONITOR_WORKER=0): las comprobaciones solo se ejecutan con «Probar ahora».</span>
+</div>
+
+<div class="grid grid-4">
+  <div class="stat"><div class="stat-lbl">Comprobaciones</div><div class="stat-val" id="s-total">—</div><div class="stat-sub" id="s-total-sub">de {{ max_checks }} posibles</div></div>
+  <div class="stat"><div class="stat-lbl">En línea</div><div class="stat-val" id="s-up">—</div><div class="stat-sub" id="s-up-sub">&nbsp;</div></div>
+  <div class="stat"><div class="stat-lbl">Caídas</div><div class="stat-val" id="s-down">—</div><div class="stat-sub" id="s-down-sub">&nbsp;</div></div>
+  <div class="stat"><div class="stat-lbl">En pausa</div><div class="stat-val" id="s-paused">—</div><div class="stat-sub">no se comprueban</div></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h3>Comprobaciones</h3>
+    <button class="btn btn-primary btn-sm" onclick="editCheck(null)">Nueva comprobación</button></div>
+  <div class="table-wrap">
+  <table class="lx" id="mon-table" data-table="25">
+    <thead><tr><th>Estado</th><th>Nombre</th><th>Destino</th><th>Respuesta</th>
+      <th title="Porcentaje de comprobaciones correctas">Disponibilidad</th><th>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  </div>
+  <p class="small muted">Haz clic en una fila para ver su gráfica de respuesta y sus caídas. Se actualiza cada 15 s.</p>
+</div>
+
+<div class="card" id="det-card" hidden>
+  <div class="card-head"><h3>Detalle · <span id="det-name"></span></h3>
+    <div class="seg" id="det-range">
+      <button type="button" data-range="86400" class="active">24 h</button>
+      <button type="button" data-range="604800">7 días</button>
+    </div></div>
+  <div class="small muted" id="det-info"></div>
+  <div class="charts" style="grid-template-columns: minmax(0, 1fr); margin-top: 14px;">
+    <div><div class="chart-head"><span class="chart-title">Tiempo de respuesta</span><span class="chart-now" id="det-now"></span></div><div id="ch-ms"></div></div>
+  </div>
+  <h4 style="margin-top: 20px;">Caídas de los últimos 30 días</h4>
+  <table class="lx" id="inc-table" data-table="10" data-table-filter="off">
+    <thead><tr><th>Inicio</th><th>Fin</th><th>Duración</th><th>Error</th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">Sin caídas</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+const API = {{ url_for('monitor.index')|tojson }} + 'api/';
+const TYPES = {{ types|tojson }}, INTERVALS = {{ intervals|tojson }}, DEF = {{ defaults|tojson }};
+const $ = id => document.getElementById(id);
+const getJSON = async url => { try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; } };
+const fmtMs = v => v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + ' s' : Math.round(v) + ' ms';
+const fmtPct = v => v === null || v === undefined ? '—' : (v >= 99.995 ? '100' : v.toFixed(2).replace('.', ',')) + ' %';
+const fmtDate = t => new Date(t * 1000).toLocaleString('es', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+const fmtDur = s => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : m ? `${m} min` : `${s} s`; };
+const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? `hace ${Math.max(0, Math.round(s))} s` : 'hace ' + fmtDur(s); };
+const STATUS = {up: ['ok', '', 'En línea'], down: ['err', 'err', 'Caído'], paused: ['mute', 'mute', 'En pausa'], pending: ['mute', 'warn', 'Sin datos']};
+const TARGET_HELP = {http: 'URL completa, p. ej. https://intranet.local/ o http://192.168.1.20:8080/salud',
+                     tcp: 'Equipo y puerto: 192.168.1.10:3306, db.local:5432 o [::1]:443',
+                     ping: 'IP o nombre del equipo: 192.168.1.1 o impresora.local'};
+
+let CHECKS = [], SEL = null, RANGE = 86400;
+const chart = lineChart($('ch-ms'), {series: [{key: 'ms', label: 'Respuesta'}], max: 'auto', min: 10, fmt: fmtMs});
+
+function statusCell(c) {
+  let [pill, led, label] = STATUS[c.status] || STATUS.pending;
+  if ((c.status === 'up' || c.status === 'pending') && c.fails > 0) { pill = 'warn'; led = 'warn'; label = `Falla (${c.fails} de ${c.failures})`; }
+  const since = c.since && c.status !== 'paused' ? ` title="Desde ${escapeHtml(new Date(c.since * 1000).toLocaleString('es'))}"` : '';
+  const order = {down: 0, pending: 1, up: 2, paused: 3}[c.status];
+  return `<td class="nowrap" data-sort="${order}"${since}><span class="led sm ${led}" style="display:inline-block; margin-right:8px;"></span><span class="pill ${pill}">${escapeHtml(label)}</span></td>`;
+}
+const pctCls = v => v === null || v === undefined ? 'muted' : v >= 99 ? '' : v >= 95 ? 'pill warn' : 'pill err';
+function uptimeCell(u) {
+  // 24 h destacado (y criterio de orden); 7 y 30 días debajo
+  return `<td data-sort="${u.d1 ?? -1}"><span class="mono ${pctCls(u.d1)}" title="Últimas 24 h">${escapeHtml(fmtPct(u.d1))}</span>
+    <div class="small muted"><span class="nowrap">7 d <span class="mono">${escapeHtml(fmtPct(u.d7))}</span></span> · <span class="nowrap">30 d <span class="mono">${escapeHtml(fmtPct(u.d30))}</span></span></div></td>`;
+}
+
+function render() {
+  const tb = $('mon-table').tBodies[0];
+  if (!CHECKS.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="muted center">Todavía no hay comprobaciones. Pulsa «Nueva comprobación» para vigilar una web, un puerto o un equipo.</td></tr>';
+    return;
+  }
+  tb.innerHTML = CHECKS.map(c => {
+    const l = c.last, err = l && !l.ok ? `<div class="small" style="color: var(--err);">${escapeHtml(l.error)}</div>` : '';
+    return `<tr class="mon-row${c.id === SEL ? ' sel' : ''}" onclick="selectCheck(${jsArg(c.id)})">
+      ${statusCell(c)}
+      <td><b>${escapeHtml(c.name)}</b></td>
+      <td style="min-width: 170px; max-width: 340px;"><span class="pill mute">${escapeHtml(TYPES[c.type])}</span> <span class="mono small" style="overflow-wrap: anywhere;">${escapeHtml(c.target)}</span>${err}</td>
+      <td class="small" data-sort="${l && l.ok ? l.ms : 1e9}" ${l ? `title="Última comprobación: ${escapeHtml(new Date(l.t * 1000).toLocaleString('es'))}"` : ''}><b class="mono">${l && l.ok ? escapeHtml(fmtMs(l.ms)) : '—'}</b>
+        <div class="muted"><span class="nowrap">${l ? escapeHtml(ago(l.t)) : 'nunca'}</span> · <span class="nowrap">cada ${escapeHtml(INTERVALS[c.interval] || c.interval + ' s')}</span></div></td>
+      ${uptimeCell(c.uptime)}
+      <td class="nowrap" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="testCheck(${jsArg(c.id)})">Probar ahora</button>
+        <button class="btn btn-sm" onclick="editCheck(${jsArg(c.id)})">Editar</button>
+        <button class="btn btn-sm" onclick="pauseCheck(${jsArg(c.id)}, ${!c.enabled})">${c.enabled ? 'Pausar' : 'Reanudar'}</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteCheck(${jsArg(c.id)})">Eliminar</button></td></tr>`;
+  }).join('');
+}
+
+async function load() {
+  const d = await getJSON(API + 'checks');
+  if (!d.checks) return;
+  CHECKS = d.checks;
+  const s = d.summary;
+  $('s-total').textContent = s.total;
+  $('s-up').textContent = s.up;
+  $('s-up-sub').textContent = s.pending ? `${s.pending} sin datos todavía` : 'responden bien';
+  $('s-down').textContent = s.down;
+  $('s-down').style.color = s.down ? 'var(--err)' : '';
+  $('s-down-sub').textContent = s.down ? 'revisa la tabla' : 'ninguna';
+  $('s-paused').textContent = s.paused;
+  $('mon-worker-off').hidden = d.worker;
+  if (SEL && !CHECKS.some(c => c.id === SEL)) { SEL = null; $('det-card').hidden = true; }
+  render();
+  if (SEL) renderInfo();
+}
+
+// ── Detalle ──
+function renderInfo() {
+  const c = CHECKS.find(x => x.id === SEL);
+  if (!c) return;
+  $('det-name').textContent = c.name;
+  const [, , label] = STATUS[c.status] || STATUS.pending;
+  const parts = [`${TYPES[c.type]} ${c.target}`, `cada ${INTERVALS[c.interval]}`, `caído tras ${c.failures} fallo(s)`, `espera ${c.timeout} s`];
+  if (c.type === 'http') parts.push(`códigos ${c.codes}`, c.keyword ? `debe contener «${c.keyword}»` : '', c.insecure ? 'sin verificar certificado' : '');
+  $('det-info').innerHTML = `<span class="pill ${(STATUS[c.status] || STATUS.pending)[0]}">${escapeHtml(label)}</span>`
+    + (c.since && c.status !== 'paused' ? ` desde ${escapeHtml(new Date(c.since * 1000).toLocaleString('es'))} · ` : ' ')
+    + parts.filter(Boolean).map(escapeHtml).join(' · ');
+}
+async function loadDetail() {
+  if (!SEL) return;
+  const id = SEL, d = await getJSON(API + 'checks/' + encodeURIComponent(id) + '/history?range=' + RANGE);
+  if (!d.ok || id !== SEL) return;
+  chart.update(d.points, RANGE, d.bucket);
+  const vals = d.points.map(p => p.ms);
+  $('det-now').textContent = vals.length ? `media ${fmtMs(vals.reduce((a, b) => a + b, 0) / vals.length)} · máx. ${fmtMs(Math.max(...vals))}` : '';
+  $('inc-table').tBodies[0].innerHTML = d.incidents.map(i => `<tr>
+      <td class="small nowrap" data-sort="${i.start}">${escapeHtml(new Date(i.start * 1000).toLocaleString('es'))}</td>
+      <td class="small nowrap" data-sort="${i.end || 9e12}">${i.end ? escapeHtml(new Date(i.end * 1000).toLocaleString('es')) : '<span class="pill err">En curso</span>'}</td>
+      <td class="small" data-sort="${i.duration}">${escapeHtml(fmtDur(i.duration))}</td>
+      <td class="small">${escapeHtml(i.error)}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="muted center">Sin caídas en los últimos 30 días</td></tr>';
+}
+function selectCheck(id) {
+  const changed = id !== SEL;
+  SEL = id;
+  $('det-card').hidden = false;
+  render(); renderInfo();
+  if (changed) { chart.update([], RANGE, 60); }
+  loadDetail();
+  if (changed) $('det-card').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+$('det-range').addEventListener('click', e => {
+  const b = e.target.closest('[data-range]');
+  if (!b) return;
+  RANGE = +b.dataset.range;
+  document.querySelectorAll('#det-range button').forEach(x => x.classList.toggle('active', x === b));
+  loadDetail();
+});
+
+// ── Acciones ──
+function tweakForm() {
+  // ui.form no tiene campos condicionales: el diálogo recién abierto se ajusta aquí (2 columnas, campos solo HTTP)
+  const dlg = [...document.querySelectorAll('dialog.dlg')].at(-1);
+  if (!dlg) return;
+  dlg.style.width = 'min(620px, calc(100vw - 32px))';
+  dlg.querySelector('.dlg-body').classList.add('dp-form2');
+  const f = i => dlg.querySelector('#dlg-f' + i), row = i => f(i).closest('.form-row, .dlg-check');
+  [0, 3].forEach(i => { row(i).style.gridColumn = '1 / -1'; });
+  const sync = () => {
+    const t = f(1).value;
+    [6, 7, 8, 9].forEach(i => { row(i).hidden = t !== 'http'; });
+    row(3).querySelector('.dlg-help').textContent = TARGET_HELP[t];
+    f(3).placeholder = {http: 'https://intranet.local/', tcp: '192.168.1.10:3306', ping: '192.168.1.1'}[t];
+  };
+  f(1).addEventListener('change', sync);
+  sync();
+}
+async function editCheck(id) {
+  const c = id ? CHECKS.find(x => x.id === id) : null;
+  if (id && !c) return;
+  let v = c ? {...DEF, ...c} : {...DEF, name: '', target: ''};
+  for (;;) {
+    const p = ui.form({
+      title: c ? 'Editar comprobación' : 'Nueva comprobación', confirmText: c ? 'Guardar' : 'Crear',
+      fields: [
+        {name: 'name', label: 'Nombre', value: v.name, required: true, placeholder: 'Intranet'},
+        {name: 'type', label: 'Tipo', type: 'select', value: v.type, options: Object.entries(TYPES)},
+        {name: 'interval', label: 'Comprobar cada', type: 'select', value: v.interval, options: Object.entries(INTERVALS)},
+        {name: 'target', label: 'Destino', value: v.target, required: true, help: TARGET_HELP[v.type]},
+        {name: 'failures', label: 'Fallos seguidos para darlo por caído', type: 'number', value: v.failures},
+        {name: 'timeout', label: 'Tiempo de espera (s)', type: 'number', value: v.timeout},
+        {name: 'codes', label: 'Códigos HTTP esperados', value: v.codes, placeholder: '200-399'},
+        {name: 'keyword', label: 'Texto que debe aparecer (opcional)', value: v.keyword, placeholder: 'Bienvenido'},
+        {name: 'redirects', label: 'Seguir redirecciones', type: 'checkbox', value: v.redirects},
+        {name: 'insecure', label: 'Ignorar errores del certificado', type: 'checkbox', value: v.insecure},
+        {name: 'enabled', label: 'Activa', type: 'checkbox', value: v.enabled},
+      ],
+    });
+    tweakForm();
+    const r = await p;
+    if (!r) return;
+    const d = await postJSON(API + 'checks' + (c ? '/' + encodeURIComponent(c.id) : ''), r);
+    if (d.ok) {
+      ui.toast(c ? 'Comprobación guardada' : 'Comprobación creada');
+      await load();
+      selectCheck(d.check.id);
+      return;
+    }
+    await ui.alert(d.error || 'No se pudo guardar', {title: 'Revisa los datos', icon: 'error'});
+    v = {...v, ...r};
+  }
+}
+async function testCheck(id) {
+  const c = CHECKS.find(x => x.id === id);
+  const d = await postJSON(API + 'checks/' + encodeURIComponent(id) + '/test', {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo probar', {title: 'Error', icon: 'error'});
+  const r = d.result;
+  if (r.ok) ui.toast(`«${c ? c.name : id}» responde en ${fmtMs(r.ms)}`);
+  else ui.toast(`«${c ? c.name : id}» falló: ${r.error}`, 'error', 6000);
+  await load();
+  if (SEL === id) loadDetail();
+}
+async function pauseCheck(id, enabled) {
+  const d = await postJSON(API + 'checks/' + encodeURIComponent(id) + '/pause', {enabled});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo cambiar', {title: 'Error', icon: 'error'});
+  ui.toast(enabled ? 'Comprobación reanudada' : 'Comprobación en pausa');
+  load();
+}
+async function deleteCheck(id) {
+  const c = CHECKS.find(x => x.id === id);
+  if (!c || !await ui.confirm(`¿Eliminar «${c.name}»? Se borra también su historial y sus caídas.`,
+                              {title: 'Eliminar comprobación', danger: true, confirmText: 'Eliminar'})) return;
+  const d = await postJSON(API + 'checks/' + encodeURIComponent(id) + '/delete', {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
+  ui.toast('Comprobación eliminada');
+  load();
+}
+
+load();
+setInterval(() => { if (!document.hidden) { load(); loadDetail(); } }, 15000);
+</script>
+{% endblock %}

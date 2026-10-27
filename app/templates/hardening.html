@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block title %}Seguridad del servidor{% endblock %}
+{% block heading %}Seguridad del servidor{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-head"><h3>Resumen</h3>
+    <div class="hd-tools"><span class="small muted" id="updated"></span>
+      <button class="btn btn-sm" id="refresh" onclick="load()">Actualizar</button></div></div>
+  <div class="grid grid-4">
+    <div class="stat hd-score"><span class="led lg mute" id="score-led"></span>
+      <div><div class="stat-lbl">Puntuación</div><div class="stat-val"><span id="score">—</span><span class="muted small"> / 100</span></div>
+        <div class="stat-sub" id="score-sub">Analizando…</div></div></div>
+    <div class="stat"><div class="stat-lbl">Correcto</div><div class="stat-val" id="c-ok">—</div><div class="stat-sub">comprobaciones en verde</div></div>
+    <div class="stat"><div class="stat-lbl">Avisos</div><div class="stat-val" id="c-warn">—</div><div class="stat-sub">conviene revisarlas</div></div>
+    <div class="stat"><div class="stat-lbl">Problemas</div><div class="stat-val" id="c-err">—</div><div class="stat-sub">corregir cuanto antes</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Comprobaciones</h3>
+  <div id="checks"><p class="muted center">Cargando…</p></div>
+  <p class="small muted">Puntuación: verde = 1, aviso = ½, problema = 0; las filas informativas (gris) no cuentan.</p>
+</div>
+
+<div class="card" id="f2b-card">
+  <div class="card-head"><h3>fail2ban</h3><div class="hd-tools" id="f2b-actions"></div></div>
+  <div id="f2b-status" class="hd-line"><span class="muted">Cargando…</span></div>
+  <div id="f2b-body" hidden>
+    <table class="lx" id="t-jails" data-table data-table-filter="off">
+      <thead><tr><th>Jail</th><th>Fallos ahora</th><th>Fallos totales</th><th>Bloqueadas ahora</th><th>Bloqueos totales</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <h4>IPs bloqueadas</h4>
+    <table class="lx" id="t-banned" data-table>
+      <thead><tr><th>IP</th><th>Jail</th><th data-nosort>Acciones</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <h4>Bloquear una IP a mano</h4>
+    <div class="hd-ban">
+      <label class="form-row"><span>Jail</span><select class="input" id="ban-jail"></select></label>
+      <label class="form-row"><span>Dirección IP</span><input class="input mono" id="ban-ip" placeholder="203.0.113.7" autocomplete="off"></label>
+      <button class="btn btn-danger" onclick="banIp()">Bloquear</button>
+    </div>
+    <p class="small muted">El bloqueo dura lo que indique el <span class="mono">bantime</span> de la jail. Tu IP (<span class="mono">{{ client_ip }}</span>) no se puede bloquear desde aquí.</p>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Puertos a la escucha</h3>
+  <table class="lx" id="t-ports" data-table>
+    <thead><tr><th>Puerto</th><th>Protocolo</th><th>Dirección</th><th>Alcance</th><th>Proceso</th></tr></thead>
+    <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <p class="small muted">«Todas las interfaces» (<span class="mono">0.0.0.0</span>, <span class="mono">::</span>, <span class="mono">*</span>) significa que cualquiera que llegue al servidor puede conectarse, salvo que el firewall lo impida.</p>
+</div>
+
+<div class="card">
+  <h3>Cuentas relevantes</h3>
+  <table class="lx" id="t-accounts" data-table>
+    <thead><tr><th>Usuario</th><th>UID</th><th>Shell</th><th>Privilegios</th><th>Contraseña</th><th>Llaves SSH</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <p class="small muted">root, usuarios con acceso de consola (UID ≥ 1000) y cualquier cuenta con UID 0, sin contraseña o en sudo/wheel. Los hashes de contraseña nunca salen del servidor. Gestiona las cuentas en <a href="{{ url_for('users.index') }}">Usuarios y grupos</a>.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = {{ url_for('hardening.index')|tojson }} + 'api/';
+const LINKS = {firewall: {{ url_for('firewall.index')|tojson }}, packages: {{ url_for('packages.index')|tojson }}, users: {{ url_for('users.index')|tojson }}};
+const LINK_TXT = {firewall: 'Ir a Firewall', packages: 'Ir a Paquetes', users: 'Ir a Usuarios'};
+const CLIENT_IP = {{ client_ip|tojson }};
+const LBL = {ok: 'Correcto', warn: 'Aviso', err: 'Problema', info: 'Info'};
+const $ = id => document.getElementById(id);
+let S = null;
+
+const led = st => `<span class="led ${st === 'ok' ? '' : st === 'info' ? 'mute' : st}"></span>`;
+const pill = (st, txt) => `<span class="pill ${st === 'info' ? 'mute' : st}">${escapeHtml(txt)}</span>`;
+const fail = (d, t) => ui.alert(d.error || t, {title: 'Error', icon: 'error'});
+
+async function load() {
+  $('refresh').disabled = true;
+  let d;
+  try { d = await (await fetch(API + 'status')).json(); } catch (e) { d = {ok: false, error: String(e)}; }
+  $('refresh').disabled = false;
+  if (!d.ok) { $('checks').innerHTML = `<p class="center" style="color:var(--err)">${escapeHtml(d.error || 'No se pudo analizar')}</p>`; return; }
+  S = d;
+  $('updated').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es');
+  renderScore(); renderChecks(); renderF2b(); renderPorts(); renderAccounts();
+}
+
+function renderScore() {
+  const st = S.score >= 85 ? 'ok' : S.score >= 60 ? 'warn' : 'err';
+  $('score').textContent = S.score;
+  $('score-led').className = 'led lg ' + (st === 'ok' ? '' : st);
+  $('score-sub').textContent = {ok: 'Buen nivel de seguridad', warn: 'Mejorable', err: 'Necesita atención'}[st];
+  for (const k of ['ok', 'warn', 'err']) $('c-' + k).textContent = S.counts[k];
+}
+
+function renderChecks() {
+  const order = {err: 0, warn: 1, info: 2, ok: 3};
+  const rows = [...S.checks].sort((a, b) => order[a.status] - order[b.status]);
+  $('checks').innerHTML = rows.map(c => {
+    let act = '';
+    if (c.fix) act = `<button class="btn btn-sm ${c.status === 'ok' ? '' : 'btn-primary'}" onclick="fix(${jsArg(c.fix)}, ${jsArg(c.key || '')})">${c.status === 'ok' ? 'Ajustar…' : 'Corregir…'}</button>`;
+    else if (c.link && LINKS[c.link]) act = `<a class="btn btn-sm" href="${escapeHtml(LINKS[c.link])}">${escapeHtml(LINK_TXT[c.link])}</a>`;
+    return `<div class="hd-row">${led(c.status)}
+      <div class="hd-body"><div class="hd-title"><b>${escapeHtml(c.title)}</b> ${pill(c.status, LBL[c.status])}</div>
+        <div class="small">${escapeHtml(c.detail)}</div><div class="small muted">${escapeHtml(c.rec)}</div></div>
+      <div class="hd-act">${act}</div></div>`;
+  }).join('');
+}
+
+function renderPorts() {
+  const scope = {all: ['warn', 'Todas las interfaces'], ip: ['mute', 'IP concreta'], local: ['ok', 'Solo local']};
+  $('t-ports').tBodies[0].innerHTML = S.ports.map(p => `<tr>
+    <td class="mono" data-sort="${p.port}"><b>${p.port}</b></td><td>${escapeHtml(p.proto.toUpperCase())}</td>
+    <td class="mono small">${escapeHtml(p.addr)}</td><td>${pill(scope[p.scope][0], scope[p.scope][1])}</td>
+    <td class="mono small">${escapeHtml(p.process || '—')}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted center">No se pudo leer (¿falta ss?)</td></tr>';
+}
+
+function renderAccounts() {
+  const pw = {empty: ['err', 'Vacía'], locked: ['mute', 'Bloqueada'], set: ['ok', 'Definida'], unknown: ['mute', '—']};
+  $('t-accounts').tBodies[0].innerHTML = S.accounts.map(a => {
+    const priv = [a.uid === 0 ? pill(a.user === 'root' ? 'mute' : 'err', 'UID 0') : '',
+                  a.admin && a.admin !== 'root' ? pill('warn', a.admin) : ''].filter(Boolean).join(' ');
+    return `<tr><td class="mono"><b>${escapeHtml(a.user)}</b></td><td data-sort="${a.uid}">${a.uid}</td>
+      <td class="mono small">${escapeHtml(a.shell)}</td><td>${priv || '<span class="muted">—</span>'}</td>
+      <td>${pill(pw[a.password][0], pw[a.password][1])}</td><td data-sort="${a.keys}">${a.keys || '<span class="muted">0</span>'}</td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted center">Sin cuentas</td></tr>';
+}
+
+function renderF2b() {
+  const f = S.fail2ban;
+  let st, txt, acts = '';
+  if (!f.installed) {
+    st = 'warn'; txt = 'No instalado.';
+    if (f.can_install) acts = '<button class="btn btn-sm btn-primary" onclick="fix(\'f2b-install\')">Instalar fail2ban</button>';
+  } else {
+    st = f.running ? 'ok' : 'warn';
+    txt = f.running ? `En marcha · ${f.jails.length} jail(s)` : 'Instalado, pero detenido.';
+    if (f.managed) txt += ` · protección SSH del panel: bantime ${f.managed.bantime || '?'}, findtime ${f.managed.findtime || '?'}, maxretry ${f.managed.maxretry || '?'}`;
+    acts = `<button class="btn btn-sm ${f.managed ? '' : 'btn-primary'}" onclick="fix('f2b-jail')">${f.managed ? 'Ajustar protección SSH…' : 'Activar protección SSH…'}</button>`;
+  }
+  $('f2b-status').innerHTML = led(st) + `<span>${escapeHtml(txt)}</span>`;
+  $('f2b-actions').innerHTML = acts;
+  $('f2b-body').hidden = !f.running;
+  if (!f.running) return;
+  $('t-jails').tBodies[0].innerHTML = f.jails.map(j => `<tr><td class="mono"><b>${escapeHtml(j.name)}</b></td>
+    <td>${escapeHtml(j.failed)}</td><td>${escapeHtml(j.total_failed)}</td><td>${escapeHtml(j.banned_count)}</td><td>${escapeHtml(j.total_banned)}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted center">Sin jails activas</td></tr>';
+  const banned = f.jails.flatMap(j => j.banned.map(ip => ({ip, jail: j.name})));
+  $('t-banned').tBodies[0].innerHTML = banned.map(b => `<tr><td class="mono">${escapeHtml(b.ip)}</td><td class="mono">${escapeHtml(b.jail)}</td>
+    <td><button class="btn btn-sm" onclick="unban(${jsArg(b.jail)}, ${jsArg(b.ip)})">Desbloquear</button></td></tr>`).join('')
+    || '<tr><td colspan="3" class="muted center">Ninguna IP bloqueada ahora</td></tr>';
+  const sel = $('ban-jail'), cur = sel.value;
+  sel.innerHTML = f.jails.map(j => `<option value="${escapeHtml(j.name)}">${escapeHtml(j.name)}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+
+// ── Correcciones ──
+async function fix(kind, key) {
+  if (kind === 'ssh') return fixSsh(key);
+  if (kind === 'unattended') {
+    if (!await ui.confirm('Se instalará unattended-upgrades (si falta) y se activarán las actualizaciones automáticas diarias de seguridad.', {title: 'Actualizaciones automáticas', confirmText: 'Activar'})) return;
+    return post('unattended', {}, 'Actualizaciones automáticas activadas');
+  }
+  if (kind === 'f2b-install') {
+    if (!await ui.confirm('Se instalará fail2ban con apt-get. En Debian viene con la jail sshd activada.', {title: 'Instalar fail2ban', confirmText: 'Instalar'})) return;
+    return post('f2b/install', {}, 'fail2ban instalado');
+  }
+  if (kind === 'f2b-jail') {
+    const m = S.fail2ban.managed || {};
+    const ign = (m.ignoreip || '').split(/\s+/).filter(x => x && x !== '127.0.0.1/8' && x !== '::1').join(' ') || CLIENT_IP;
+    const v = await ui.form({title: 'Protección SSH con fail2ban',
+      text: 'Bloquea la IP que falle «maxretry» veces dentro de «findtime» durante «bantime». Formatos de tiempo: 600 (segundos), 10m, 1h, 1d, 1w; bantime -1 = para siempre.',
+      fields: [{name: 'bantime', label: 'Tiempo de bloqueo (bantime)', value: m.bantime || '1h', required: true},
+               {name: 'findtime', label: 'Ventana de fallos (findtime)', value: m.findtime || '10m', required: true},
+               {name: 'maxretry', label: 'Intentos fallidos permitidos (maxretry)', type: 'number', value: m.maxretry || '5', required: true},
+               {name: 'ignoreip', label: 'No bloquear nunca (IPs o redes, separadas por espacios)', value: ign, placeholder: '192.168.1.0/24',
+                help: 'Incluye tu IP o la red de administración para no bloquearte a ti mismo.'}],
+      confirmText: 'Guardar y aplicar',
+      validate: v => /^(-1|\d{1,7}[smhdw]?)$/.test(v.bantime.trim()) && /^\d{1,7}[smhdw]?$/.test(v.findtime.trim()) ? null : 'Tiempo no válido (ej.: 600, 10m, 1h, 1d)'});
+    if (!v) return;
+    return post('f2b/jail', v, 'Protección SSH aplicada');
+  }
+}
+
+async function fixSsh(key) {
+  const s = S.ssh;
+  if (!s) return;
+  const yn = [['yes', 'Sí (yes)'], ['no', 'No (no)']];
+  const v = await ui.form({title: 'Ajustes de SSH',
+    text: 'Solo se escriben los valores que cambies, en /etc/ssh/sshd_config.d/00-matipanel.conf. Antes de recargar se valida con «sshd -t»; si falla se restaura lo anterior. Mantén abierta tu sesión SSH actual hasta comprobar que puedes volver a entrar.',
+    fields: [
+      {name: 'PermitRootLogin', label: 'Acceso de root (PermitRootLogin)', type: 'select', value: s.PermitRootLogin,
+       options: [['no', 'No permitir'], ['prohibit-password', 'Solo con llave SSH'], ['yes', 'Permitir (no recomendado)']].concat(
+         ['no', 'prohibit-password', 'yes'].includes(s.PermitRootLogin) ? [] : [[s.PermitRootLogin, s.PermitRootLogin + ' (actual)']])},
+      {name: 'PasswordAuthentication', label: 'Inicio de sesión con contraseña (PasswordAuthentication)', type: 'select', value: s.PasswordAuthentication, options: yn},
+      {name: 'Port', label: 'Puerto (Port)', type: 'number', value: s.Port, required: true},
+      {name: 'MaxAuthTries', label: 'Intentos por conexión (MaxAuthTries, 1–10)', type: 'number', value: s.MaxAuthTries, required: true},
+      {name: 'X11Forwarding', label: 'Reenvío X11 (X11Forwarding)', type: 'select', value: s.X11Forwarding, options: yn}],
+    confirmText: 'Aplicar',
+    validate: v => !/^\d+$/.test(v.Port) || +v.Port < 1 || +v.Port > 65535 ? 'Puerto no válido (1–65535)'
+      : !/^\d+$/.test(v.MaxAuthTries) || +v.MaxAuthTries < 1 || +v.MaxAuthTries > 10 ? 'MaxAuthTries debe estar entre 1 y 10' : null});
+  if (!v) return;
+  const settings = {};
+  for (const k of Object.keys(v)) if (String(v[k]).trim() !== String(s[k])) settings[k] = String(v[k]).trim();
+  if (!Object.keys(settings).length) return ui.toast('No cambiaste nada', 'info');
+  let confirm = false;
+  if (settings.PasswordAuthentication === 'no') {
+    const who = s.admins_with_keys.length
+      ? `Usuarios administradores con llave SSH: ${s.admins_with_keys.join(', ')}.`
+      : '¡ATENCIÓN! Ningún administrador tiene llaves en ~/.ssh/authorized_keys: si continúas, NADIE podrá entrar por SSH.';
+    if (!await ui.confirm(`Después de esto solo se podrá entrar por SSH con llave. Si tu llave no funciona te quedarás fuera del servidor (y tendrás que entrar por la consola física o del proveedor).\n\n${who}\n\nAntes de continuar, abre otra terminal y comprueba que entras con tu llave.`,
+      {title: 'Desactivar contraseñas en SSH', danger: true, typed: 'DESACTIVAR', confirmText: 'Desactivar contraseñas'})) return;
+    confirm = true;
+  }
+  if (settings.PermitRootLogin === 'no' && !S.accounts.some(a => a.admin && a.uid !== 0 && a.login)) {
+    if (!await ui.confirm('No hay ningún otro usuario administrador (sudo/wheel) con acceso de consola. Si root no puede entrar por SSH, nadie podrá administrar el servidor de forma remota.',
+      {title: 'Prohibir el acceso de root', danger: true, typed: 'ROOT', confirmText: 'Prohibir root'})) return;
+    confirm = true;
+  }
+  if (settings.Port) {
+    if (!await ui.confirm(`SSH pasará a escuchar en el puerto ${settings.Port}. Abre ese puerto en el firewall ANTES de aplicar o te quedarás fuera. Las sesiones abiertas no se cortan.`,
+      {title: 'Cambiar el puerto de SSH', danger: true, confirmText: 'Cambiar puerto'})) return;
+    confirm = true;
+  }
+  post('ssh', {settings, confirm}, 'SSH actualizado');
+}
+
+async function post(path, body, okMsg) {
+  const d = await postJSON(API + path, body);
+  if (!d.ok) return fail(d, 'La acción falló');
+  if (d.warning) ui.alert(d.warning, {title: 'Aplicado con advertencias', icon: 'warning'});
+  else ui.toast(okMsg);
+  load();
+}
+
+async function unban(jail, ip) {
+  if (!await ui.confirm(`¿Desbloquear ${ip} en la jail ${jail}?`, {title: 'Desbloquear IP', confirmText: 'Desbloquear'})) return;
+  post('f2b/unban', {jail, ip}, `${ip} desbloqueada`);
+}
+
+async function banIp() {
+  const ip = $('ban-ip').value.trim(), jail = $('ban-jail').value;
+  if (!ip) return ui.toast('Escribe una IP', 'warning');
+  if (!await ui.confirm(`¿Bloquear ${ip} en la jail ${jail}?`, {title: 'Bloquear IP', danger: true, confirmText: 'Bloquear'})) return;
+  const d = await postJSON(API + 'f2b/ban', {jail, ip});
+  if (!d.ok) return fail(d, 'No se pudo bloquear');
+  $('ban-ip').value = '';
+  ui.toast(`${ip} bloqueada`);
+  load();
+}
+
+load();
+</script>
+{% endblock %}

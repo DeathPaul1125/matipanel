@@ -31,7 +31,8 @@ MODULES = {
     "databases": "Bases de datos", "docker": "Docker", "files": "Archivos", "packages": "Paquetes", "logs": "Logs",
     "terminal": "Terminal", "appearance": "Apariencia", "help": "Ayuda", "remote": "Multi-servidor", "mail": "Correo",
     "dns": "DNS", "shares": "Compartidos", "storage": "Almacenamiento", "dbexplorer": "Explorador BD",
-    "deploy": "Despliegues", "audit": "Auditoría", "notify": "Notificaciones", "appbackup": "Respaldos de apps",
+    "deploy": "Despliegues", "audit": "Auditoría", "notify": "Notificaciones", "appbackup": "Respaldos de apps", "roles": "Permisos del panel",
+    "monitor": "Monitor", "hardening": "Seguridad del servidor", "stacks": "Stacks",
 }
 
 _lock = threading.Lock()

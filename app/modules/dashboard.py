@@ -212,6 +212,11 @@ def compute_issues():
         issues += traffic.health_issues()
     except Exception:  # la barra de salud no debe caerse por las alertas de red
         pass
+    try:
+        from .. import monitor
+        issues += monitor.health_issues()
+    except Exception:
+        pass
     issues.sort(key=lambda i: i[0] != "err")
     return issues, failed
 

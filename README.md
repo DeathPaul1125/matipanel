@@ -41,20 +41,24 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | Módulo | Qué puedes hacer |
 |---|---|
 | **Dashboard** | Estado del servidor siempre visible en la barra superior, tacómetros de CPU/memoria/swap/disco, historial persistente de 7 días (CPU, memoria, red, E/S de disco, carga, procesos), procesos top, almacenamiento y servicios con fallo |
-| **Sistema** | Hostname, zona horaria/NTP, sesiones, hardware, reiniciar/apagar, edición de configuraciones clave (hosts, resolv, sshd) |
+| **Sistema** | Resumen del equipo (SO, virtualización, carga, arranque), reloj en vivo, zona horaria/NTP, aviso de reinicio pendiente, reiniciar/apagar al momento o **programado**, sesiones e intentos fallidos de SSH por IP, procesador y dispositivos, configuraciones clave |
 | **Procesos** | Lista estilo `htop`, filtro, terminar o forzar |
 | **Servicios** | systemd: iniciar, detener, reiniciar, habilitar al arranque, ver estado |
 | **Tareas (cron)** | Crontabs por usuario: crear, editar, activar/desactivar, borrar |
 | **Discos** | Particiones y uso |
 | **Almacenamiento** | LVM (PV, VG, LV, snapshots), RAID con mdadm y cuotas de disco |
 | **Respaldos** | Respaldos `.tar.gz` de carpetas, descarga, restauración y programación con retención |
-| **Usuarios y grupos** | Crear/borrar usuarios, contraseñas, bloqueo, shells, grupos y membresías |
+| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otro servidor Linux por SSH**: programados, con retención, verificación SHA-256 y restauración |
+| **Usuarios y grupos** | Crear/borrar usuarios, contraseñas, bloqueo, shells, grupos, membresías y **claves SSH** autorizadas |
+| **Permisos del panel** | Roles por usuario: administrador, solo lectura, módulos concretos o sin acceso |
+| **Seguridad del servidor** | Chequeo con semáforo (SSH, firewall, actualizaciones, reinicio pendiente, puertos, cuentas) con correcciones guiadas y gestión de fail2ban |
 
 ### Red y servidores
 
 | Módulo | Qué puedes hacer |
 |---|---|
 | **Interfaces** | Interfaces de red y conexiones activas |
+| **Tráfico de red** | Ancho de banda por interfaz en vivo y 7 días, quién consume (equipos, servicios, procesos), capturas `.pcap` y alertas |
 | **Firewall** | UFW (instalación con un clic, reglas, accesos rápidos, políticas), firewalld y nftables |
 | **Multi-servidor** | Monitorea otros MatiPanel desde uno solo, con tokens de solo lectura y huella de certificado anclada |
 | **Servidor web** | Apache y Nginx: sitios, asistente de virtual hosts, módulos, recarga con prueba previa |
@@ -64,7 +68,11 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Correo** | Postfix y Dovecot: configuración, cola, alias, SSL, registro y correo de prueba |
 | **DNS** | BIND 9: zonas primarias, inversas y secundarias, registros, SOA, reenviadores y pruebas con `dig` |
 | **Compartidos** | Samba (recursos, usuarios, sesiones) y NFS (exports) |
-| **Docker** | Contenedores, imágenes, volúmenes y logs |
+| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno |
+| **Stacks** | Proyectos de Docker Compose propios (Portainer, Uptime Kuma, wikis…) con plantillas, validación y avisos de configuraciones peligrosas |
+| **Docker** | Contenedores agrupados por proyecto con nombres propios, imágenes, volúmenes y logs |
+| **Explorador BD** | Estilo phpMyAdmin para las bases del servidor y las de cada app desplegada |
+| **Monitor** | Comprueba URLs, puertos y equipos de tu red (HTTP, TCP, ping), con historial, disponibilidad y aviso por correo |
 
 ### Herramientas y cuenta
 
@@ -73,6 +81,8 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Archivos** | Navegar con favoritos y migas, seleccionar varios, copiar/cortar/pegar, comprimir (`.tar.gz`/`.zip`), extraer, permisos con casillas, buscar en subcarpetas, vista previa de imágenes, calcular tamaño de carpetas, subir arrastrando (incluso carpetas) y editor con números de línea |
 | **Paquetes** | Buscar, instalar, quitar y actualizar (APT), actualizaciones automáticas |
 | **Logs** | journalctl, archivos de `/var/log` y vista en vivo |
+| **Notificaciones** | Avisos por correo (SMTP propio): problemas del servidor, despliegues, respaldos, monitor y bloqueos de acceso |
+| **Auditoría** | Quién hizo qué, cuándo y desde dónde; filtros y exportación CSV |
 | **Terminal** | Shell real en el navegador con tu usuario (nunca root) |
 | **Seguridad** | 2FA TOTP (Google Authenticator, Aegis…) con códigos de recuperación |
 | **Apariencia** | Tema, color de acento, barra lateral, tamaño, densidad, bordes, tipografía y secciones del dashboard |
@@ -144,6 +154,7 @@ El servicio corre como **root** (igual que Webmin) porque administra el sistema 
 - **Archivos y enlaces simbólicos:** las escrituras, subidas, extracciones y respaldos no siguen enlaces simbólicos plantados por otros usuarios; los comprimidos se revisan antes de extraer (rutas fuera del destino, setuid, dispositivos).
 - **Terminal:** baja a los privilegios de tu usuario; nunca abre un shell root.
 - **Comandos:** todos se ejecutan sin shell y con validación estricta de parámetros.
+- **Permisos y auditoría:** roles por usuario (administrador, solo lectura, módulos concretos) aplicados en cada petición, y registro de quién hizo qué sin guardar secretos.
 - **Acciones destructivas:** piden confirmación, y las más delicadas exigen escribir el nombre de lo que se va a borrar.
 - **Cambios de configuración:** se validan antes de aplicarse (`nginx -t`, `testparm`, `named-checkzone`, `postfix check`…) y se revierten si fallan.
 
@@ -155,7 +166,7 @@ El servicio corre como **root** (igual que Webmin) porque administra el sistema 
 usermod -aG matipanel <usuario>
 ```
 
-Para quitarlo: `gpasswd -d <usuario> matipanel`. Su sesión se cierra en la siguiente acción que haga en el panel.
+Para quitarlo: `gpasswd -d <usuario> matipanel`. Su sesión se cierra en la siguiente acción que haga en el panel. Qué puede hacer dentro (administrador, solo lectura, módulos concretos) se elige en **Permisos del panel**.
 
 ## Opciones
 
@@ -168,7 +179,7 @@ Environment="MATIPANEL_FILE_WRITE=0"   # administrador de archivos en solo lectu
 
 ## Documentación
 
-La guía de usuario completa (30 capítulos) está en [`app/docs/`](app/docs/) y dentro del panel en **Menú → Cuenta → Ayuda**, o con el botón **?** de cada pantalla. Empieza por la [Introducción](app/docs/01-introduccion.md) y la guía de [Instalación](app/docs/02-instalacion.md).
+La guía de usuario completa (más de 40 capítulos) está en [`app/docs/`](app/docs/) y dentro del panel en **Menú → Cuenta → Ayuda**, o con el botón **?** de cada pantalla. Empieza por la [Introducción](app/docs/01-introduccion.md) y la guía de [Instalación](app/docs/02-instalacion.md).
 
 ## Desarrollo
 
@@ -182,6 +193,8 @@ Levanta el panel en `http://127.0.0.1:8080`, sin HTTPS y con tu usuario: las fun
 matipanel/
 ├── app/
 │   ├── __init__.py       # Flask factory, CSRF por Origin, preferencias
+│   ├── roles.py, audit.py, notify.py  # Permisos, auditoría y correo
+│   ├── deployer.py, appbackup.py      # Motor de despliegues y respaldos de apps
 │   ├── auth.py, totp.py  # Login PAM, 2FA y bloqueo de intentos
 │   ├── metrics.py        # Historial de métricas (SQLite, 7 días)
 │   ├── prefs.py          # Apariencia por usuario
@@ -191,10 +204,20 @@ matipanel/
 │   └── docs/             # Guía de usuario (Markdown)
 ├── docs/screenshots/     # Capturas del README
 ├── scripts/              # install.sh, uninstall.sh, run-dev.sh
+├── tests/                # Pruebas (python tests/run.py)
 ├── systemd/matipanel.service
 ├── wsgi.py
 └── requirements.txt
 ```
+
+### Pruebas
+
+```bash
+python tests/run.py            # todas
+python tests/run.py roles fm   # solo las que contienen esos textos
+```
+
+Cada prueba corre en una carpeta temporal con la app de prueba, sin tocar `/var/lib/matipanel`, y al final se ejecutan las auto-pruebas de los módulos que las tienen. Funciona en Windows (para desarrollar) y en Linux. **No la ejecutes como root**: en el servidor, `cd /tmp/matipanel && /opt/matipanel/venv/bin/python tests/run.py` con tu usuario normal.
 
 ## Roadmap
 
@@ -203,6 +226,9 @@ matipanel/
 - [x] Samba / NFS
 - [x] Cuotas de disco y RAID/LVM
 - [x] Multi-servidor
+- [x] Despliegues, stacks y respaldos remotos de apps
+- [x] Monitor, notificaciones por correo y auditoría
+- [x] Permisos por usuario y seguridad del servidor
 - [ ] DNSSEC y zonas inversas IPv6
 - [ ] Buzones virtuales de correo
 

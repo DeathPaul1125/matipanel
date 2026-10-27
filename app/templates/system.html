@@ -4,11 +4,15 @@
 
 {% block content %}
 <div class="grid grid-4">
-  <div class="stat"><div class="stat-lbl">Hostname</div><div class="stat-val mono" id="s-host" style="font-size:16px;">—</div><div class="stat-sub" id="s-os">—</div></div>
-  <div class="stat"><div class="stat-lbl">Kernel</div><div class="stat-val mono" id="s-kernel" style="font-size:14px;">—</div><div class="stat-sub" id="s-uptime">—</div></div>
-  <div class="stat"><div class="stat-lbl">CPU</div><div class="stat-val" id="s-cpus">—</div><div class="stat-sub" id="s-cpu">—</div></div>
-  <div class="stat"><div class="stat-lbl">Memoria</div><div class="stat-val" id="s-mem">—</div><div class="stat-sub" id="s-swap">—</div></div>
+  <div class="stat"><div class="stat-lbl">Servidor</div><div class="stat-val mono sy-host" id="s-host">—</div><div class="stat-sub" id="s-os">—</div></div>
+  <div class="stat"><div class="stat-lbl">Encendido desde hace</div><div class="stat-val" id="s-uptime">—</div><div class="stat-sub" id="s-boot">—</div></div>
+  <div class="stat"><div class="stat-lbl">CPU</div><div class="stat-val" id="s-cpus">—</div><div class="stat-sub" id="s-load">—</div></div>
+  <div class="stat"><div class="stat-lbl">Memoria</div><div class="stat-val" id="s-mem">—</div>
+    <div class="sy-bar"><i id="s-mem-bar"></i></div><div class="stat-sub" id="s-swap">—</div></div>
 </div>
+
+<div class="sy-banner warn" id="b-reboot" hidden></div>
+<div class="sy-banner info" id="b-sched" hidden></div>
 
 <div class="tabs">
   <button class="tab active" data-tab="general">General</button>
@@ -17,49 +21,97 @@
   <button class="tab" data-tab="configs">Configuración</button>
 </div>
 
+<!-- General -->
 <div id="tab-general" class="tab-pane">
   <div class="grid grid-2">
     <div class="card">
-      <h3>Hostname</h3>
-      <div class="toolbar">
-        <input type="text" id="hostname" class="input mono" maxlength="253">
-        <button class="btn btn-primary" onclick="saveHostname()">Cambiar</button>
-      </div>
-      <p class="muted small">Usa <code>hostnamectl</code> y actualiza la línea <code>127.0.1.1</code> de /etc/hosts (copia en /etc/hosts.matipanel.bak).</p>
+      <h3>Resumen</h3>
+      <dl class="sy-kv" id="kv"></dl>
     </div>
     <div class="card">
       <h3>Fecha y hora</h3>
-      <p>Hora local: <span class="mono" id="t-local">—</span></p>
-      <p>NTP: <span id="t-ntp">—</span> &nbsp; <button class="btn btn-sm" id="t-ntp-btn" onclick="toggleNtp()">—</button></p>
-      <div class="toolbar">
-        <input type="text" id="tz" class="input mono" list="tz-list" placeholder="America/Guatemala">
-        <datalist id="tz-list"></datalist>
-        <button class="btn btn-primary" onclick="saveTz()">Cambiar zona</button>
+      <div class="sy-clock"><div class="sy-time mono" id="clk-time">--:--:--</div><div class="muted" id="clk-date">—</div></div>
+      <dl class="sy-kv sy-kv-tight">
+        <div><dt>Zona horaria</dt><dd><div class="sy-row"><input type="text" id="tz" class="input mono" list="tz-list" placeholder="America/Guatemala">
+          <datalist id="tz-list"></datalist><button class="btn btn-primary btn-sm" onclick="saveTz()">Cambiar</button></div></dd></div>
+        <div><dt>Sincronización (NTP)</dt><dd><span id="t-ntp">—</span> <button class="btn btn-sm" id="t-ntp-btn" onclick="toggleNtp()">—</button></dd></div>
+        <div><dt>Servidor de hora</dt><dd class="mono small" id="t-server">—</dd></div>
+        <div><dt>Hora UTC</dt><dd class="mono small" id="t-utc">—</dd></div>
+      </dl>
+    </div>
+  </div>
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Nombre del servidor</h3>
+      <div class="sy-row">
+        <input type="text" id="hostname" class="input mono" maxlength="253">
+        <button class="btn btn-primary" onclick="saveHostname()">Cambiar</button>
+      </div>
+      <p class="muted small">Usa <code>hostnamectl</code> y actualiza la línea <code>127.0.1.1</code> de <code>/etc/hosts</code> (copia en <code>/etc/hosts.matipanel.bak</code>). Los usuarios conectados lo verán al abrir una sesión nueva.</p>
+    </div>
+    <div class="card">
+      <h3>Encendido</h3>
+      <p class="muted small">Para cualquiera de estas acciones se pide escribir el nombre del servidor. «Ahora» se ejecuta a los 3 segundos; «Programar» avisa a los usuarios conectados y se puede cancelar.</p>
+      <div class="sy-row">
+        <button class="btn btn-danger" onclick="power('reboot')">Reiniciar ahora</button>
+        <button class="btn btn-danger" onclick="power('poweroff')">Apagar ahora</button>
+        <button class="btn" onclick="schedule()">Programar…</button>
+        <button class="btn" id="cancel-btn" onclick="cancelSchedule()" hidden>Cancelar programado</button>
       </div>
     </div>
   </div>
+</div>
+
+<!-- Sesiones -->
+<div id="tab-sessions" class="tab-pane" hidden>
+  <div class="toolbar"><button class="btn" onclick="loadSessions()">Refrescar</button></div>
   <div class="card">
-    <h3>Encendido</h3>
-    <p class="muted small">Se te pedirá escribir el hostname para confirmar. La acción se ejecuta 3 segundos después.</p>
-    <button class="btn btn-danger" onclick="power('reboot')">Reiniciar servidor</button>
-    <button class="btn btn-danger" onclick="power('poweroff')">Apagar servidor</button>
+    <h3>Conectados ahora</h3>
+    <table class="lx" id="who-table" data-table>
+      <thead><tr><th>Usuario</th><th>Terminal</th><th>Desde</th><th>Entró</th><th>Inactivo</th></tr></thead>
+      <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Intentos fallidos por SSH</h3><span class="small muted" id="ssh-sum"></span></div>
+    <table class="lx" id="ssh-table" data-table>
+      <thead><tr><th>IP</th><th>Intentos</th><th>Usuarios probados</th><th>Último</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+    <p class="small muted">Últimos 7 días, del journal de <span class="mono">sshd</span>. Para bloquear una IP usa el <a href="{{ url_for('firewall.index') }}">Firewall</a>.</p>
+  </div>
+  <div class="card">
+    <h3>Últimos accesos y arranques</h3>
+    <table class="lx" id="last-table" data-table>
+      <thead><tr><th>Usuario</th><th>Terminal</th><th>Desde</th><th>Inicio</th><th>Fin</th><th>Duración</th></tr></thead>
+      <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+    <pre class="terminal output" id="last-raw" hidden></pre>
+  </div>
+  <div class="card" id="lastb-card" hidden>
+    <h3>Accesos fallidos (lastb)</h3>
+    <table class="lx" id="lastb-table" data-table>
+      <thead><tr><th>Usuario</th><th>Terminal</th><th>Desde</th><th>Fecha</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </div>
 </div>
 
-<div id="tab-sessions" class="tab-pane" style="display:none;">
-  <div class="toolbar"><button class="btn" onclick="loadSessions()">Refrescar</button></div>
-  <div class="card" style="margin-bottom:12px;"><h3>Usuarios conectados (who)</h3><pre class="terminal output" id="who">Cargando…</pre></div>
-  <div class="card" style="margin-bottom:12px;"><h3>Últimos accesos (last)</h3><pre class="terminal output" id="last">Cargando…</pre></div>
-  <div class="card"><h3>Accesos fallidos (lastb)</h3><pre class="terminal output" id="lastb">Cargando…</pre></div>
-</div>
-
-<div id="tab-hardware" class="tab-pane" style="display:none;">
-  <div class="card" style="margin-bottom:12px;">
-    <h3>Dispositivos de bloque</h3>
-    <table class="lx" id="disk-table">
-      <thead><tr><th>Nombre</th><th>Tamaño</th><th>Tipo</th><th>FS</th><th>Montaje</th><th>Modelo</th></tr></thead>
-      <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
-    </table>
+<!-- Hardware -->
+<div id="tab-hardware" class="tab-pane" hidden>
+  <div class="grid grid-2">
+    <div class="card"><h3>Procesador</h3><dl class="sy-kv" id="cpu-kv"><div class="muted">Cargando…</div></dl></div>
+    <div class="card">
+      <h3>Dispositivos de bloque</h3>
+      <table class="lx" id="disk-table">
+        <thead><tr><th>Nombre</th><th>Tamaño</th><th>Tipo</th><th>FS</th><th>Montaje</th><th>Modelo</th></tr></thead>
+        <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="grid grid-2">
+    <div class="card"><h3>Dispositivos PCI</h3><pre class="terminal output sy-dev" id="pci">Cargando…</pre></div>
+    <div class="card"><h3>Dispositivos USB</h3><pre class="terminal output sy-dev" id="usb">Cargando…</pre></div>
   </div>
   <div class="card">
     <h3>/etc/fstab <a class="btn btn-sm" href="{{ url_for('files.index') }}?edit=%2Fetc%2Ffstab">editar</a></h3>
@@ -67,7 +119,8 @@
   </div>
 </div>
 
-<div id="tab-configs" class="tab-pane" style="display:none;">
+<!-- Configuración -->
+<div id="tab-configs" class="tab-pane" hidden>
   <div class="grid grid-3" id="configs"></div>
 </div>
 {% endblock %}
@@ -75,43 +128,86 @@
 {% block scripts %}
 <script>
 const EDIT_URL = "{{ url_for('files.index') }}?edit=";
-let info = {};
+const $ = id => document.getElementById(id);
+let info = {}, skew = 0, hwLoaded = false;
 
 document.querySelectorAll('.tabs .tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tabs .tab').forEach(x => x.classList.toggle('active', x === t));
-  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = p.id === 'tab-' + t.dataset.tab ? '' : 'none');
+  document.querySelectorAll('.tab-pane').forEach(p => { p.hidden = p.id !== 'tab-' + t.dataset.tab; });
   if (t.dataset.tab === 'sessions') loadSessions();
+  if (t.dataset.tab === 'hardware' && !hwLoaded) loadHardware();
 }));
 
 function fmtUptime(s) {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
-  return `arriba ${d}d ${h}h ${m}m`;
+  return (d ? `${d} d ` : '') + `${h} h ${m} min`;
 }
+const fmtDate = t => new Date(t * 1000).toLocaleString('es', {dateStyle: 'medium', timeStyle: 'short'});
+
+// Reloj del servidor: la hora del navegador corregida con el desfase medido y mostrada en la zona del servidor
+function tick() {
+  if (!info.time) return;
+  const now = new Date(Date.now() + skew);
+  const tz = info.time.timezone || undefined;
+  try {
+    $('clk-time').textContent = now.toLocaleTimeString('es', {timeZone: tz, hour12: false});
+    $('clk-date').textContent = now.toLocaleDateString('es', {timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'}) + (tz ? ' · ' + tz : '');
+  } catch (e) {  // zona que el navegador no conoce
+    $('clk-time').textContent = now.toLocaleTimeString('es', {hour12: false});
+  }
+  $('t-utc').textContent = now.toISOString().replace('T', ' ').slice(0, 19);
+}
+setInterval(tick, 1000);
 
 async function loadInfo() {
-  const r = await fetch("{{ url_for('system.info') }}");
-  info = await r.json();
-  const set = (id, v) => document.getElementById(id).textContent = v;
-  set('s-host', info.hostname); set('s-os', info.os);
-  set('s-kernel', info.kernel); set('s-uptime', info.arch + ' · ' + fmtUptime(info.uptime));
-  set('s-cpus', info.cpu_count + ' núcleos'); set('s-cpu', info.cpu_model);
-  set('s-mem', `${info.mem_used} / ${info.mem_total}`);
-  set('s-swap', `Swap: ${info.swap_used} / ${info.swap_total}`);
-  document.getElementById('hostname').value = info.hostname;
+  const t0 = Date.now();
+  info = await (await fetch("{{ url_for('system.info') }}")).json();
+  skew = info.time && info.time.epoch ? info.time.epoch * 1000 - (t0 + Date.now()) / 2 : 0;
+  const o = info.overview, set = (id, v) => { $(id).textContent = v; };
+  set('s-host', info.hostname); set('s-os', o.os_name);
+  set('s-uptime', fmtUptime(info.uptime)); set('s-boot', 'desde el ' + fmtDate(o.boot));
+  set('s-cpus', info.cpu_count + ' núcleos'); set('s-load', `Carga ${o.load.join(' · ')}`);
+  set('s-mem', `${info.mem_used} / ${info.mem_total}`); set('s-swap', `Swap: ${info.swap_used} / ${info.swap_total}`);
+  $('s-mem-bar').style.width = info.mem_pct + '%';
+  $('s-mem-bar').className = info.mem_pct >= 90 ? 'err' : info.mem_pct >= 80 ? 'warn' : '';
+  if (document.activeElement !== $('hostname')) $('hostname').value = info.hostname;
   set('fstab', info.fstab || '(vacío o inexistente)');
 
+  const cores = info.cpu_count || 1, loadCls = o.load[0] / cores >= 1.5 ? 'err' : o.load[0] / cores >= 1 ? 'warn' : 'ok';
+  const kv = [
+    ['Sistema operativo', escapeHtml(o.os_name) + (o.codename && !o.os_name.includes(o.codename) ? ` <span class="muted">(${escapeHtml(o.codename)})</span>` : '')],
+    ['Kernel', `<span class="mono">${escapeHtml(info.kernel)}</span> · ${escapeHtml(info.arch)}`],
+    ['Equipo', escapeHtml(o.machine || '—') + (o.virt ? ` <span class="pill mute">virtual: ${escapeHtml(o.virt)}</span>` : ' <span class="pill mute">físico</span>')],
+    ['Procesador', escapeHtml(info.cpu_model)],
+    ['Carga (1 · 5 · 15 min)', `<span class="pill ${loadCls}">${o.load.join(' · ')}</span> <span class="small muted">con ${cores} núcleos</span>`],
+    ['Procesos', String(o.procs)],
+    ['Sesiones abiertas', String(o.users)],
+    ['Idioma y teclado', escapeHtml([o.locale.lang, o.locale.keymap].filter(Boolean).join(' · ') || '—')],
+  ];
+  $('kv').innerHTML = kv.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`).join('');
+
   const t = info.time;
-  if (t.error) { set('t-local', t.error); }
+  if (t.error) { set('t-server', t.error); }
   else {
-    set('t-local', t.local_time);
-    document.getElementById('tz').value = t.timezone;
-    document.getElementById('t-ntp').innerHTML = t.ntp
-      ? '<span class="pill ok">activo</span> ' + (t.synced ? '<span class="pill ok">sincronizado</span>' : '<span class="pill warn">sin sincronizar</span>')
-      : '<span class="pill mute">inactivo</span>';
-    const b = document.getElementById('t-ntp-btn');
-    b.textContent = t.ntp ? 'Desactivar NTP' : 'Activar NTP';
-    b.disabled = !t.can_ntp && !t.ntp;
+    if (document.activeElement !== $('tz')) $('tz').value = t.timezone;
+    $('t-ntp').innerHTML = t.ntp
+      ? '<span class="pill ok">activa</span> ' + (t.synced ? '<span class="pill ok">sincronizada</span>' : '<span class="pill warn">sin sincronizar</span>')
+      : '<span class="pill mute">desactivada</span>';
+    $('t-ntp-btn').textContent = t.ntp ? 'Desactivar' : 'Activar';
+    $('t-ntp-btn').disabled = !t.can_ntp && !t.ntp;
+    set('t-server', t.ntp_server || '—');
   }
+  tick();
+
+  $('b-reboot').hidden = !o.reboot_required;
+  if (o.reboot_required) $('b-reboot').innerHTML = `<b>Reinicio pendiente.</b> Las actualizaciones instaladas lo necesitan para aplicarse`
+    + (o.reboot_pkgs.length ? `: <span class="mono small">${escapeHtml(o.reboot_pkgs.join(', '))}</span>` : '.')
+    + ` <button class="btn btn-sm" onclick="schedule()">Programar reinicio…</button>`;
+  $('b-sched').hidden = !o.scheduled;
+  $('cancel-btn').hidden = !o.scheduled;
+  if (o.scheduled) $('b-sched').innerHTML = `<b>${o.scheduled.mode === 'reboot' ? 'Reinicio' : 'Apagado'} programado</b> para el ${escapeHtml(fmtDate(o.scheduled.at))}`
+    + (o.scheduled.message ? ` — <span class="small">${escapeHtml(o.scheduled.message)}</span>` : '')
+    + ` <button class="btn btn-sm" onclick="cancelSchedule()">Cancelar</button>`;
 
   const rows = [];
   (function walk(list, depth) {
@@ -124,25 +220,54 @@ async function loadInfo() {
       <td class="mono">${escapeHtml(d.mountpoint || '')}</td><td>${escapeHtml(d.model || '')}</td>
     </tr>`).join('') : '<tr><td colspan="6" class="muted center">' + escapeHtml(info.lsblk_error || 'Sin datos') + '</td></tr>';
 
-  document.getElementById('configs').innerHTML = info.configs.map(c => `
+  $('configs').innerHTML = info.configs.map(c => `
     <div class="card">
-      <h3 class="mono" style="font-size:14px;">${escapeHtml(c.path)}</h3>
+      <h3 class="mono sy-cfg">${escapeHtml(c.path)}</h3>
       <p class="muted small">${escapeHtml(c.desc)}</p>
-      ${c.exists ? `<a class="btn btn-sm" href="${EDIT_URL + encodeURIComponent(c.path)}">editar</a>` : '<span class="pill mute">no existe</span>'}
+      ${c.exists ? `<a class="btn btn-sm" href="${EDIT_URL + encodeURIComponent(c.path)}">Editar</a>` : '<span class="pill mute">no existe</span>'}
       ${c.path === '/etc/ssh/sshd_config' && c.exists ? '<button class="btn btn-sm" onclick="sshRestart()">Probar y reiniciar SSH</button>' : ''}
     </div>`).join('');
 }
 
 async function loadTimezones() {
-  const r = await fetch("{{ url_for('system.timezones') }}");
-  const d = await r.json();
-  if (d.timezones) document.getElementById('tz-list').innerHTML = d.timezones.map(z => `<option value="${escapeHtml(z)}">`).join('');
+  const d = await (await fetch("{{ url_for('system.timezones') }}")).json();
+  if (d.timezones) $('tz-list').innerHTML = d.timezones.map(z => `<option value="${escapeHtml(z)}">`).join('');
 }
 
 async function loadSessions() {
-  const r = await fetch("{{ url_for('system.sessions') }}");
-  const d = await r.json();
-  for (const k of ['who', 'last', 'lastb']) document.getElementById(k).textContent = d[k];
+  const d = await (await fetch("{{ url_for('system.sessions') }}")).json();
+  const fill = (id, rows, cols) => { $(id).tBodies[0].innerHTML = rows.join('') || `<tr><td colspan="${cols}" class="muted center">Sin registros</td></tr>`; };
+  fill('who-table', d.who.map(w => `<tr><td class="mono">${escapeHtml(w.user)}</td><td class="mono small">${escapeHtml(w.tty)}</td>
+    <td class="mono small">${escapeHtml(w.from || 'local')}</td><td class="small">${escapeHtml(w.since)}</td><td class="small muted">${escapeHtml(w.idle)}</td></tr>`), 5);
+  const s = d.ssh_failed || {ips: []};
+  $('ssh-sum').textContent = s.error ? s.error : `${s.total || 0} intentos desde ${s.ips.length} IP`;
+  fill('ssh-table', s.ips.map(e => `<tr><td class="mono">${escapeHtml(e.ip)}</td><td data-sort="${e.count}"><b>${e.count}</b></td>
+    <td class="mono small">${escapeHtml(e.users.join(', '))}</td><td class="small">${escapeHtml(e.last.replace('T', ' ').slice(0, 19))}</td></tr>`), 4);
+  fill('last-table', d.last.map(r => `<tr${r.boot ? ' class="sy-boot"' : ''}>
+    <td class="mono">${r.boot ? '<span class="pill mute">arranque</span>' : escapeHtml(r.user)}</td>
+    <td class="mono small">${escapeHtml(r.boot ? r.kernel : r.tty)}</td><td class="mono small">${escapeHtml(r.from || (r.boot ? '' : 'local'))}</td>
+    <td class="small" data-sort="${Date.parse(r.start) / 1000 || 0}">${escapeHtml(r.start)}</td>
+    <td class="small">${r.status ? `<span class="pill ${/still/.test(r.status) ? 'ok' : 'mute'}">${escapeHtml(r.status.replace('still logged in', 'conectado').replace('still running', 'en marcha'))}</span>` : escapeHtml(r.end === 'crash' ? 'caída' : r.end === 'down' ? 'apagado' : r.end)}</td>
+    <td class="small mono">${escapeHtml(r.duration)}</td></tr>`), 6);
+  $('last-raw').hidden = !d.last_raw;
+  $('last-raw').textContent = d.last_raw || '';
+  $('lastb-card').hidden = !d.has_lastb;
+  fill('lastb-table', d.lastb.map(r => `<tr><td class="mono">${escapeHtml(r.user)}</td><td class="mono small">${escapeHtml(r.tty)}</td>
+    <td class="mono small">${escapeHtml(r.from)}</td><td class="small">${escapeHtml(r.start)}</td></tr>`), 4);
+}
+
+async function loadHardware() {
+  hwLoaded = true;
+  const d = await (await fetch("{{ url_for('system.hardware') }}")).json();
+  const names = {'Model name': 'Modelo', 'Vendor ID': 'Fabricante', 'Architecture': 'Arquitectura', 'CPU(s)': 'CPU lógicas',
+    'Socket(s)': 'Zócalos', 'Core(s) per socket': 'Núcleos por zócalo', 'Core(s) per cluster': 'Núcleos por clúster',
+    'Thread(s) per core': 'Hilos por núcleo', 'CPU max MHz': 'Frecuencia máxima (MHz)', 'CPU min MHz': 'Frecuencia mínima (MHz)',
+    'Virtualization': 'Virtualización por hardware', 'Hypervisor vendor': 'Hipervisor', 'Virtualization type': 'Tipo de virtualización',
+    'L1d': 'Caché L1 datos', 'L1i': 'Caché L1 instrucciones', 'L2': 'Caché L2', 'L3': 'Caché L3', 'NUMA node(s)': 'Nodos NUMA'};
+  $('cpu-kv').innerHTML = d.cpu.length ? d.cpu.map(([k, v]) => `<div><dt>${escapeHtml(names[k] || k)}</dt><dd>${escapeHtml(v)}</dd></div>`).join('')
+    : '<div class="muted">lscpu no disponible</div>';
+  $('pci').textContent = d.pci === null ? 'lspci no está instalado (paquete pciutils)' : d.pci.join('\n') || '(sin dispositivos)';
+  $('usb').textContent = d.usb === null ? 'lsusb no está instalado (paquete usbutils)' : d.usb.join('\n') || '(sin dispositivos)';
 }
 
 function report(d, okMsg) {
@@ -152,41 +277,52 @@ function report(d, okMsg) {
 }
 
 async function saveHostname() {
-  const hostname = document.getElementById('hostname').value.trim();
-  if (!await ui.confirm(`¿Cambiar el hostname a "${hostname}"?`, { title: 'Cambiar hostname', confirmText: 'Cambiar' })) return;
-  if (report(await postJSON("{{ url_for('system.set_hostname') }}", { hostname }), 'Hostname actualizado')) loadInfo();
+  const hostname = $('hostname').value.trim();
+  if (!await ui.confirm(`¿Cambiar el nombre del servidor a «${hostname}»?`, { title: 'Cambiar nombre', confirmText: 'Cambiar' })) return;
+  if (report(await postJSON("{{ url_for('system.set_hostname') }}", { hostname }), 'Nombre actualizado')) loadInfo();
 }
-
 async function saveTz() {
-  const timezone = document.getElementById('tz').value.trim();
+  const timezone = $('tz').value.trim();
   if (!await ui.confirm(`¿Cambiar la zona horaria a ${timezone}?`, { title: 'Zona horaria', confirmText: 'Cambiar' })) return;
-  if (report(await postJSON("{{ url_for('system.set_timezone') }}", { timezone }))) loadInfo();
+  if (report(await postJSON("{{ url_for('system.set_timezone') }}", { timezone }), 'Zona horaria cambiada')) loadInfo();
 }
-
 async function toggleNtp() {
   const enabled = !info.time.ntp;
-  if (!await ui.confirm(enabled ? '¿Activar sincronización NTP?' : '¿Desactivar sincronización NTP?',
+  if (!await ui.confirm(enabled ? '¿Activar la sincronización de hora por NTP?' : '¿Desactivar la sincronización de hora por NTP? El reloj puede desviarse con el tiempo.',
       { title: 'Sincronización NTP', confirmText: enabled ? 'Activar' : 'Desactivar' })) return;
   if (report(await postJSON("{{ url_for('system.set_ntp') }}", { enabled }))) loadInfo();
 }
-
 async function power(action) {
   const label = action === 'reboot' ? 'REINICIAR' : 'APAGAR';
-  if (!await ui.confirm(`¿Seguro que deseas ${label} el servidor?`, {
+  if (!await ui.confirm(`¿Seguro que deseas ${label} el servidor ahora? Se cortarán todos los servicios y sesiones.`, {
     title: action === 'reboot' ? 'Reiniciar servidor' : 'Apagar servidor', danger: true,
     confirmText: action === 'reboot' ? 'Reiniciar' : 'Apagar', typed: info.hostname,
   })) return;
   report(await postJSON("{{ url_for('system.power') }}", { action, confirm: info.hostname }),
     action === 'reboot' ? 'El servidor se reiniciará en unos segundos.' : 'El servidor se apagará en unos segundos.');
 }
-
+async function schedule() {
+  const r = await ui.form({title: 'Programar reinicio o apagado', fields: [
+    {name: 'action', label: 'Acción', type: 'select', value: 'reboot', options: [['reboot', 'Reiniciar'], ['poweroff', 'Apagar']]},
+    {name: 'when', label: 'Cuándo: minutos desde ahora (p. ej. 30) o una hora HH:MM (p. ej. 23:00)', value: '23:00', required: true},
+    {name: 'message', label: 'Mensaje para los usuarios conectados (opcional)', placeholder: 'Mantenimiento programado'},
+    {name: 'confirm', label: `Escribe «${info.hostname}» para confirmar`, required: true},
+  ], confirmText: 'Programar', danger: true});
+  if (!r) return;
+  if (report(await postJSON("{{ url_for('system.power_schedule') }}", r), 'Programado')) loadInfo();
+}
+async function cancelSchedule() {
+  if (!await ui.confirm('¿Cancelar el reinicio o apagado programado?', { title: 'Cancelar', confirmText: 'Cancelar programado' })) return;
+  if (report(await postJSON("{{ url_for('system.power_cancel') }}", {}), 'Cancelado')) loadInfo();
+}
 async function sshRestart() {
-  if (!await ui.confirm('Se validará sshd_config con "sshd -t" y, si es correcto, se reiniciará SSH. ¿Continuar?',
+  if (!await ui.confirm('Se validará sshd_config con «sshd -t» y, si es correcto, se reiniciará SSH. ¿Continuar?',
       { title: 'Reiniciar SSH', danger: true, confirmText: 'Reiniciar' })) return;
   report(await postJSON("{{ url_for('system.ssh_restart') }}", {}), 'Configuración válida. SSH reiniciado.');
 }
 
 loadInfo();
 loadTimezones();
+setInterval(loadInfo, 30000);
 </script>
 {% endblock %}

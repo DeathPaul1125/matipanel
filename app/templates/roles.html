@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Permisos del panel{% endblock %}
+{% block heading %}Permisos del panel{% endblock %}
+
+{% block content %}
+<div class="card">
+  <p class="muted">Quién puede entrar al panel lo deciden los grupos del sistema (<span class="mono">matipanel</span>, <span class="mono">sudo</span>, <span class="mono">wheel</span>, <span class="mono">admin</span>). Aquí decides <b>qué puede hacer</b> cada uno.</p>
+  <div class="rl-roles small">
+    <div><span class="pill ok">Administrador</span> todo, incluida esta pantalla.</div>
+    <div><span class="pill mute">Solo lectura</span> ve los módulos pero no cambia nada; sin Terminal, Archivos, Explorador BD ni descargas de datos.</div>
+    <div><span class="pill warn">Personalizado</span> acceso completo solo a los módulos que marques.</div>
+    <div><span class="pill err">Sin acceso</span> no puede entrar.</div>
+  </div>
+  <label class="form-row rl-default"><span>Rol para los usuarios que no estén en la lista (o que se agreguen después a esos grupos)</span>
+    <select class="input" id="r-default">{% for k, v in role_names.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+</div>
+
+<div class="card">
+  <table class="lx" id="r-table">
+    <thead><tr><th>Usuario</th><th>Grupos</th><th>Rol</th><th data-nosort>Módulos (rol personalizado)</th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  <div class="form-actions"><button class="btn btn-primary" onclick="save()">Guardar permisos</button></div>
+  <p class="small muted">Todos pueden siempre ver el Dashboard, la Ayuda, su Apariencia y su 2FA. Los cambios se aplican en la siguiente acción de cada usuario; «Sin acceso» cierra su sesión.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = {{ url_for('roles.index')|tojson }} + 'api/';
+const ROLE_NAMES = {{ role_names|tojson }};
+const MODULES = {{ modules|tojson }};
+const $ = id => document.getElementById(id);
+let ME = '';
+
+function row(u) {
+  const opts = Object.entries(ROLE_NAMES).map(([k, v]) => `<option value="${k}" ${k === u.role ? 'selected' : ''}>${escapeHtml(v)}${!u.configured && k === u.role ? ' (por defecto)' : ''}</option>`).join('');
+  const mods = MODULES.map(m => `<label class="rl-mod"><input type="checkbox" value="${escapeHtml(m.key)}" ${u.modules.includes(m.key) ? 'checked' : ''}> ${escapeHtml(m.label)}</label>`).join('');
+  return `<tr data-user="${escapeHtml(u.user)}" data-configured="${u.configured ? 1 : 0}">
+    <td><b class="mono">${escapeHtml(u.user)}</b>${u.user === ME ? ' <span class="pill mute">tú</span>' : ''}${u.allowed_by_group ? '' : ' <span class="pill warn" title="Ya no está en ningún grupo con acceso">sin grupo</span>'}</td>
+    <td class="small mono">${escapeHtml(u.groups.join(', ') || '—')}</td>
+    <td><select class="input rl-role">${opts}</select></td>
+    <td><div class="rl-mods" ${u.role === 'custom' ? '' : 'hidden'}>${mods}</div></td></tr>`;
+}
+async function load() {
+  const d = await (await fetch(API + 'config')).json();
+  if (!d.ok) return;
+  ME = d.me;
+  $('r-default').value = d.default;
+  $('r-table').tBodies[0].innerHTML = d.users.map(row).join('') || '<tr><td colspan="4" class="muted center">Sin usuarios</td></tr>';
+  document.querySelectorAll('.rl-role').forEach(sel => sel.addEventListener('change', () => {
+    const tr = sel.closest('tr');
+    tr.dataset.configured = '1';
+    tr.querySelector('.rl-mods').hidden = sel.value !== 'custom';
+  }));
+}
+async function save() {
+  const users = {};
+  document.querySelectorAll('#r-table tr[data-user]').forEach(tr => {
+    // Los que siguen con el rol por defecto no se guardan: así les afecta si cambias el rol por defecto
+    if (tr.dataset.configured !== '1') return;
+    users[tr.dataset.user] = {role: tr.querySelector('.rl-role').value,
+      modules: [...tr.querySelectorAll('.rl-mods input:checked')].map(i => i.value)};
+  });
+  const d = await postJSON(API + 'config', {default: $('r-default').value, users});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  ui.toast('Permisos guardados');
+  load();
+}
+load();
+</script>
+{% endblock %}

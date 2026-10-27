@@ -101,6 +101,22 @@
   </div>
 </div>
 
+<!-- Claves SSH -->
+<div class="modal" id="m-keys">
+  <div class="modal-box wide">
+    <h3>Claves SSH de <span class="mono" id="k-user"></span></h3>
+    <p class="small muted">Claves públicas autorizadas a entrar por SSH como este usuario (<span class="mono" id="k-path"></span>).</p>
+    <table class="lx" id="k-table"><thead><tr><th>Tipo</th><th>Huella</th><th>Comentario</th><th></th></tr></thead><tbody></tbody></table>
+    <label class="form-row"><span>Agregar una clave pública</span>
+      <textarea class="input mono" id="k-new" rows="3" placeholder="ssh-ed25519 AAAAC3Nza… usuario@equipo"></textarea>
+      <span class="dlg-help">El contenido de <span class="mono">~/.ssh/id_ed25519.pub</span> (o <span class="mono">id_rsa.pub</span>) de quien va a entrar. Nunca la clave privada.</span></label>
+    <div class="form-actions">
+      <button class="btn" onclick="closeModal('m-keys')">Cerrar</button>
+      <button class="btn btn-primary" onclick="addKey()">Agregar clave</button>
+    </div>
+  </div>
+</div>
+
 <!-- Eliminar usuario -->
 <div class="modal" id="m-del">
   <div class="modal-box">
@@ -191,9 +207,46 @@ function render() {
           : `<button class="btn btn-sm" onclick="lockUser(${jsArg(u.name)}, true)">Bloquear</button>`}
         <button class="btn btn-sm" onclick="openShell(${jsArg(u.name)})">Shell</button>
         <button class="btn btn-sm" onclick="openUserGroups(${jsArg(u.name)})">Grupos</button>
+        <button class="btn btn-sm" onclick="openKeys(${jsArg(u.name)})">Claves SSH</button>
         ${u.uid !== 0 && u.name !== me ? `<button class="btn btn-sm btn-danger" onclick="openDelete(${jsArg(u.name)})">Eliminar</button>` : ''}
       </td>
     </tr>`).join('');
+}
+
+// ── Claves SSH ──
+let keysUser = '';
+async function openKeys(name) {
+  keysUser = name;
+  document.getElementById('k-user').textContent = name;
+  document.getElementById('k-new').value = '';
+  openModal('m-keys');
+  await loadKeys();
+}
+async function loadKeys() {
+  const tb = document.querySelector('#k-table tbody');
+  tb.innerHTML = '<tr><td colspan="4" class="muted center">Cargando…</td></tr>';
+  let d;
+  try { d = await (await fetch(API + 'user/keys?user=' + encodeURIComponent(keysUser))).json(); } catch (e) { d = {ok: false, error: String(e)}; }
+  if (!d.ok) { tb.innerHTML = `<tr><td colspan="4" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  document.getElementById('k-path').textContent = d.home + '/.ssh/authorized_keys';
+  tb.innerHTML = d.keys.length ? d.keys.map(k => `<tr>
+    <td class="mono small">${escapeHtml(k.type)}${k.bits ? ' · ' + k.bits : ''}${k.options ? ` <span class="pill mute" title="${escapeHtml(k.options)}">con opciones</span>` : ''}</td>
+    <td class="mono small">${escapeHtml(k.fingerprint)}</td><td class="small">${escapeHtml(k.comment || '—')}</td>
+    <td><button class="btn btn-sm btn-danger" onclick="delKey(${k.line}, ${jsArg(k.fingerprint)}, ${jsArg(k.comment || k.fingerprint)})">Quitar</button></td></tr>`).join('')
+    : '<tr><td colspan="4" class="muted center">Este usuario no tiene claves autorizadas</td></tr>';
+}
+async function addKey() {
+  const d = await postJSON(API + 'user/keys/add', {user: keysUser, key: document.getElementById('k-new').value});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo agregar', {title: 'Error', icon: 'error'});
+  document.getElementById('k-new').value = '';
+  ui.toast('Clave agregada');
+  loadKeys();
+}
+async function delKey(line, fingerprint, label) {
+  if (!await ui.confirm(`¿Quitar la clave «${label}»? Quien la use ya no podrá entrar por SSH como ${keysUser}.`, {title: 'Quitar clave', danger: true, confirmText: 'Quitar'})) return;
+  const d = await postJSON(API + 'user/keys/delete', {user: keysUser, line, fingerprint});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo quitar', {title: 'Error', icon: 'error'});
+  loadKeys();
 }
 
 function renderGroups() {
