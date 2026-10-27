@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.10.1] - 2026-10-27
+
+### Cambiado
+- 🧭 **Menú compacto rediseñado** — un icono por sección (seis en total, sin barras de desplazamiento) con la sección actual resaltada; al pasar el mouse se abre un panel flotante con el nombre de la sección y sus módulos.
+- 🏷️ **Versión visible** — junto al nombre MatiPanel en el menú (debajo de la «M» en el menú compacto) y en la pantalla de inicio de sesión; lleva a «Acerca de».
+
 ## [0.10.0] - 2026-10-27
 
 ### Añadido

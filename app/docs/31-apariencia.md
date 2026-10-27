@@ -61,7 +61,7 @@ En la tarjeta **Barra lateral**, elige un estilo:
 
 ### Usar la barra compacta
 
-Marca **Barra compacta → Activar** para mostrar solo los iconos del menú. El nombre de cada sección aparece al pasar el mouse. Útil en pantallas pequeñas o para dar más espacio a tablas y consultas.
+Marca **Barra compacta → Activar** para dejar el menú en una columna angosta con **un icono por sección** (Sistema, Archivos y discos, Red y acceso, Web y aplicaciones, Bases de datos y Herramientas). La sección de la pantalla actual queda resaltada. Al pasar el mouse sobre un icono (o al llegar con la tecla Tab) se abre un **panel flotante** con el nombre de la sección y sus módulos; haz clic en uno para ir. Útil en pantallas pequeñas o para dar más espacio a tablas y consultas.
 
 También puedes colapsarla y expandirla desde cualquier pantalla con el botón de la **barra superior**, a la izquierda del título (el icono de un panel con una flecha). El cambio se guarda igual que esta opción.
 
