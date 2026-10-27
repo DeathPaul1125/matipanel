@@ -157,10 +157,46 @@ def backup_now(name):
 @appbackup_bp.route("/api/apps/<name>/status")
 @login_required
 def status(name):
-    if not _app(name):
+    if not D.valid_name(name):  # también apps que se están recuperando y aún no existen aquí
         return _err("La aplicación no existe", 404)
     busy, log = B.status(name)
-    return jsonify({"ok": True, "busy": busy, "log": log, "state": B.load()["state"].get(name) or {}})
+    return jsonify({"ok": True, "busy": busy, "log": log, "state": B.load()["state"].get(name) or {},
+                    "exists": bool(_app(name))})
+
+
+# ── Recuperación ante desastres ─────────────────────────────────────────────
+
+@appbackup_bp.route("/api/dests/<dest_id>/apps")
+@login_required
+def dr_apps(dest_id):
+    dest = B.find_dest(B.load(), dest_id)
+    if not B.ready(dest):
+        return _err("Ese servidor de respaldos no existe", 404)
+    try:
+        return jsonify({"ok": True, "apps": B.remote_apps(dest), "docker": bool(D.compose_cmd())})
+    except B.Fail as e:
+        return _err(str(e), 502)
+
+
+@appbackup_bp.route("/api/recover", methods=["POST"])
+@login_required
+def recover():
+    d = request.get_json(silent=True) or {}
+    name, stamp, dest_id = str(d.get("app", "")), str(d.get("stamp", "")), str(d.get("dest", ""))
+    if not D.valid_name(name) or not B.STAMP_RE.fullmatch(stamp):
+        return _err("Elige la app y el respaldo")
+    if d.get("confirm") != name:
+        return _err("Escribe el nombre de la aplicación para confirmar")
+    if not B.ready(B.find_dest(B.load(), dest_id)):
+        return _err("Ese servidor de respaldos no existe", 404)
+    if D.lstat_kind(D.app_dir(name)) is not None:
+        return _err(f"Ya existe una app «{name}» en este servidor: usa «Ver respaldos → Restaurar»", 409)
+    if not D.compose_cmd():
+        return _err("Instala Docker y Docker Compose en este servidor antes de recuperar apps", 409)
+    if B._run_lock.locked():
+        return _err("Ya hay un respaldo o una restauración en curso; espera a que termine", 409)
+    B.run_async(B.recover, name, stamp, dest_id)
+    return jsonify({"ok": True})
 
 
 @appbackup_bp.route("/api/apps/<name>/list")

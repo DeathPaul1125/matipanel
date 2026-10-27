@@ -2,6 +2,18 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.8.0] - 2026-10-27
+
+### Añadido
+- 🆘 **Recuperación ante desastres** — en Respaldos de apps: con un MatiPanel recién instalado y el mismo servidor de respaldos, lista las apps respaldadas y las recrea con un clic: configuración original, base de datos y archivos restaurados **antes** del primer despliegue (las migraciones corren sobre los datos recuperados) y despliegue desde GitHub. Si el puerto está ocupado asigna otro; si algo falla deshace todo para reintentar. Guía paso a paso en la Ayuda.
+- 🔑 El respaldo de configuración incluye la clave de despliegue de GitHub, para volver a clonar repositorios privados en otro servidor.
+
+### Seguridad
+- La configuración recuperada se lee en memoria (sin extraer rutas ni enlaces del archivo) y su `app.json` se valida campo por campo antes de crear nada.
+
+### Cambiado
+- Un respaldo incompleto o borrado muestra un mensaje claro en vez del error de `cat`.
+
 ## [0.7.0] - 2026-10-27
 
 ### Añadido

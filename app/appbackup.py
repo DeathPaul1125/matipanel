@@ -21,6 +21,7 @@ fijada en backup_known_hosts la primera vez.
 ponytail: un hilo programador y un respaldo a la vez en todo el servidor; estado en un JSON.
 """
 import hashlib
+import io
 import json
 import os
 import re
@@ -29,6 +30,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -58,6 +60,11 @@ SMB_USER_RE = re.compile(r"\w[\w.@$ -]{0,99}")
 DOMAIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,99}")
 FILE_RE = re.compile(r"(db\.sql\.gz|db\.pgdump|config\.tar\.gz|vol-[a-z0-9_.-]{1,120}\.tar\.gz)")
 SCHEDULES = {"6h": "Cada 6 horas", "daily": "Diario", "weekly": "Semanal (domingo)"}
+# config.tar.gz: con esto se recrea la app en otro servidor (recuperación ante desastres). Incluye la clave
+# de despliegue: sin ella un repositorio privado no se podría volver a clonar.
+CONFIG_FILES = ("app.json", "env", "db.env", "secrets.json", "deploy_key", "deploy_key.pub", "known_hosts")
+CONFIG_MAX = 8 * 1024 * 1024
+DB_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,31}")
 DEFAULT_APP = {"enabled": True, "schedule": "daily", "time": "02:00", "keep": 14, "dest": ""}
 STEP_TIMEOUT = 4 * 3600
 CHUNK = 256 * 1024
@@ -585,7 +592,7 @@ def backup(name, trigger="manual"):
                                                 f"{work}/vol-{short}.tar.gz")
         _step(name, "Copiando la configuración (.env y credenciales)")
         d = D.app_dir(name)
-        items = [f for f in ("app.json", "env", "db.env", "secrets.json") if D.lstat_kind(d / f) == "file"]
+        items = [f for f in CONFIG_FILES if D.lstat_kind(d / f) == "file"]
         files["config.tar.gz"] = push(dest, ["tar", "-C", str(d), "-czf", "-", "--", *items], f"{work}/config.tar.gz")
         manifest = {"app": name, "created": stamp, "trigger": trigger, "kind": cfg.get("kind", "laravel"),
                     "database": cfg.get("database"), "db_name": D.db_name(cfg),
@@ -691,7 +698,12 @@ def manifest(dest, name, stamp):
     if not STAMP_RE.fullmatch(stamp):
         raise Fail("Respaldo inválido")
     with connected(dest):
-        out = rsh(dest, f"cat -- {q(base(dest) + '/' + name + '/' + stamp + '/manifest.json')}", timeout=30)
+        try:
+            out = rsh(dest, f"cat -- {q(base(dest) + '/' + name + '/' + stamp + '/manifest.json')}", timeout=30)
+        except Fail as e:
+            if "No such file" in str(e):
+                raise Fail(f"El respaldo {stamp} de «{name}» está incompleto o ya no existe (falta manifest.json)")
+            raise
     try:
         data = json.loads(out)
     except ValueError:
@@ -738,27 +750,7 @@ def restore(name, stamp, parts, dest_id=None):
             _step(name, "Deteniendo la aplicación: " + ", ".join(svcs))
             code, o, e = D._run(D.compose(name, "stop", "-t", "20", *svcs), timeout=180)
             stopped = code == 0
-        if "db" in parts:
-            if "db.sql.gz" in m["files"] and cfg.get("database") == "mariadb":
-                _step(name, "Restaurando la base de datos MariaDB")
-                pull(dest, f"{rdir}/db.sql.gz", ["docker", "exec", "-i", db_container(name), "sh", "-c",
-                                                 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot'], gunzip=True)
-            elif "db.pgdump" in m["files"] and cfg.get("database") == "postgres":
-                _step(name, "Restaurando la base de datos PostgreSQL")
-                pull(dest, f"{rdir}/db.pgdump", ["docker", "exec", "-i", db_container(name), "pg_restore", "-U",
-                                                 D.db_name(cfg), "-d", D.db_name(cfg), "--clean", "--if-exists", "--no-owner"])
-            else:
-                _log(name, "El respaldo no tiene una base de datos compatible con la configuración actual; se omite")
-        if "volumes" in parts:
-            for fname in [f for f in m["files"] if f.startswith("vol-")]:
-                short = fname[4:-7]
-                vol = f"{D.project_name(name)}_{short}"
-                mp = volume_mountpoint(vol, create=True)
-                if not mp:
-                    raise Fail(f"No se pudo preparar el volumen {vol}")
-                _step(name, f"Restaurando el volumen {short}")
-                _empty_dir(mp)
-                pull(dest, f"{rdir}/{fname}", ["tar", "-C", mp, "--numeric-owner", "-xzf", "-"])
+        _restore_data(dest, name, cfg, rdir, m, parts)
         _step(name, "Restauración terminada")
         return {"ok": True}
     except Exception as e:
@@ -773,6 +765,225 @@ def restore(name, stamp, parts, dest_id=None):
         if svcs and stopped:
             _step(name, "Levantando la aplicación")
             D._run(D.compose(name, "up", "-d", "--no-deps", *svcs), timeout=300)
+        with _lock:
+            _status.pop(name, None)
+        _run_lock.release()
+
+
+def _restore_data(dest, name, cfg, rdir, m, parts):
+    """Base de datos y/o volúmenes de un respaldo, con el contenedor de la base ya en marcha."""
+    if "db" in parts:
+        if "db.sql.gz" in m["files"] and cfg.get("database") == "mariadb":
+            _step(name, "Restaurando la base de datos MariaDB")
+            pull(dest, f"{rdir}/db.sql.gz", ["docker", "exec", "-i", db_container(name), "sh", "-c",
+                                             'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot'], gunzip=True)
+        elif "db.pgdump" in m["files"] and cfg.get("database") == "postgres":
+            _step(name, "Restaurando la base de datos PostgreSQL")
+            pull(dest, f"{rdir}/db.pgdump", ["docker", "exec", "-i", db_container(name), "pg_restore", "-U",
+                                             D.db_name(cfg), "-d", D.db_name(cfg), "--clean", "--if-exists", "--no-owner"])
+        else:
+            _log(name, "El respaldo no tiene una base de datos compatible con la configuración actual; se omite")
+    if "volumes" in parts:
+        for fname in [f for f in m["files"] if f.startswith("vol-")]:
+            short = fname[4:-7]
+            vol = f"{D.project_name(name)}_{short}"
+            mp = volume_mountpoint(vol, create=True)
+            if not mp:
+                raise Fail(f"No se pudo preparar el volumen {vol}")
+            _step(name, f"Restaurando el volumen {short}")
+            _empty_dir(mp)
+            pull(dest, f"{rdir}/{fname}", ["tar", "-C", mp, "--numeric-owner", "-xzf", "-"])
+
+
+# ── Recuperación ante desastres ──────────────────────────────────────────
+
+def remote_apps(dest):
+    """Apps con respaldos completos en un servidor. → [{name, backups: [stamps, del más nuevo], local}]"""
+    with connected(dest):
+        out = rsh(dest, f"cd -- {q(base(dest))} 2>/dev/null || exit 0; "
+                        "for d in */*/; do printf '%s\\n' \"${d%/}\"; done", timeout=60)
+    found = {}
+    for line in out.splitlines():
+        app, _, stamp = line.partition("/")
+        if D.valid_name(app) and STAMP_RE.fullmatch(stamp):  # sin .partial: solo respaldos terminados
+            found.setdefault(app, []).append(stamp)
+    local = set(D.list_apps())
+    return [{"name": a, "backups": sorted(v, reverse=True), "local": a in local} for a, v in sorted(found.items())]
+
+
+def read_config_archive(data):
+    """Archivos de config.tar.gz leídos en memoria: solo archivos normales con nombres conocidos
+    (ni rutas ni enlaces del archivo llegan al disco). → {nombre: bytes}"""
+    out = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+            for mem in tf:
+                if mem.isreg() and mem.name in CONFIG_FILES and mem.size <= CONFIG_MAX and mem.name not in out:
+                    out[mem.name] = tf.extractfile(mem).read()
+    except (tarfile.TarError, OSError, EOFError, zlib.error) as e:
+        raise Fail(f"config.tar.gz dañado: {e}")
+    return out
+
+
+def check_app_config(cfg, name):
+    """El app.json del respaldo viene de otro servidor: se valida como si lo escribiera un usuario. → error o ''."""
+    if not isinstance(cfg, dict):
+        return "app.json ilegible"
+    num = lambda v, lo, hi, kinds=(int,): type(v) in kinds and lo <= v <= hi  # noqa: E731
+    persist = cfg.get("persist") or []
+    exts = cfg.get("php_ext") or []
+    checks = (
+        ("name", cfg.get("name") == name),
+        ("repo", D.parse_repo(cfg.get("repo"))),
+        ("branch", D.valid_branch(cfg.get("branch"))),
+        ("kind", cfg.get("kind", "laravel") in D.KINDS),
+        ("database", cfg.get("database", "none") in D.DATABASES),
+        ("php", str(cfg.get("php")) in D.PHP_VERSIONS),
+        ("hostname", not cfg.get("hostname") or D.valid_hostname(cfg["hostname"])),
+        ("db_name", isinstance(D.db_name(cfg), str) and DB_NAME_RE.fullmatch(D.db_name(cfg))),
+        ("persist", isinstance(persist, list) and len(persist) <= D.MAX_PERSIST and all(D.valid_rel_path(x) for x in persist)),
+        ("docroot", not cfg.get("docroot") or D.valid_rel_path(cfg["docroot"])),
+        ("env_path", not cfg.get("env_path") or D.valid_rel_path(cfg["env_path"])),
+        ("migrate_cmd", not cfg.get("migrate_cmd") or D.valid_migrate_cmd(cfg["migrate_cmd"])),
+        ("php_ext", isinstance(exts, list) and all(isinstance(e, str) and D.PHP_EXT_RE.fullmatch(e) for e in exts)),
+        ("port", num(cfg.get("port"), *D.PORT_EDIT_RANGE)),
+        ("slot_base", num(cfg.get("slot_base"), *D.SLOT_RANGE)),
+        ("container_port", num(cfg.get("container_port", 8080), 1, 65535)),
+        ("mem_mb", num(cfg.get("mem_mb", 0), 0, 262144, (int, float))),
+        ("cpus", num(cfg.get("cpus", 0), 0, 256, (int, float))),
+    )
+    return next((f"campo «{k}» inválido" for k, ok in checks if not ok), "")
+
+
+def _read_remote(dest, path, cap=CONFIG_MAX + 1024 * 1024):
+    """Archivo pequeño del destino, en bytes (config.tar.gz)."""
+    try:
+        r = subprocess.run(remote(dest, f"head -c {int(cap)} -- {q(path)}"), capture_output=True, timeout=120,
+                           stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise Fail("El servidor de respaldos no respondió a tiempo")
+    if r.returncode != 0:
+        raise Fail("Lectura del servidor de respaldos falló: " +
+                   _ssh_error(r.stderr.decode(errors="replace"), r.returncode, dest))
+    return r.stdout
+
+
+def recover(name, stamp, dest_id):
+    """Recuperación ante desastres: recrea en este servidor una app que solo existe en los respaldos.
+
+    Orden: configuración → base de datos y volúmenes → despliegue. Así las migraciones del primer despliegue
+    corren sobre los datos recuperados (solo aplican las pendientes) y no sobre una base vacía.
+    Si algo falla se deshace todo lo creado, para poder reintentar con otro respaldo."""
+    dest = find_dest(load(), dest_id)
+    if not ready(dest):
+        raise Fail("Ese servidor de respaldos no existe")
+    if not D.valid_name(name) or not STAMP_RE.fullmatch(stamp):
+        raise Fail("Respaldo inválido")
+    if D.lstat_kind(D.app_dir(name)) is not None:
+        raise Fail(f"Ya existe una app «{name}» en este servidor: usa «Ver respaldos → Restaurar» o elimínala primero")
+    if not D.compose_cmd():
+        raise Fail("Instala Docker y Docker Compose en este servidor antes de recuperar apps")
+    if not _run_lock.acquire(blocking=False):
+        raise Fail("Ya hay un respaldo o una restauración en curso; espera a que termine")
+    with _lock:
+        _logs[name] = deque(maxlen=300)
+        _status[name] = {"busy": "recuperación", "step": "Preparando"}
+    rdir = f"{base(dest)}/{name}/{stamp}"
+    d = D.app_dir(name)
+    stack, created = ExitStack(), False
+    try:
+        _step(name, f"Recuperando «{name}» desde el respaldo {stamp} de «{dest['name']}»")
+        stack.enter_context(connected(dest))
+        m = manifest(dest, name, stamp)
+        if "config.tar.gz" not in m["files"]:
+            raise Fail("El respaldo no tiene la configuración de la app (config.tar.gz)")
+        _step(name, "Leyendo la configuración del respaldo")
+        files = read_config_archive(_read_remote(dest, f"{rdir}/config.tar.gz"))
+        try:
+            cfg = json.loads(files.get("app.json", b"").decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            cfg = None
+        err = check_app_config(cfg, name)
+        if err:
+            raise Fail(f"La configuración del respaldo no es válida ({err})")
+        try:
+            sec = json.loads(files["secrets.json"].decode("utf-8")) if "secrets.json" in files else {}
+        except (ValueError, UnicodeDecodeError):
+            sec = {}
+        sec = sec if isinstance(sec, dict) and all(isinstance(v, str) for v in sec.values()) else {}
+        # El estado de ejecución era del servidor anterior: aquí todavía no hay ninguna versión desplegada
+        cfg.update(draft=False, active_slot=None, slots={"blue": None, "green": None}, current=None, last_build_sha=None)
+        ports, bases = D.used_ports()
+        listening = D.listening_ports()
+        if cfg["port"] in ports | listening:
+            new = D.allocate_port(ports | listening)
+            if not new:
+                raise Fail("No quedan puertos libres")
+            _log(name, f"El puerto {cfg['port']} está ocupado en este servidor: la app usará el {new}")
+            cfg["port"] = new
+        if cfg["slot_base"] in bases or {cfg["slot_base"], cfg["slot_base"] + 1} & listening:
+            cfg["slot_base"] = D.allocate_slot_base(bases, listening)
+            if not cfg["slot_base"]:
+                raise Fail("No quedan puertos internos libres")
+
+        _step(name, "Creando la aplicación con su configuración original")
+        D._ensure_dir(D.BASE_DIR)
+        D._ensure_dir(d)
+        created = True
+        if cfg.get("database") in ("mariadb", "postgres") and not sec.get("db_password"):
+            sec.update(db_password=D.new_password(), db_root_password=D.new_password())
+            files.pop("db.env", None)  # credenciales nuevas: el db.env viejo ya no sirve
+        if cfg.get("database") in ("mariadb", "postgres") and "db.env" not in files:
+            sec.setdefault("db_root_password", D.new_password())  # la base parte de cero: root nuevo sirve
+        for f in ("env", "db.env", "deploy_key", "deploy_key.pub", "known_hosts"):
+            if f in files:
+                D.write_file(d / f, files[f])
+        sec.setdefault("webhook_secret", secrets.token_hex(24))
+        D.save_secrets(name, sec)
+        if "env" not in files:
+            D.write_env(name, D.default_env(cfg, sec))
+        if "db.env" not in files:
+            D.write_file(d / "db.env", D.db_env(cfg, sec))
+        if "deploy_key" not in files:
+            D.generate_key(name)
+            if D.is_ssh(cfg["repo"]):
+                _log(name, "AVISO: el respaldo no traía la clave de despliegue (es de una versión anterior del panel). "
+                           "Se generó una nueva: agrégala en GitHub (Settings → Deploy keys) y vuelve a desplegar. "
+                           "Clave pública: " + D.public_key(name))
+        elif "known_hosts" not in files:
+            D.write_file(d / "known_hosts", D.GITHUB_KNOWN_HOSTS)
+        D.save_config(name, cfg)
+        D.save_history(name, [])
+        D._ensure_dir(d / "deployments")
+        D._write_compose(name, cfg)
+
+        deps = D.dep_services(cfg)
+        if deps:
+            _step(name, "Levantando la base de datos: " + ", ".join(deps))
+            code, o, e = D._run(D.compose(name, "up", "-d", "--wait", *deps), timeout=600)
+            if code != 0:
+                raise Fail("docker compose up falló: " + (o + e).strip()[-400:])
+        _restore_data(dest, name, cfg, rdir, m, ("db", "volumes"))
+        dep, _ = D.enqueue(name, "manual")
+        update(lambda c: c["apps"].__setitem__(name, {**app_settings(c, name), "dest": dest["id"]}))
+        _step(name, f"Datos recuperados. Desplegando la app desde GitHub (rama {cfg['branch']}): "
+                    f"sigue el avance en Despliegues → {name}")
+        return {"ok": True, "deployment": dep["id"]}
+    except Exception as e:
+        msg = str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}"
+        _log(name, "ERROR: " + msg)
+        if created:
+            _log(name, "Se deshace la recuperación parcial (contenedores, volúmenes y carpeta) para poder reintentar")
+            try:
+                D.delete_app(name, volumes=True)
+            except Exception:
+                shutil.rmtree(d, ignore_errors=True)
+        raise Fail(msg)
+    finally:
+        try:
+            stack.close()
+        except Exception:
+            pass
         with _lock:
             _status.pop(name, None)
         _run_lock.release()
@@ -890,4 +1101,24 @@ if __name__ == "__main__":
     cfg = {"dests": [w, {"id": "abcd1234", "type": "ssh"}], "apps": {"a": {"dest": "abcd1234"}}, "state": {}}
     assert app_dest(cfg, "a")["id"] == "abcd1234" and app_dest(cfg, "b")["id"] == w["id"] and app_dest(cfg, "a", "zzzz") is None
     assert validate_app({"schedule": "daily", "dest": "nope"}, ["abcd1234"])[1]
+    # config.tar.gz manipulado: rutas, enlaces y nombres desconocidos no salen del archivo
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for nm, kind in (("app.json", tarfile.REGTYPE), ("../../etc/cron.d/x", tarfile.REGTYPE),
+                         ("env", tarfile.SYMTYPE), ("otro.txt", tarfile.REGTYPE)):
+            ti = tarfile.TarInfo(nm)
+            ti.type = kind
+            if kind == tarfile.SYMTYPE:
+                ti.linkname = "/etc/shadow"
+                tf.addfile(ti)
+            else:
+                ti.size = 2
+                tf.addfile(ti, io.BytesIO(b"{}"))
+    assert read_config_archive(buf.getvalue()) == {"app.json": b"{}"}
+    good = {"name": "app1", "repo": "https://github.com/o/r", "branch": "main", "php": "8.3", "port": 8081,
+            "slot_base": 20000, "kind": "php", "database": "mariadb", "persist": ["assets/uploads"]}
+    assert check_app_config(good, "app1") == ""
+    for k, v in (("name", "otra"), ("branch", "x;y"), ("repo", "file:///etc"), ("db_name", "a'b"), ("persist", ["../x"]),
+                 ("php", "5.6"), ("port", "8081"), ("hostname", "-x"), ("migrate_cmd", "sh -c x"), ("php_ext", ["a b"])):
+        assert check_app_config({**good, k: v}, "app1"), k
     print("ok")

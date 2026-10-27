@@ -50,6 +50,26 @@
     Si uno falla se reintenta a la hora y, si lo activaste, te llega un correo (<a href="{{ url_for('notify.index') }}">Notificaciones</a>).</p>
 </div>
 
+<div class="card" id="dr">
+  <div class="card-head"><h3>Recuperación ante desastres</h3>
+    <div class="ab-acts"><select class="input ab-in" id="dr-dest" title="Servidor de respaldos"></select>
+      <button class="btn btn-sm" onclick="drScan()">Buscar apps en el servidor</button></div></div>
+  <p class="small muted">Si este servidor se perdió: instala MatiPanel en uno nuevo, agrega arriba el mismo servidor de respaldos y recupera cada app.
+    Se recrea con su configuración original, se restauran la base de datos y los archivos, y se despliega desde GitHub.
+    <a href="{{ url_for('help.page', slug='57-respaldos-apps') }}#recuperacion-ante-desastres">Guía paso a paso</a></p>
+  <div id="dr-warn" class="flash flash-error" hidden></div>
+  <table class="lx" id="dr-table" data-table data-table-filter="off">
+    <thead><tr><th>Aplicación</th><th>Respaldos</th><th>Último respaldo</th><th>En este servidor</th><th data-nosort>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="5" class="muted center">Elige un servidor y pulsa «Buscar apps en el servidor»</td></tr></tbody>
+  </table>
+  <div id="dr-progress" hidden>
+    <h4>Recuperando <span class="mono" id="dr-name"></span></h4>
+    <div id="dr-busy" class="ab-busy" hidden></div>
+    <div id="dr-done"></div>
+    <pre class="terminal ab-log" id="dr-log">—</pre>
+  </div>
+</div>
+
 <div class="card" id="detail" hidden>
   <div class="card-head"><h3>Respaldos de <span class="mono" id="det-name"></span></h3>
     <div class="ab-acts"><select class="input ab-in" id="det-dest" title="Servidor de respaldos" onchange="loadList()"></select>
@@ -146,6 +166,7 @@ async function load() {
     : '<span class="muted">Aún no hay huellas fijadas.</span>';
   renderDests();
   renderApps();
+  fillDrDest();
   if (DETAIL) loadStatus();
 }
 
@@ -350,7 +371,7 @@ async function restoreDlg(name, stamp) {
   if (hasVol) fields.push({name: 'volumes', type: 'checkbox', label: 'Volúmenes de datos: ' + files.filter(f => f.startsWith('vol-')).map(f => f.slice(4, -7)).join(', ') + ' (se vacían y se reemplazan)', value: true});
   if (!fields.length) return ui.alert('Este respaldo no tiene base de datos ni volúmenes que restaurar.', {title: 'Nada que restaurar'});
   fields.push({name: 'confirm', label: `Escribe «${name}» para confirmar`, required: true});
-  const r = await ui.form({title: `Restaurar ${name} · ${fmtDate(new Date(stamp.replace(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, '$1-$2-$3T$4:$5:$6')) / 1000)}`,
+  const r = await ui.form({title: `Restaurar ${name} · ${fmtDate(stampTime(stamp))}`,
     text: `Desde «${destName}». La aplicación se detiene mientras se restaura y vuelve a arrancar al terminar. Los datos actuales que elijas se pierden.`,
     fields, confirmText: 'Restaurar', danger: true});
   if (!r) return;
@@ -365,6 +386,71 @@ async function deleteBackup(name, stamp) {
   const d = await postJSON(API + `apps/${encodeURIComponent(name)}/delete/${encodeURIComponent(stamp)}` + destQ(), {});
   if (!d.ok) return ui.alert(d.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
   loadList();
+}
+
+// ── Recuperación ante desastres ──
+const DEPLOY_URL = {{ url_for('deploy.detail', name='__APP__')|tojson }};
+const stampTime = s => new Date(s.replace(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, '$1-$2-$3T$4:$5:$6')) / 1000;
+let DR = [], DR_APP = null;
+function fillDrDest() {
+  const sel = $('dr-dest'), cur = sel.value;
+  sel.innerHTML = OV.dests.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('') || '<option value="">(sin servidores)</option>';
+  if (OV.dests.some(d => d.id === cur)) sel.value = cur;
+}
+async function drScan() {
+  const tb = $('dr-table').tBodies[0], dest = $('dr-dest').value;
+  if (!dest) return ui.alert('Agrega primero el servidor de respaldos en «Servidores de respaldo».', {title: 'Sin servidores'});
+  tb.innerHTML = '<tr><td colspan="5" class="muted center">Consultando el servidor de respaldos…</td></tr>';
+  const d = await getJSON(API + `dests/${encodeURIComponent(dest)}/apps`);
+  if (!d.ok) { tb.innerHTML = `<tr><td colspan="5" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  DR = d.apps;
+  $('dr-warn').hidden = d.docker;
+  $('dr-warn').textContent = d.docker ? '' : 'Docker y Docker Compose no están instalados en este servidor: instálalos antes de recuperar (Despliegues los instala).';
+  if (!DR.length) { tb.innerHTML = '<tr><td colspan="5" class="muted center">Este servidor no tiene respaldos de apps</td></tr>'; return; }
+  tb.innerHTML = DR.map(a => `<tr><td><b class="mono">${escapeHtml(a.name)}</b></td><td>${a.backups.length}</td>
+    <td data-sort="${stampTime(a.backups[0])}">${escapeHtml(fmtDate(stampTime(a.backups[0])))}</td>
+    <td>${a.local ? '<span class="pill ok">Ya existe</span>' : '<span class="pill mute">No existe</span>'}</td>
+    <td>${a.local ? '<span class="small muted">Usa «Ver respaldos → Restaurar»</span>'
+      : `<button class="btn btn-sm btn-primary" onclick="drRecover(${jsArg(a.name)})" ${d.docker ? '' : 'disabled'}>Recuperar…</button>`}</td></tr>`).join('');
+}
+async function drRecover(name) {
+  const a = DR.find(x => x.name === name), dest = $('dr-dest').value;
+  const r = await ui.form({title: `Recuperar ${name}`,
+    text: 'Se crea la app en este servidor con su configuración original (.env, credenciales, dominio, clave de despliegue), ' +
+          'se restauran su base de datos y sus archivos, y se despliega desde GitHub. Si algo falla, se deshace todo y puedes reintentar.',
+    fields: [{name: 'stamp', type: 'select', label: 'Respaldo', value: a.backups[0],
+              options: a.backups.map((s, i) => [s, fmtDate(stampTime(s)) + (i ? '' : ' (el más reciente)')])},
+             {name: 'confirm', label: `Escribe «${name}» para confirmar`, required: true}],
+    confirmText: 'Recuperar'});
+  if (!r) return;
+  const d = await postJSON(API + 'recover', {app: name, stamp: r.stamp, dest, confirm: r.confirm});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo iniciar', {title: 'Error', icon: 'error'});
+  ui.toast(`Recuperación de «${name}» iniciada`, 'info');
+  DR_APP = name; drWasBusy = true;
+  $('dr-progress').hidden = false; $('dr-name').textContent = name; $('dr-done').innerHTML = '';
+  $('dr-progress').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  setTimeout(drFollow, 500);
+}
+let drWasBusy = false;
+async function drFollow() {
+  const name = DR_APP;
+  if (!name) return;
+  const d = await getJSON(API + `apps/${encodeURIComponent(name)}/status`);
+  if (name !== DR_APP || !d.ok) return;
+  const busy = d.busy && d.busy.busy;
+  $('dr-busy').hidden = !busy;
+  if (busy) $('dr-busy').innerHTML = `<span class="led sm warn live"></span> ${escapeHtml(d.busy.step || '')}`;
+  $('dr-log').textContent = d.log.length ? d.log.join('\n') : '—';
+  $('dr-log').scrollTop = 1e9;
+  if (busy) return setTimeout(drFollow, 1500);
+  if (drWasBusy) {
+    drWasBusy = false;
+    const failed = d.log.some(l => l.includes('ERROR:'));
+    $('dr-done').innerHTML = failed || !d.exists
+      ? '<p><span class="pill err">Falló</span> Revisa el registro; no quedó nada a medias, puedes reintentar.</p>'
+      : `<p><span class="pill ok">Datos recuperados</span> La app se está desplegando: <a href="${escapeHtml(DEPLOY_URL.replace('__APP__', encodeURIComponent(name)))}">sigue el avance en Despliegues</a>.</p>`;
+    load(); drScan();
+  }
 }
 load();
 setInterval(load, 15000);

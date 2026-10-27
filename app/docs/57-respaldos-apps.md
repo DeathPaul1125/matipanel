@@ -8,7 +8,7 @@ Respalda automáticamente cada aplicación de [Despliegues](56-despliegues.md) �
 |---|---|
 | `db.sql.gz` / `db.pgdump` | Volcado completo de la base de datos de la app (MariaDB o PostgreSQL), consistente aunque la app esté en uso. |
 | `vol-<nombre>.tar.gz` | Cada volumen de datos: `storage` en Laravel o las **carpetas persistentes** en proyectos PHP (subidas, logs…). |
-| `config.tar.gz` | La configuración de la app en el panel: `.env`, credenciales de la base y ajustes, para poder recrearla. |
+| `config.tar.gz` | La configuración de la app en el panel: `.env`, credenciales de la base, ajustes y clave de despliegue de GitHub, para poder recrearla en otro servidor. |
 | `manifest.json` | Tamaño y huella SHA-256 de cada archivo. |
 
 Cada respaldo es una carpeta `<carpeta>/<app>/<AAAAMMDD-HHMMSS>/` en el servidor de respaldos (en Windows, `\\servidor\recurso\<carpeta>\<app>\<AAAAMMDD-HHMMSS>\`).
@@ -105,6 +105,50 @@ La app se detiene mientras se restaura y vuelve a arrancar al terminar; la base 
 > **Consejo:** Antes de restaurar algo importante, pulsa **Respaldar ahora**: así puedes volver al estado actual si te equivocas de respaldo.
 
 **Eliminar** borra un respaldo del servidor remoto.
+
+## Recuperación ante desastres
+
+Si este servidor se pierde (falla de disco, reinstalación, robo), las apps se recrean en un servidor nuevo a partir de sus respaldos: configuración, base de datos, archivos y código.
+
+### Antes de que pase (hazlo ya)
+
+- **Guarda fuera de este servidor** los datos del servidor de respaldos: IP, usuario y carpeta (Linux) o recurso, dominio, usuario y **contraseña** de la cuenta (Windows). Sin ellos no podrás conectar el panel nuevo.
+- **Respalda de nuevo cada app** después de actualizar a la versión 0.8.0 (**Respaldar ahora** o espera al respaldo programado). Desde esa versión el respaldo incluye la **clave de despliegue** de GitHub; con respaldos anteriores habrá que registrar una clave nueva en GitHub.
+- **Ensáyalo** de vez en cuando en un servidor de prueba: la recuperación no toca el servidor de respaldos, solo lee de él.
+
+### Paso a paso en el servidor nuevo
+
+1. Instala Debian y, si puedes, dale la **misma IP** que tenía el servidor perdido (así siguen funcionando los nombres internos, los accesos directos y el webhook de GitHub).
+2. Instala MatiPanel como la primera vez: `git clone https://github.com/DeathPaul1125/matipanel /tmp/matipanel && sudo bash /tmp/matipanel/scripts/install.sh <tu-usuario>`.
+3. En **Despliegues**, instala **Docker** y **Nginx** con sus botones.
+4. En **Respaldos de apps → Servidores de respaldo**, pulsa **Agregar servidor** con los mismos datos de antes.
+   - **Linux:** el panel nuevo tiene **otra clave SSH**. En el servidor de respaldos agrega la nueva: de los comandos de **Preparar el servidor de respaldos** basta con la línea `echo 'restrict ssh-ed25519 …' >> …/authorized_keys` (el usuario y la carpeta ya existen). Puedes borrar la línea de la clave vieja.
+   - **Windows:** la misma cuenta del dominio y su contraseña.
+   Pulsa **Probar**: debe decir **Correcta**.
+5. En **Recuperación ante desastres**, elige el servidor y pulsa **Buscar apps en el servidor**. Aparecen todas las apps que tienen respaldos, cuántos y la fecha del último.
+6. En cada app pulsa **Recuperar…**, elige el respaldo (por defecto el más reciente), escribe el nombre de la app y pulsa **Recuperar**. Se recupera una app a la vez.
+7. Sigue el registro. Cuando diga **Datos recuperados**, abre **sigue el avance en Despliegues**: la app se está compilando desde GitHub. Al terminar queda en línea.
+8. Comprueba que la app abre y tiene sus datos. Si la IP cambió, actualiza el DNS o el archivo `hosts` de los equipos que usan el nombre interno, y la URL del webhook en GitHub (**Settings → Webhooks**).
+
+### Qué hace «Recuperar»
+
+| Paso | Detalle |
+|---|---|
+| 1. Configuración | Recrea la app con su `app.json`, `.env`, credenciales de la base, secreto del webhook y clave de despliegue originales. El estado de ejecución del servidor viejo se descarta. Si su puerto ya está ocupado en el servidor nuevo, se le asigna otro (lo dice el registro). |
+| 2. Base de datos | Levanta solo el contenedor de la base y le carga el volcado del respaldo. |
+| 3. Archivos | Crea los volúmenes y restaura su contenido (subidas, `storage`, carpetas persistentes). |
+| 4. Despliegue | Pone en cola un despliegue normal desde GitHub. Las migraciones corren sobre los datos ya recuperados, así que solo aplican las que falten. Configura Nginx y el nombre interno. |
+| 5. Respaldos | La app queda respaldándose en el mismo servidor del que se recuperó. |
+
+> **Importante:** Se despliega el código **actual de la rama** en GitHub, no necesariamente el commit que estaba en línea al hacer el respaldo (`manifest.json` indica cuál era). Si la rama avanzó con cambios que no quieres, revierte en GitHub y vuelve a desplegar.
+
+Si algo falla durante la recuperación, se deshace todo lo creado (contenedores, volúmenes y carpeta de la app): revisa el registro, corrige la causa y vuelve a pulsar **Recuperar…**, o elige un respaldo anterior. Si la app ya existe en este servidor, usa **Ver respaldos → Restaurar…** en su lugar.
+
+Si el respaldo es de una versión anterior a la 0.8.0 y el repositorio es privado por SSH, el registro muestra una **clave de despliegue nueva**: agrégala en GitHub (**Settings → Deploy keys**) y pulsa **Desplegar** en la app.
+
+### Qué no recupera
+
+Esto recupera las **apps desplegadas**. La configuración del propio servidor y del panel se vuelve a hacer a mano: usuarios del sistema y su 2FA, firewall, notificaciones por correo, monitor de servicios, permisos del panel, stacks de Docker Compose, bases de datos del servidor (fuera de las apps) y respaldos de carpetas. Para esas carpetas usa [Respaldos](16-respaldos.md).
 
 ## Preguntas frecuentes
 

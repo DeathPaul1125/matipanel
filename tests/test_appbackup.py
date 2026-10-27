@@ -11,7 +11,7 @@ for n in ("pwd", "grp", "pty", "termios", "fcntl", "pam"):
     sys.modules[n] = types.ModuleType(n)
 from app import appbackup as B, deployer as D
 
-D.save_config("quetzal", {"name": "quetzal", "kind": "php", "database": "mariadb", "db_name": "laravel", "persist": ["assets/uploads"],
+D.save_config("quetzal", {"name": "quetzal", "repo": "git@github.com:DeathPaul1125/quetzal.git", "branch": "main", "php": "8.3", "kind": "php", "database": "mariadb", "db_name": "laravel", "persist": ["assets/uploads"],
                           "active_slot": "blue", "slot_base": 20000, "port": 8081, "draft": False, "current": {"sha": "af26625"}})
 D.write_env("quetzal", "DB_HOST=db\n")
 D.save_secrets("quetzal", {"db_password": "x"})
@@ -101,4 +101,51 @@ shutil.rmtree(ROOT + "/vol"); os.makedirs(ROOT + "/vol")
 B.restore("quetzal", r4["name"], ["volumes"], w["id"])
 assert open(ROOT + "/vol/sub/nota.txt").read() == "hola"
 assert mounts.count("mount") == mounts.count("umount") and not B._mounts
+
+# Recuperación ante desastres: el servidor se pierde y la app solo existe en los respaldos
+appd = ROOT + "/apps/quetzal"
+open(appd + "/deploy_key", "w").write("-----BEGIN OPENSSH PRIVATE KEY-----\nfalsa\n")
+open(appd + "/deploy_key.pub", "w").write("ssh-ed25519 AAAA matipanel-quetzal")
+r5 = B.backup("quetzal")
+sec_before = D.load_secrets("quetzal")
+env_before = D.read_env("quetzal")
+shutil.rmtree(appd, onerror=lambda f, p, e: (os.chmod(p, 0o600), f(p)))  # env.mount: solo lectura
+shutil.rmtree(ROOT + "/vol"); os.makedirs(ROOT + "/vol")
+found = {a["name"]: a for a in B.remote_apps(w)}
+assert found["quetzal"]["backups"][0] == r5["name"] and not found["quetzal"]["local"], found
+D.listening_ports = lambda: {8081}  # en el servidor nuevo ese puerto ya lo usa otro programa
+calls.clear()
+res = B.recover("quetzal", r5["name"], w["id"])
+cfg = D.load_config("quetzal")
+assert cfg and cfg["active_slot"] is None and not cfg["current"] and cfg["port"] != 8081 and cfg["kind"] == "php", cfg
+sec_after = D.load_secrets("quetzal")  # se conserva todo; solo se completa lo que faltaba (root, webhook)
+assert all(sec_after[k] == v for k, v in sec_before.items()) and D.read_env("quetzal") == env_before
+assert open(appd + "/deploy_key").read().startswith("-----BEGIN OPENSSH")  # el repositorio privado se puede clonar
+assert open(ROOT + "/vol/sub/nota.txt").read() == "hola"
+assert open(ROOT + "/docker.log", "rb").read().count(b"RESTORE:") >= 2
+ups = [c for c in calls if "up" in c and "--wait" in c]
+assert ups and ups[0][-1] == "db", calls  # la base se levanta y restaura ANTES del primer despliegue
+assert [q for q in D.queue_load() if q["app"] == "quetzal" and q["id"] == res["deployment"]]
+assert B.load()["apps"]["quetzal"]["dest"] == w["id"] and not B._run_lock.locked() and not B._mounts
+try:  # ya existe: no se pisa
+    B.recover("quetzal", r5["name"], w["id"])
+    raise AssertionError("debía negarse")
+except B.Fail as e:
+    assert "Ya existe" in str(e)
+
+# Un respaldo con app.json manipulado no crea nada
+bad = f"{ROOT}/smb/{w['id']}/MatiPanel/quetzal/{r5['name']}"
+shutil.rmtree(appd, onerror=lambda f, p, e: (os.chmod(p, 0o600), f(p)))  # env.mount: solo lectura
+import tarfile, io
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+    data = json.dumps({**cfg, "branch": "main; rm -rf /"}).encode()
+    ti = tarfile.TarInfo("app.json"); ti.size = len(data); tf.addfile(ti, io.BytesIO(data))
+open(bad + "/config.tar.gz", "wb").write(buf.getvalue())
+try:
+    B.recover("quetzal", r5["name"], w["id"])
+    raise AssertionError("debía rechazar el app.json")
+except B.Fail as e:
+    assert "branch" in str(e), e
+assert not os.path.exists(appd) and not B._run_lock.locked()
 print("appbackup ok")
