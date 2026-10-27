@@ -1348,6 +1348,9 @@ th.tbl-sortable:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ab-acts { display: flex; gap: 4px; flex-wrap: wrap; }
 .ab-sched { display: flex; gap: 4px; flex-wrap: wrap; }
 .ab-sched .ab-time { margin-left: 0; }
+details.ab-help { border-top: 1px solid var(--border); padding: 8px 0; }
+details.ab-help:first-of-type { border-top: none; padding-top: 0; }
+details.ab-help > summary { cursor: pointer; padding: 4px 0 8px; }
 
 /* ── Permisos del panel ── */
 .rl-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin: 10px 0 14px; }

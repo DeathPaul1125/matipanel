@@ -48,7 +48,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Discos** | Particiones y uso |
 | **Almacenamiento** | LVM (PV, VG, LV, snapshots), RAID con mdadm y cuotas de disco |
 | **Respaldos** | Respaldos `.tar.gz` de carpetas, descarga, restauración y programación con retención |
-| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otro servidor Linux por SSH**: programados, con retención, verificación SHA-256 y restauración |
+| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otros servidores: Linux por SSH o Windows/NAS por carpeta compartida con cuenta del AD** (varios a la vez, cada app elige el suyo): programados, con retención, verificación SHA-256 y restauración |
 | **Usuarios y grupos** | Crear/borrar usuarios, contraseñas, bloqueo, shells, grupos, membresías y **claves SSH** autorizadas |
 | **Permisos del panel** | Roles por usuario: administrador, solo lectura, módulos concretos o sin acceso |
 | **Seguridad del servidor** | Chequeo con semáforo (SSH, firewall, actualizaciones, reinicio pendiente, puertos, cuentas) con correcciones guiadas y gestión de fail2ban |

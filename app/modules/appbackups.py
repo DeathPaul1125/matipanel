@@ -25,6 +25,11 @@ def _app(name):
     return cfg if cfg and not cfg.get("draft") else None
 
 
+def _dest(name, dest_id=None):
+    """Servidor pedido en la petición o, si no se indica, el de la app."""
+    return B.app_dest(B.load(), name, str(dest_id) if dest_id else None)
+
+
 @appbackup_bp.route("/")
 @login_required
 def index():
@@ -45,42 +50,82 @@ def overview():
         if app.get("draft"):
             continue
         busy, _ = B.status(name)
+        dest = B.app_dest(cfg, name)
         apps.append({"name": name, "database": app.get("database", "none"), "deployed": bool(app.get("active_slot")),
-                     "volumes": [v.split("_", 1)[1] for v in B.app_volumes(app)],
+                     "volumes": [v.split("_", 1)[1] for v in B.app_volumes(app)], "dest": dest["id"] if dest else "",
                      "settings": B.app_settings(cfg, name), "state": cfg["state"].get(name) or {}, "busy": busy})
-    return jsonify({"dest": cfg["dest"], "configured": B.configured(cfg), "pubkey": B.public_key(),
-                    "fingerprints": B.fingerprints(), "apps": apps})
+    return jsonify({"dests": [B.public_dest(d) for d in cfg["dests"]], "configured": B.configured(cfg),
+                    "pubkey": B.public_key(), "fingerprints": B.fingerprints(), "apps": apps})
 
 
-@appbackup_bp.route("/api/dest", methods=["POST"])
+def _posted_dest():
+    """Servidor enviado por el formulario, validado (al editar conserva id y contraseña). → (dest, old, error)"""
+    data = request.get_json(silent=True) or {}
+    old = None
+    if data.get("id"):
+        old = B.find_dest(B.load(), str(data["id"]))
+        if not old:
+            return None, None, "Ese servidor de respaldos ya no existe"
+    d, err = B.validate_dest(data, old)
+    return d, old, err
+
+
+@appbackup_bp.route("/api/dests", methods=["POST"])
 @login_required
-def dest():
-    d, err = B.validate_dest(request.get_json(silent=True) or {})
+def dest_save():
+    d, old, err = _posted_dest()
     if err:
         return _err(err)
-    old = B.load()["dest"]
-    if (old.get("host"), old.get("port")) != (d["host"], d["port"]):
-        B.forget_host()  # otro servidor: se fija su huella en la próxima conexión
-    B.update(lambda c: c.__setitem__("dest", d))
+    if old and old["type"] == "ssh" and (old["type"], old["host"], old["port"]) != (d["type"], d["host"], d["port"]):
+        B.forget_host(old)  # otro servidor: se fija su huella en la próxima conexión
+
+    def put(c):
+        i = next((i for i, x in enumerate(c["dests"]) if x["id"] == d["id"]), None)
+        if i is None:
+            c["dests"].append(d)
+        else:
+            c["dests"][i] = d
+    B.update(put)
+    return jsonify({"ok": True, "id": d["id"]})
+
+
+@appbackup_bp.route("/api/dests/<dest_id>/delete", methods=["POST"])
+@login_required
+def dest_delete(dest_id):
+    old = B.find_dest(B.load(), dest_id)
+    if not old:
+        return _err("Ese servidor de respaldos ya no existe", 404)
+    B.forget_host(old)
+    B.update(lambda c: c.__setitem__("dests", [x for x in c["dests"] if x["id"] != dest_id]))
     return jsonify({"ok": True})
 
 
 @appbackup_bp.route("/api/test", methods=["POST"])
 @login_required
 def test():
-    cfg = B.load()
-    if not cfg["dest"]["host"]:
-        return _err("Guarda primero el servidor de respaldos")
+    # Prueba lo que está en el formulario (sin guardarlo) o, con solo {"id"}, el servidor guardado
+    data = request.get_json(silent=True) or {}
+    if set(data) == {"id"}:
+        d, err = B.find_dest(B.load(), str(data["id"])), ""
+        if not d:
+            return _err("Ese servidor de respaldos ya no existe", 404)
+    else:
+        d, _, err = _posted_dest()
+    if err:
+        return _err(err)
     try:
-        return jsonify({"ok": True, **B.test(cfg["dest"])})
+        return jsonify({"ok": True, **B.test(d)})
     except B.Fail as e:
         return _err(str(e), 502)
+    except OSError as e:
+        return _err(f"No se pudo preparar la conexión: {e}", 500)
 
 
 @appbackup_bp.route("/api/forget-host", methods=["POST"])
 @login_required
 def forget_host():
-    B.forget_host()
+    dest_id = str((request.get_json(silent=True) or {}).get("id") or "")
+    B.forget_host(B.find_dest(B.load(), dest_id) if dest_id else None)
     return jsonify({"ok": True})
 
 
@@ -89,7 +134,7 @@ def forget_host():
 def settings(name):
     if not _app(name):
         return _err("La aplicación no existe", 404)
-    s, err = B.validate_app(request.get_json(silent=True) or {})
+    s, err = B.validate_app(request.get_json(silent=True) or {}, [d["id"] for d in B.load()["dests"]])
     if err:
         return _err(err)
     B.update(lambda c: c["apps"].__setitem__(name, s))
@@ -101,8 +146,8 @@ def settings(name):
 def backup_now(name):
     if not _app(name):
         return _err("La aplicación no existe", 404)
-    if not B.configured():
-        return _err("Configura primero el servidor de respaldos")
+    if not B.ready(B.app_dest(B.load(), name)):
+        return _err("Configura primero un servidor de respaldos")
     if B._run_lock.locked():
         return _err("Ya hay un respaldo o una restauración en curso; espera a que termine", 409)
     B.run_async(B.backup, name, "manual")
@@ -123,11 +168,11 @@ def status(name):
 def remote_list(name):
     if not _app(name):
         return _err("La aplicación no existe", 404)
-    cfg = B.load()
-    if not B.configured(cfg):
-        return _err("Configura primero el servidor de respaldos")
+    dest = _dest(name, request.args.get("dest"))
+    if not dest:
+        return _err("Configura primero un servidor de respaldos")
     try:
-        return jsonify({"ok": True, "backups": B.list_remote(cfg["dest"], name)})
+        return jsonify({"ok": True, "backups": B.list_remote(dest, name), "dest": dest["id"]})
     except B.Fail as e:
         return _err(str(e), 502)
 
@@ -137,8 +182,11 @@ def remote_list(name):
 def manifest(name, stamp):
     if not _app(name):
         return _err("La aplicación no existe", 404)
+    dest = _dest(name, request.args.get("dest"))
+    if not dest:
+        return _err("Ese servidor de respaldos no existe", 404)
     try:
-        return jsonify({"ok": True, "manifest": B.manifest(B.load()["dest"], name, stamp)})
+        return jsonify({"ok": True, "manifest": B.manifest(dest, name, stamp)})
     except B.Fail as e:
         return _err(str(e), 502)
 
@@ -159,7 +207,10 @@ def restore(name):
         return _err("Ya hay un respaldo o una restauración en curso; espera a que termine", 409)
     if D.pending(name):
         return _err("Hay un despliegue en curso o en cola para esta app; espera a que termine", 409)
-    B.run_async(B.restore, name, stamp, parts)
+    dest = _dest(name, d.get("dest"))
+    if not dest:
+        return _err("Ese servidor de respaldos no existe", 404)
+    B.run_async(B.restore, name, stamp, parts, dest["id"])
     return jsonify({"ok": True})
 
 
@@ -168,8 +219,11 @@ def restore(name):
 def delete(name, stamp):
     if not _app(name):
         return _err("La aplicación no existe", 404)
+    dest = _dest(name, request.args.get("dest"))
+    if not dest:
+        return _err("Ese servidor de respaldos no existe", 404)
     try:
-        B.delete_remote(B.load()["dest"], name, stamp)
+        B.delete_remote(dest, name, stamp)
     except B.Fail as e:
         return _err(str(e), 502)
     return jsonify({"ok": True})

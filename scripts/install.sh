@@ -48,11 +48,11 @@ case "$FAMILY" in
     debian)
         apt-get update -qq
         apt-get install -y -qq python3 python3-venv python3-pip python3-dev \
-            build-essential openssl unzip zip
+            build-essential openssl unzip zip cifs-utils
         ;;
     rhel)
         if command -v dnf &>/dev/null; then PKG=dnf; else PKG=yum; fi
-        $PKG install -y -q python3 python3-pip python3-devel gcc openssl unzip zip
+        $PKG install -y -q python3 python3-pip python3-devel gcc openssl unzip zip cifs-utils
         ;;
     *)
         echo "⚠ Distro no soportada oficialmente. Instala manualmente:"

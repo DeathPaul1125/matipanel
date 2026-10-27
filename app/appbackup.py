@@ -1,4 +1,11 @@
-"""Respaldos de las apps desplegadas a otro servidor Linux por SSH.
+"""Respaldos de las apps desplegadas a otros servidores: Linux/Unix por SSH o Windows/NAS por SMB.
+
+Puede haber varios servidores de destino; cada app elige el suyo. Para SMB (carpeta compartida de
+Windows, con una cuenta del Active Directory) el recurso se monta con mount.cifs solo mientras dura
+la operación, en /run/matipanel-smb/<id>, y las MISMAS órdenes de shell que van por SSH se ejecutan
+ahí como «nobody» (setpriv): si el servidor presentara un enlace simbólico hacia este equipo, esas
+órdenes no pueden leer ni escribir nada de root. La contraseña se escribe a un archivo de
+credenciales 0600 solo durante el montaje (nunca en la línea de órdenes) y no vuelve al navegador.
 
 Cada respaldo es una carpeta <destino>/<app>/<AAAAMMDD-HHMMSS>/ en el servidor remoto con:
   db.sql.gz (MariaDB, mariadb-dump --databases --add-drop-database) o db.pgdump (PostgreSQL, pg_dump -Fc)
@@ -17,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -26,6 +34,7 @@ import threading
 import time
 import zlib
 from collections import deque
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -35,13 +44,21 @@ BASE = Path(os.environ.get("MATIPANEL_APPBACKUP_DIR", "/var/lib/matipanel"))
 CONFIG_PATH = BASE / "appbackup.json"
 KEY_PATH = BASE / "backup_key"
 KNOWN_HOSTS = BASE / "backup_known_hosts"
+MOUNT_ROOT = os.environ.get("MATIPANEL_SMB_MOUNTS", "/run/matipanel-smb")
+NOBODY = 65534
+TYPES = {"ssh": "Linux / Unix (SSH)", "smb": "Windows / NAS (SMB)"}
 STAMP_RE = re.compile(r"\d{8}-\d{6}")
+ID_RE = re.compile(r"[a-z0-9]{4,16}")
 HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
 USER_RE = re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
 PATH_RE = re.compile(r"/[A-Za-z0-9._/-]{1,200}")
+SHARE_RE = re.compile(r"\w[\w .$-]{0,79}")
+SMB_PART_RE = re.compile(r"\w[\w .-]{0,79}")
+SMB_USER_RE = re.compile(r"\w[\w.@$ -]{0,99}")
+DOMAIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,99}")
 FILE_RE = re.compile(r"(db\.sql\.gz|db\.pgdump|config\.tar\.gz|vol-[a-z0-9_.-]{1,120}\.tar\.gz)")
 SCHEDULES = {"6h": "Cada 6 horas", "daily": "Diario", "weekly": "Semanal (domingo)"}
-DEFAULT_APP = {"enabled": True, "schedule": "daily", "time": "02:00", "keep": 14}
+DEFAULT_APP = {"enabled": True, "schedule": "daily", "time": "02:00", "keep": 14, "dest": ""}
 STEP_TIMEOUT = 4 * 3600
 CHUNK = 256 * 1024
 
@@ -64,9 +81,13 @@ def load():
     except (OSError, ValueError):
         data = {}
     data = data if isinstance(data, dict) else {}
-    dest = data.get("dest") if isinstance(data.get("dest"), dict) else {}
-    return {"dest": {"host": dest.get("host", ""), "port": dest.get("port", 22), "user": dest.get("user", ""),
-                     "path": dest.get("path", "")},
+    dests = [d for d in data.get("dests") or [] if isinstance(d, dict) and d.get("type") in TYPES
+             and ID_RE.fullmatch(str(d.get("id", "")))] if isinstance(data.get("dests"), list) else []
+    old = data.get("dest")
+    if not dests and isinstance(old, dict) and old.get("host"):  # formato anterior: un solo servidor Linux
+        dests = [{"id": "principal", "name": old["host"], "type": "ssh", "host": old["host"], "port": old.get("port", 22),
+                  "user": old.get("user", ""), "path": old.get("path", "")}]
+    return {"dests": dests,
             "apps": data.get("apps") if isinstance(data.get("apps"), dict) else {},
             "state": data.get("state") if isinstance(data.get("state"), dict) else {}}
 
@@ -98,26 +119,87 @@ def app_settings(cfg, name):
     return s
 
 
-def validate_dest(d):
-    host, user, path = str(d.get("host", "")).strip(), str(d.get("user", "")).strip(), str(d.get("path", "")).strip().rstrip("/")
+def validate_dest(d, old=None):
+    """Normaliza un servidor de destino. `old`: el guardado (al editar), conserva id y contraseña."""
+    kind = d.get("type", "ssh")
+    if kind not in TYPES:
+        return None, "Tipo de servidor inválido"
+    host = str(d.get("host", "")).strip()
     try:
-        port = int(d.get("port") if d.get("port") not in (None, "") else 22)
+        port = int(d.get("port") if d.get("port") not in (None, "") else (22 if kind == "ssh" else 445))
     except (TypeError, ValueError):
         return None, "Puerto inválido"
     if not HOST_RE.fullmatch(host):
         return None, "Servidor inválido (IP o nombre)"
-    if not USER_RE.fullmatch(user):
-        return None, "Usuario inválido"
     if not 1 <= port <= 65535:
         return None, "Puerto inválido"
-    if not PATH_RE.fullmatch(path) or any(p in (".", "..") for p in path.split("/")[1:]) or path.count("/") < 2:
-        return None, "Carpeta inválida: ruta absoluta de al menos dos niveles, p. ej. /srv/respaldos/matipanel"
-    return {"host": host, "port": port, "user": user, "path": path}, ""
+    name = " ".join("".join(c for c in str(d.get("name") or "") if c.isprintable()).split())[:60] or host
+    out = {"id": old["id"] if old else secrets.token_hex(4), "name": name, "type": kind, "host": host, "port": port}
+    if kind == "ssh":
+        user, path = str(d.get("user", "")).strip(), str(d.get("path", "")).strip().rstrip("/")
+        if not USER_RE.fullmatch(user):
+            return None, "Usuario inválido"
+        if not PATH_RE.fullmatch(path) or any(p in (".", "..") for p in path.split("/")[1:]) or path.count("/") < 2:
+            return None, "Carpeta inválida: ruta absoluta de al menos dos niveles, p. ej. /srv/respaldos/matipanel"
+        out.update(user=user, path=path)
+        return out, ""
+    share = str(d.get("share", "")).strip().strip("\\/")
+    if not SHARE_RE.fullmatch(share) or share.endswith((" ", ".")):
+        return None, "Recurso compartido inválido: el nombre de la carpeta compartida, p. ej. Respaldos"
+    parts = [p for p in str(d.get("path", "")).replace("\\", "/").strip().split("/") if p]
+    if len(parts) > 8 or any(not SMB_PART_RE.fullmatch(p) or p.endswith((" ", ".")) for p in parts):
+        return None, "Carpeta inválida: subcarpetas dentro del recurso, p. ej. MatiPanel o Apps\\Produccion"
+    user, domain = str(d.get("user", "")).strip(), str(d.get("domain", "")).strip()
+    if "\\" in user:  # DOMINIO\usuario
+        domain, user = user.split("\\", 1)
+    if not SMB_USER_RE.fullmatch(user):
+        return None, "Usuario inválido (usuario, DOMINIO\\usuario o usuario@dominio)"
+    if domain and not DOMAIN_RE.fullmatch(domain):
+        return None, "Dominio inválido (p. ej. SENABED o senabed.local)"
+    pw = str(d.get("password") or "")
+    if not pw and old and old.get("type") == "smb":
+        pw = old.get("password", "")
+    if not pw:
+        return None, "Escribe la contraseña de la cuenta"
+    if len(pw) > 256 or any(c in pw for c in "\r\n\0"):
+        return None, "Contraseña inválida"
+    out.update(share=share, path="".join("/" + p for p in parts), domain=domain, user=user, password=pw,
+               encrypt=bool(d.get("encrypt", True)))
+    return out, ""
 
 
-def validate_app(d):
+def public_dest(d):
+    """Lo que ve el navegador: nunca la contraseña."""
+    p = {k: v for k, v in d.items() if k != "password"}
+    if d["type"] == "smb":
+        p["has_password"] = bool(d.get("password"))
+    return p
+
+
+def describe(d):
+    if d["type"] == "smb":
+        who = (d["domain"] + "\\" if d.get("domain") else "") + d["user"]
+        return f"\\\\{d['host']}\\{d['share']}{d['path'].replace('/', chr(92))} ({who})"
+    return f"{d['user']}@{d['host']}:{d['path']}"
+
+
+def find_dest(cfg, dest_id):
+    return next((d for d in cfg["dests"] if d["id"] == dest_id), None)
+
+
+def app_dest(cfg, name, dest_id=None):
+    """Servidor de una app: el pedido (`dest_id`), el elegido en su programación o el primero."""
+    if dest_id:
+        return find_dest(cfg, dest_id)
+    return find_dest(cfg, app_settings(cfg, name)["dest"]) or (cfg["dests"][0] if cfg["dests"] else None)
+
+
+def validate_app(d, dest_ids=()):
     s = dict(DEFAULT_APP)
     s["enabled"] = bool(d.get("enabled", True))
+    s["dest"] = str(d.get("dest") or "")
+    if s["dest"] and s["dest"] not in dest_ids:
+        return None, "Servidor de respaldo inválido"
     if d.get("schedule") not in SCHEDULES:
         return None, "Programación inválida"
     s["schedule"] = d["schedule"]
@@ -134,8 +216,12 @@ def validate_app(d):
     return s, ""
 
 
+def ready(dest):
+    return bool(dest) and (dest["type"] == "smb" or KEY_PATH.exists())
+
+
 def configured(cfg=None):
-    return bool((cfg or load())["dest"]["host"]) and KEY_PATH.exists()
+    return any(ready(d) for d in (cfg or load())["dests"])
 
 
 # ── SSH ──────────────────────────────────────────────────────────────────
@@ -165,15 +251,36 @@ def ssh(dest, remote_cmd):
             "-p", str(int(dest["port"])), f"{dest['user']}@{dest['host']}", remote_cmd]
 
 
+def _local(cmd):
+    """Orden sobre el recurso SMB montado, sin privilegios (ver el docstring del módulo)."""
+    return ["setpriv", f"--reuid={NOBODY}", f"--regid={NOBODY}", "--clear-groups", "--no-new-privs", "sh", "-c", cmd]
+
+
+def remote(dest, cmd):
+    return _local(cmd) if dest["type"] == "smb" else ssh(dest, cmd)
+
+
+def base(dest):
+    """Carpeta raíz de los respaldos tal como la ven las órdenes de `remote`."""
+    return f"{MOUNT_ROOT}/{dest['id']}{dest['path']}" if dest["type"] == "smb" else dest["path"]
+
+
 def rsh(dest, remote_cmd, timeout=120):
-    code, out, err = D._run(ssh(dest, remote_cmd), timeout=timeout)
+    code, out, err = D._run(remote(dest, remote_cmd), timeout=timeout)
     if code != 0:
-        raise Fail(_ssh_error(err or out, code))
+        raise Fail(_ssh_error(err or out, code, dest))
     return out
 
 
-def _ssh_error(text, code):
+def _ssh_error(text, code, dest=None):
     text = (text or "").strip()
+    if dest and dest["type"] == "smb":
+        hints = [("Permission denied", "la cuenta no tiene permiso de escritura en la carpeta compartida (permisos del recurso y NTFS)"),
+                 ("No space left", "la carpeta compartida no tiene espacio libre"),
+                 ("Host is down", "se perdió la conexión con el servidor Windows")]
+        hint = next((h for k, h in hints if k in text), "")
+        last = text.splitlines()[-1] if text else f"terminó con código {code}"
+        return (last + (f" — {hint}" if hint else ""))[:500]
     hints = [("Permission denied", "el servidor rechazó la clave: agrega la clave pública en ~/.ssh/authorized_keys del usuario"),
              ("REMOTE HOST IDENTIFICATION HAS CHANGED", "la huella del servidor cambió; si es correcto, bórrala con «Olvidar huella»"),
              ("Connection refused", "el servidor no acepta conexiones SSH en ese puerto"),
@@ -195,20 +302,116 @@ def fingerprints():
     return [ln.strip() for ln in out.splitlines() if ln.strip()] if code == 0 else []
 
 
-def forget_host():
-    try:
-        KNOWN_HOSTS.unlink()
-    except FileNotFoundError:
-        pass
+def forget_host(dest=None):
+    """Olvida la huella de un servidor SSH (o todas, sin `dest`)."""
+    if dest is None:
+        try:
+            KNOWN_HOSTS.unlink()
+        except FileNotFoundError:
+            pass
+    elif dest["type"] == "ssh" and KNOWN_HOSTS.exists():
+        host = dest["host"] if int(dest["port"]) == 22 else f"[{dest['host']}]:{int(dest['port'])}"
+        D._run(["ssh-keygen", "-q", "-R", host, "-f", str(KNOWN_HOSTS)], timeout=10)
 
 
 def test(dest):
-    ensure_key()
-    out = rsh(dest, f"mkdir -p -- {q(dest['path'])} && test -w {q(dest['path'])} && df -Pk -- {q(dest['path'])} | tail -1",
-              timeout=40)
+    if dest["type"] == "ssh":
+        ensure_key()
+    b = q(base(dest))
+    probe = q(base(dest) + "/.matipanel-prueba")
+    with connected(dest):  # escribe y borra un archivo: comprueba el permiso real, no solo el que se ve
+        out = rsh(dest, f"mkdir -p -- {b} && touch -- {probe} && rm -f -- {probe} && df -Pk -- {b} | tail -1", timeout=40)
     parts = out.split()
     free = int(parts[3]) * 1024 if len(parts) >= 4 and parts[3].isdigit() else None
-    return {"free": free, "fingerprints": fingerprints()}
+    return {"free": free, "fingerprints": fingerprints() if dest["type"] == "ssh" else []}
+
+
+# ── SMB (Windows / NAS) ──────────────────────────────────────────────────
+
+_mounts = {}                          # punto de montaje → operaciones que lo usan
+_mount_lock = threading.RLock()
+
+
+@contextmanager
+def connected(dest):
+    """Monta el recurso SMB mientras dura el bloque (anidable). Con SSH no hace nada."""
+    if dest["type"] != "smb":
+        yield
+        return
+    mp = f"{MOUNT_ROOT}/{dest['id']}"
+    with _mount_lock:
+        if not _mounts.get(mp):
+            _mount(dest, mp)
+        _mounts[mp] = _mounts.get(mp, 0) + 1
+    try:
+        yield
+    finally:
+        with _mount_lock:
+            _mounts[mp] -= 1
+            if not _mounts[mp]:
+                del _mounts[mp]
+                _umount(mp)
+
+
+def _mount(dest, mp):
+    if not shutil.which("mount.cifs"):
+        raise Fail("Falta cifs-utils para conectar con carpetas compartidas de Windows: instálalo en Paquetes "
+                   "o vuelve a ejecutar el instalador del panel")
+    os.makedirs(MOUNT_ROOT, exist_ok=True)
+    os.chmod(MOUNT_ROOT, 0o711)  # «nobody» puede atravesarla para llegar a su montaje, no listarla
+    if os.path.ismount(mp):      # resto de un reinicio del panel a mitad de un respaldo
+        _umount(mp)
+    os.makedirs(mp, mode=0o700, exist_ok=True)
+    BASE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cred = BASE / f".smb-{dest['id']}.cred"
+    try:
+        os.unlink(cred)
+    except FileNotFoundError:
+        pass
+    fd = os.open(cred, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(f"username={dest['user']}\npassword={dest['password']}\n" + (f"domain={dest['domain']}\n" if dest.get("domain") else ""))
+    opts = [f"credentials={cred}", f"port={int(dest['port'])}", f"uid={NOBODY}", f"gid={NOBODY}", "forceuid", "forcegid",
+            "file_mode=0600", "dir_mode=0700", "nosuid", "nodev", "noexec", "soft", "echo_interval=15"]
+    if dest.get("encrypt", True):
+        opts.append("seal")  # cifrado SMB3 de punta a punta
+    try:
+        code, out, err = D._run(["mount", "-t", "cifs", "-o", ",".join(opts), f"//{dest['host']}/{dest['share']}", mp], timeout=45)
+    finally:
+        os.unlink(cred)
+    if code != 0:
+        try:
+            os.rmdir(mp)
+        except OSError:
+            pass
+        raise Fail(_smb_error(err or out, code))
+
+
+def _umount(mp):
+    if D._run(["umount", "--", mp], timeout=60)[0] != 0:
+        D._run(["umount", "-l", "--", mp], timeout=30)
+    try:
+        os.rmdir(mp)
+    except OSError:
+        pass
+
+
+def _smb_error(text, code):
+    text = (text or "").strip()
+    hints = {"13": "usuario, contraseña o dominio incorrectos, o la cuenta no tiene acceso al recurso compartido",
+             "2": "no existe ese recurso compartido en el servidor (revisa el nombre)",
+             "6": "no existe ese recurso compartido en el servidor (revisa el nombre)",
+             "95": "el servidor no admite SMB3 cifrado: desmarca «Cifrar la conexión» (servidores antiguos o NAS)",
+             "111": "el servidor rechazó la conexión en ese puerto (¿compartir archivos activado? ¿firewall?)",
+             "112": "el servidor no responde (¿apagado o firewall en el puerto 445?)",
+             "113": "no hay ruta al servidor", "115": "no hay respuesta del servidor (¿IP, puerto o firewall?)",
+             "22": "datos rechazados: revisa el dominio y el usuario"}
+    m = re.search(r"mount error\((\d+)\)", text)
+    hint = hints.get(m.group(1), "") if m else ""
+    if "unknown filesystem type" in text or "wrong fs type" in text:
+        hint = "falta el soporte CIFS: instala cifs-utils"
+    last = next((ln for ln in text.splitlines() if "mount error" in ln), text.splitlines()[-1] if text else f"mount terminó con código {code}")
+    return ("No se pudo conectar a la carpeta compartida: " + last + (f" — {hint}" if hint else ""))[:500]
 
 
 # ── Transferencia ────────────────────────────────────────────────────────
@@ -227,11 +430,11 @@ def _killall(*procs):
 
 
 def push(dest, producer, remote_path, gzip_it=False, timeout=STEP_TIMEOUT):
-    """Ejecuta `producer` y manda su salida a `remote_path` por SSH. → (bytes, sha256). Lanza Fail."""
+    """Ejecuta `producer` y manda su salida a `remote_path` en el destino. → (bytes, sha256). Lanza Fail."""
     perr = tempfile.TemporaryFile()
     serr = tempfile.TemporaryFile()
     p = _popen(producer, stdout=subprocess.PIPE, stderr=perr, stdin=subprocess.DEVNULL)
-    s = _popen(ssh(dest, f"cat > {q(remote_path)}"), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=serr)
+    s = _popen(remote(dest, f"cat > {q(remote_path)}"), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=serr)
     timer = threading.Timer(timeout, _killall, (p, s))
     timer.start()
     h, size = hashlib.sha256(), 0
@@ -260,15 +463,15 @@ def push(dest, producer, remote_path, gzip_it=False, timeout=STEP_TIMEOUT):
         raise Fail(f"{os.path.basename(producer[0])} falló ({pc}): " + perr.read().decode(errors="replace").strip()[-400:])
     if sc != 0:
         serr.seek(0)
-        raise Fail("Envío por SSH falló: " + _ssh_error(serr.read().decode(errors="replace"), sc))
+        raise Fail("Envío al servidor de respaldos falló: " + _ssh_error(serr.read().decode(errors="replace"), sc, dest))
     return size, h.hexdigest()
 
 
 def pull(dest, remote_path, consumer, gunzip=False, timeout=STEP_TIMEOUT):
-    """Trae `remote_path` por SSH y lo entrega a la entrada de `consumer`. Lanza Fail."""
+    """Trae `remote_path` del destino y lo entrega a la entrada de `consumer`. Lanza Fail."""
     serr = tempfile.TemporaryFile()
     cerr = tempfile.TemporaryFile()
-    s = _popen(ssh(dest, f"cat -- {q(remote_path)}"), stdout=subprocess.PIPE, stderr=serr, stdin=subprocess.DEVNULL)
+    s = _popen(remote(dest, f"cat -- {q(remote_path)}"), stdout=subprocess.PIPE, stderr=serr, stdin=subprocess.DEVNULL)
     c = _popen(consumer, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=cerr)
     timer = threading.Timer(timeout, _killall, (s, c))
     timer.start()
@@ -291,7 +494,7 @@ def pull(dest, remote_path, consumer, gunzip=False, timeout=STEP_TIMEOUT):
         _killall(s, c)
     if sc != 0:
         serr.seek(0)
-        raise Fail("Lectura por SSH falló: " + _ssh_error(serr.read().decode(errors="replace"), sc))
+        raise Fail("Lectura del servidor de respaldos falló: " + _ssh_error(serr.read().decode(errors="replace"), sc, dest))
     if cc != 0:
         cerr.seek(0)
         raise Fail(f"{os.path.basename(consumer[0])} falló ({cc}): " + cerr.read().decode(errors="replace").strip()[-600:])
@@ -337,9 +540,9 @@ def _step(name, text):
 def backup(name, trigger="manual"):
     """Respalda una app. → dict con el resultado. Lanza Fail si algo falla (y deja estado y aviso)."""
     cfg_all = load()
-    dest = cfg_all["dest"]
-    if not configured(cfg_all):
-        raise Fail("Configura primero el servidor de respaldos")
+    dest = app_dest(cfg_all, name)
+    if not ready(dest):
+        raise Fail("Configura primero un servidor de respaldos")
     cfg = D.load_config(name)
     if not cfg or cfg.get("draft"):
         raise Fail("La aplicación no existe")
@@ -350,11 +553,14 @@ def backup(name, trigger="manual"):
         _status[name] = {"busy": "respaldo", "step": "Preparando"}
     t0 = time.time()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    app_path = f"{dest['path']}/{name}"
+    app_path = f"{base(dest)}/{name}"
     work = f"{app_path}/{stamp}.partial"
     files = {}
+    stack, linked = ExitStack(), False
     try:
-        _step(name, f"Respaldo de «{name}» ({trigger}) hacia {dest['user']}@{dest['host']}:{work}")
+        _step(name, f"Respaldo de «{name}» ({trigger}) hacia «{dest['name']}»: {describe(dest)}")
+        stack.enter_context(connected(dest))
+        linked = True
         # restos de respaldos interrumpidos (solo hay uno a la vez), luego la carpeta de trabajo
         rsh(dest, f"mkdir -p -- {q(app_path)} && rm -rf -- {q(app_path)}/*.partial && mkdir -- {q(work)}")
         if cfg.get("database") == "mariadb":
@@ -395,27 +601,35 @@ def backup(name, trigger="manual"):
         rsh(dest, f"mv -- {q(work)} {q(app_path + '/' + stamp)}")
         keep = app_settings(cfg_all, name)["keep"]
         removed = prune_remote(dest, name, keep)
+        stack.close()
         total = sum(v[0] for v in files.values())
         _step(name, f"Listo: {stamp} ({_human(total)}, {round(time.time() - t0)} s)" +
               (f"; se borraron {len(removed)} respaldos antiguos" if removed else ""))
         result = {"ok": True, "name": stamp, "size": total, "seconds": round(time.time() - t0)}
         update(lambda c: c["state"].__setitem__(name, {"last_t": time.time(), "last_ok": True, "last_error": "",
-                                                       "last_name": stamp, "last_size": total, "trigger": trigger}))
+                                                       "last_name": stamp, "last_size": total, "trigger": trigger,
+                                                       "dest_name": dest["name"]}))
         _notify(True, name, f"Respaldo {stamp}: {_human(total)} en {round(time.time() - t0)} s "
-                            f"hacia {dest['host']}:{app_path}.")
+                            f"hacia «{dest['name']}» ({describe(dest)}).")
         return result
     except Exception as e:
         msg = str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}"
         _log(name, "ERROR: " + msg)
-        try:
-            rsh(dest, f"rm -rf -- {q(work)}", timeout=60)
-        except Fail:
-            pass
+        if linked:
+            try:
+                rsh(dest, f"rm -rf -- {q(work)}", timeout=60)
+            except Fail:
+                pass
         update(lambda c: c["state"].__setitem__(name, {**(c["state"].get(name) or {}), "last_t": time.time(),
-                                                       "last_ok": False, "last_error": msg[:500], "trigger": trigger}))
+                                                       "last_ok": False, "last_error": msg[:500], "trigger": trigger,
+                                                       "dest_name": dest["name"]}))
         _notify(False, name, msg)
         raise Fail(msg)
     finally:
+        try:
+            stack.close()
+        except Exception:
+            pass
         with _lock:
             _status.pop(name, None)
         _run_lock.release()
@@ -443,10 +657,11 @@ def _human(n):
 
 def list_remote(dest, name):
     """Respaldos completos de una app en el servidor remoto, del más nuevo al más viejo."""
-    app_path = f"{dest['path']}/{name}"
-    out = rsh(dest, f"cd -- {q(app_path)} 2>/dev/null || exit 0; for d in */; do d=${{d%/}}; "
+    app_path = f"{base(dest)}/{name}"
+    with connected(dest):
+        out = rsh(dest, f"cd -- {q(app_path)} 2>/dev/null || exit 0; for d in */; do d=${{d%/}}; "
                     f"case $d in *.partial) continue;; esac; printf '%s\\t' \"$d\"; du -sk -- \"$d\" | cut -f1; done",
-              timeout=60)
+                  timeout=60)
     items = []
     for line in out.splitlines():
         stamp, _, kb = line.partition("\t")
@@ -459,21 +674,24 @@ def list_remote(dest, name):
 def prune_remote(dest, name, keep):
     old = [b["name"] for b in list_remote(dest, name)][keep:]
     if old:
-        app_path = f"{dest['path']}/{name}"
-        rsh(dest, "rm -rf -- " + " ".join(q(f"{app_path}/{s}") for s in old), timeout=300)
+        app_path = f"{base(dest)}/{name}"
+        with connected(dest):
+            rsh(dest, "rm -rf -- " + " ".join(q(f"{app_path}/{s}") for s in old), timeout=300)
     return old
 
 
 def delete_remote(dest, name, stamp):
     if not STAMP_RE.fullmatch(stamp):
         raise Fail("Respaldo inválido")
-    rsh(dest, f"rm -rf -- {q(dest['path'] + '/' + name + '/' + stamp)}", timeout=300)
+    with connected(dest):
+        rsh(dest, f"rm -rf -- {q(base(dest) + '/' + name + '/' + stamp)}", timeout=300)
 
 
 def manifest(dest, name, stamp):
     if not STAMP_RE.fullmatch(stamp):
         raise Fail("Respaldo inválido")
-    out = rsh(dest, f"cat -- {q(dest['path'] + '/' + name + '/' + stamp + '/manifest.json')}", timeout=30)
+    with connected(dest):
+        out = rsh(dest, f"cat -- {q(base(dest) + '/' + name + '/' + stamp + '/manifest.json')}", timeout=30)
     try:
         data = json.loads(out)
     except ValueError:
@@ -493,10 +711,11 @@ def _empty_dir(mp):
             os.unlink(e.path)
 
 
-def restore(name, stamp, parts):
+def restore(name, stamp, parts, dest_id=None):
     """parts ⊆ {"db", "volumes"}. Detiene la app, restaura y la vuelve a levantar."""
-    cfg_all = load()
-    dest = cfg_all["dest"]
+    dest = app_dest(load(), name, dest_id)
+    if not ready(dest):
+        raise Fail("Ese servidor de respaldos no existe")
     cfg = D.load_config(name)
     if not cfg or cfg.get("draft"):
         raise Fail("La aplicación no existe")
@@ -508,11 +727,13 @@ def restore(name, stamp, parts):
     with _lock:
         _logs[name] = deque(maxlen=300)
         _status[name] = {"busy": "restauración", "step": "Preparando"}
-    rdir = f"{dest['path']}/{name}/{stamp}"
+    rdir = f"{base(dest)}/{name}/{stamp}"
     svcs = D.app_services(cfg)
     stopped = False
+    stack = ExitStack()
     try:
-        _step(name, f"Restaurando «{name}» desde el respaldo {stamp}")
+        _step(name, f"Restaurando «{name}» desde el respaldo {stamp} de «{dest['name']}»")
+        stack.enter_context(connected(dest))
         if svcs:
             _step(name, "Deteniendo la aplicación: " + ", ".join(svcs))
             code, o, e = D._run(D.compose(name, "stop", "-t", "20", *svcs), timeout=180)
@@ -545,6 +766,10 @@ def restore(name, stamp, parts):
         _log(name, "ERROR: " + msg)
         raise Fail(msg)
     finally:
+        try:
+            stack.close()
+        except Exception:
+            pass
         if svcs and stopped:
             _step(name, "Levantando la aplicación")
             D._run(D.compose(name, "up", "-d", "--no-deps", *svcs), timeout=300)
@@ -649,4 +874,20 @@ if __name__ == "__main__":
     assert FILE_RE.fullmatch("vol-storage.tar.gz") and not FILE_RE.fullmatch("../x") and not FILE_RE.fullmatch("vol-a/b.tar.gz")
     cmd = ssh({"host": "10.0.0.9", "port": 22, "user": "respaldos", "path": "/srv/r"}, "true")
     assert cmd[-2] == "respaldos@10.0.0.9" and "BatchMode=yes" in cmd and f"UserKnownHostsFile={KNOWN_HOSTS}" in cmd
+    # Windows / SMB con cuenta del AD
+    w, err = validate_dest({"type": "smb", "name": "Windows", "host": "srv-win01", "share": "Respaldos", "path": "\\MatiPanel\\Apps Prod\\",
+                            "user": "SENABED\\svc-respaldos", "password": "p,a=s s"})
+    assert not err and w["domain"] == "SENABED" and w["user"] == "svc-respaldos" and w["path"] == "/MatiPanel/Apps Prod", (w, err)
+    assert w["port"] == 445 and w["encrypt"] and ID_RE.fullmatch(w["id"]) and "password" not in public_dest(w)
+    assert base(w) == f"{MOUNT_ROOT}/{w['id']}/MatiPanel/Apps Prod" and describe(w).startswith("\\\\srv-win01\\Respaldos\\MatiPanel")
+    assert remote(w, "true")[:2] == ["setpriv", "--reuid=65534"]  # nunca como root sobre el recurso montado
+    edited, err = validate_dest({**public_dest(w), "password": ""}, w)  # al editar sin contraseña se conserva
+    assert not err and edited["password"] == "p,a=s s" and edited["id"] == w["id"]
+    for bad in ({"share": "a/../b"}, {"share": "x;y"}, {"path": "a/../b"}, {"path": "a/b."}, {"user": "u\nx"},
+                {"domain": "dom;rm"}, {"password": "a\nusername=root"}, {"password": ""}, {"type": "ftp"}):
+        assert validate_dest({"type": "smb", "host": "h", "share": "R", "user": "u", "password": "p", **bad})[1], bad
+    assert "contraseña" in _smb_error("mount error(13): Permission denied", 32)
+    cfg = {"dests": [w, {"id": "abcd1234", "type": "ssh"}], "apps": {"a": {"dest": "abcd1234"}}, "state": {}}
+    assert app_dest(cfg, "a")["id"] == "abcd1234" and app_dest(cfg, "b")["id"] == w["id"] and app_dest(cfg, "a", "zzzz") is None
+    assert validate_app({"schedule": "daily", "dest": "nope"}, ["abcd1234"])[1]
     print("ok")

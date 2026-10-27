@@ -2,6 +2,19 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.7.0] - 2026-10-27
+
+### Añadido
+- 🪟 **Respaldos de apps en Windows** — carpetas compartidas (SMB) de Windows Server o NAS con una cuenta del Active Directory (`DOMINIO\usuario`), cifrado SMB 3, prueba de conexión que escribe un archivo real y mensajes claros para cada error (credenciales, recurso, firewall, SMB antiguo).
+- 🗂️ **Varios servidores de respaldo** — Linux/Unix por SSH y Windows/NAS por SMB a la vez; cada app elige su servidor y la lista de respaldos permite ver, restaurar y eliminar en cualquiera de ellos. La configuración anterior se migra sola como primer servidor.
+
+### Seguridad
+- La contraseña de la cuenta de Windows se guarda solo en el servidor (0600), nunca vuelve al navegador ni a la Auditoría, y se entrega a `mount.cifs` en un archivo temporal, no en la línea de órdenes.
+- Sobre la carpeta compartida montada, las órdenes se ejecutan como `nobody`: un enlace simbólico puesto en el servidor remoto no puede leer ni escribir archivos de root de este equipo.
+
+### Cambiado
+- El instalador agrega `cifs-utils`.
+
 ## [0.6.0] - 2026-10-27
 
 ### Añadido

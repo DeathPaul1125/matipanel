@@ -3,54 +3,98 @@
 {% block heading %}Respaldos de apps{% endblock %}
 
 {% block content %}
-<div class="grid grid-2">
-  <div class="card">
-    <h3>Servidor de respaldos</h3>
-    <p class="small muted">Los respaldos se envían por SSH a otro servidor Linux. Nada queda en este servidor.</p>
-    <div class="dp-form2">
-      <label class="form-row"><span>Servidor (IP o nombre)</span><input class="input mono" id="d-host" placeholder="192.100.10.70" autocomplete="off"></label>
-      <label class="form-row"><span>Puerto SSH</span><input class="input mono" id="d-port" type="number" min="1" max="65535" placeholder="22"></label>
-      <label class="form-row"><span>Usuario</span><input class="input mono" id="d-user" placeholder="respaldos" autocomplete="off"></label>
-      <label class="form-row"><span>Carpeta</span><input class="input mono" id="d-path" placeholder="/srv/respaldos/matipanel" autocomplete="off"></label>
-    </div>
-    <div class="form-actions">
-      <button class="btn" onclick="testDest()">Probar conexión</button>
-      <button class="btn btn-primary" onclick="saveDest()">Guardar</button>
-    </div>
-    <div id="d-status" class="small"></div>
-  </div>
+<div class="card">
+  <div class="card-head"><h3>Servidores de respaldo</h3>
+    <button class="btn btn-sm btn-primary" onclick="editDest()">Agregar servidor</button></div>
+  <p class="small muted">Linux o Unix por SSH, o Windows (y NAS) por carpeta compartida con una cuenta del Active Directory.
+    Cada aplicación elige a cuál se respalda. Nada queda en este servidor.</p>
+  <table class="lx" id="dests-table" data-table data-table-filter="off">
+    <thead><tr><th>Nombre</th><th>Sistema</th><th>Destino</th><th>Apps</th><th>Conexión</th><th data-nosort>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+</div>
 
-  <div class="card">
-    <h3>Preparar el servidor de respaldos</h3>
+<div class="card">
+  <h3>Preparar el servidor de respaldos</h3>
+  <details class="ab-help" open>
+    <summary><b>Linux / Unix (SSH)</b></summary>
     <p class="small muted">Una sola vez, como root en el <b>servidor de respaldos</b> (no en este):</p>
     <pre class="terminal ab-cmd" id="setup-cmd"></pre>
     <div class="toolbar"><button class="btn btn-sm" data-copy="#setup-cmd">Copiar comandos</button></div>
     <p class="small muted">La clave solo sirve para respaldos: <span class="mono">restrict</span> le quita reenvío de puertos, terminal y agente.
-      La huella del servidor se fija en la primera conexión.</p>
+      La huella de cada servidor se fija en la primera conexión.</p>
     <div class="small" id="fp"></div>
-  </div>
+  </details>
+  <details class="ab-help">
+    <summary><b>Windows / NAS (carpeta compartida SMB)</b></summary>
+    <ol class="small">
+      <li>En el Active Directory crea una cuenta de servicio solo para respaldos (p. ej. <span class="mono">svc-respaldos</span>), sin privilegios de administrador y con contraseña que no caduque.</li>
+      <li>En el servidor Windows, en PowerShell como administrador, crea la carpeta compartida y dale permiso de modificación a esa cuenta:</li>
+    </ol>
+    <pre class="terminal ab-cmd" id="setup-win"></pre>
+    <div class="toolbar"><button class="btn btn-sm" data-copy="#setup-win">Copiar comandos</button></div>
+    <p class="small muted">El panel usa SMB 3 con cifrado (<span class="mono">-EncryptData</span>). Windows Server 2012 o posterior; en un NAS o un servidor antiguo sin SMB 3, desmarca «Cifrar la conexión».
+      El puerto 445 del servidor debe aceptar conexiones desde este panel.</p>
+  </details>
 </div>
 
 <div class="card">
   <h3>Aplicaciones</h3>
+  <div class="table-wrap">
   <table class="lx" id="apps-table" data-table>
-    <thead><tr><th>Aplicación</th><th>Qué se respalda</th><th>Programación</th><th>Conservar</th><th>Activo</th><th>Último respaldo</th><th>Acciones</th></tr></thead>
-    <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
-  </table>
+      <thead><tr><th>Aplicación</th><th>Qué se respalda</th><th>Servidor</th><th>Programación</th><th>Conservar</th><th>Activo</th><th>Último respaldo</th><th data-nosort>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+  </div>
   <p class="small muted">Cada respaldo incluye la base de datos (volcado comprimido), los volúmenes de datos de la app y su configuración (<span class="mono">.env</span> y credenciales).
     Si uno falla se reintenta a la hora y, si lo activaste, te llega un correo (<a href="{{ url_for('notify.index') }}">Notificaciones</a>).</p>
 </div>
 
 <div class="card" id="detail" hidden>
   <div class="card-head"><h3>Respaldos de <span class="mono" id="det-name"></span></h3>
-    <button class="btn btn-sm" onclick="closeDetail()">Cerrar</button></div>
+    <div class="ab-acts"><select class="input ab-in" id="det-dest" title="Servidor de respaldos" onchange="loadList()"></select>
+      <button class="btn btn-sm" onclick="closeDetail()">Cerrar</button></div></div>
   <div id="det-busy" class="ab-busy" hidden></div>
   <table class="lx" id="list-table" data-table>
-    <thead><tr><th>Fecha</th><th>Tamaño</th><th>Acciones</th></tr></thead>
+    <thead><tr><th>Fecha</th><th>Tamaño</th><th data-nosort>Acciones</th></tr></thead>
     <tbody></tbody>
   </table>
   <h4>Registro del último trabajo</h4>
   <pre class="terminal ab-log" id="det-log">—</pre>
+</div>
+
+<div class="modal" id="dest-modal">
+  <div class="modal-box" role="dialog" aria-labelledby="dm-title">
+    <h3 id="dm-title">Servidor de respaldos</h3>
+    <div class="dp-form2">
+      <label class="form-row"><span>Nombre</span><input class="input" id="dm-name" placeholder="Servidor Windows, NAS oficina…" autocomplete="off"></label>
+      <label class="form-row"><span>Sistema del servidor</span><select class="input" id="dm-type">
+        <option value="ssh">Linux / Unix (SSH)</option><option value="smb">Windows o NAS (carpeta compartida SMB)</option></select></label>
+      <label class="form-row"><span>Servidor (IP o nombre)</span><input class="input mono" id="dm-host" placeholder="192.100.10.70" autocomplete="off"></label>
+      <label class="form-row"><span>Puerto</span><input class="input mono" id="dm-port" type="number" min="1" max="65535"></label>
+    </div>
+    <div class="dp-form2" data-for="ssh">
+      <label class="form-row"><span>Usuario</span><input class="input mono" id="dm-user" placeholder="respaldos" autocomplete="off"></label>
+      <label class="form-row"><span>Carpeta</span><input class="input mono" id="dm-path" placeholder="/srv/respaldos/matipanel" autocomplete="off"></label>
+    </div>
+    <div data-for="smb">
+      <div class="dp-form2">
+        <label class="form-row"><span>Recurso compartido</span><input class="input mono" id="dm-share" placeholder="Respaldos" autocomplete="off"></label>
+        <label class="form-row"><span>Carpeta dentro del recurso (opcional)</span><input class="input mono" id="dm-spath" placeholder="MatiPanel" autocomplete="off"></label>
+        <label class="form-row"><span>Dominio (AD)</span><input class="input mono" id="dm-domain" placeholder="SENABED" autocomplete="off"></label>
+        <label class="form-row"><span>Usuario</span><input class="input mono" id="dm-suser" placeholder="svc-respaldos" autocomplete="off"></label>
+      </div>
+      <label class="form-row"><span>Contraseña</span><input class="input" id="dm-pass" type="password" autocomplete="new-password"></label>
+      <label class="dlg-check"><input type="checkbox" id="dm-encrypt" checked> Cifrar la conexión (SMB 3)</label>
+      <p class="small muted" id="dm-unc"></p>
+    </div>
+    <div id="dm-status" class="small"></div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeDest()">Cancelar</button>
+      <button class="btn" onclick="testForm()">Probar conexión</button>
+      <button class="btn btn-primary" onclick="saveDest()">Guardar</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -62,7 +106,17 @@ const $ = id => document.getElementById(id);
 const getJSON = async url => { try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; } };
 const fmtBytes = n => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + u[i]; };
 const fmtDate = t => new Date(t * 1000).toLocaleString('es', {dateStyle: 'medium', timeStyle: 'short'});
-let OV = null, DETAIL = null, filled = false;
+const BS = String.fromCharCode(92);  // barra invertida (rutas y cuentas de Windows)
+let OV = null, DETAIL = null, EDIT = null;
+const TESTS = {};  // id → resultado de la última prueba de conexión
+
+const destKind = d => d.type === 'smb' ? 'Windows / NAS (SMB)' : 'Linux / Unix (SSH)';
+function destTarget(d) {
+  if (d.type !== 'smb') return `${d.user}@${d.host}:${d.path}`;
+  const who = (d.domain ? d.domain + BS : '') + d.user;
+  return `${BS}${BS}${d.host}${BS}${d.share}${(d.path || '').split('/').join(BS)} · ${who}`;
+}
+const destById = id => (OV ? OV.dests : []).find(d => d.id === id);
 
 function setupCmd(pub, d) {
   const user = d.user || 'respaldos', path = d.path || '/srv/respaldos/matipanel';
@@ -72,26 +126,48 @@ install -d -m 700 -o ${user} -g ${user} /home/${user}/.ssh
 echo 'restrict ${pub}' >> /home/${user}/.ssh/authorized_keys
 chown ${user}: /home/${user}/.ssh/authorized_keys && chmod 600 /home/${user}/.ssh/authorized_keys`;
 }
+function setupWin(d) {
+  const acct = (d.domain || 'DOMINIO') + BS + (d.user || 'svc-respaldos'), share = d.share || 'Respaldos';
+  const dir = 'D:' + BS + share;
+  return `New-Item -ItemType Directory -Force -Path '${dir}' | Out-Null
+New-SmbShare -Name '${share}' -Path '${dir}' -FullAccess '${acct}' -EncryptData $true
+icacls '${dir}' /grant '${acct}:(OI)(CI)M'`;
+}
 
 async function load() {
   const d = await getJSON(API + 'overview');
   if (!d.apps) return;
   OV = d;
-  if (!filled) {
-    filled = true;
-    $('d-host').value = d.dest.host; $('d-port').value = d.dest.port || 22; $('d-user').value = d.dest.user; $('d-path').value = d.dest.path;
-  }
-  $('setup-cmd').textContent = d.pubkey ? setupCmd(d.pubkey, {user: $('d-user').value.trim(), path: $('d-path').value.trim()}) : 'No se pudo generar la clave SSH (¿falta ssh-keygen?).';
+  const ssh = d.dests.find(x => x.type === 'ssh') || {}, smb = d.dests.find(x => x.type === 'smb') || {};
+  $('setup-cmd').textContent = d.pubkey ? setupCmd(d.pubkey, ssh) : 'No se pudo generar la clave SSH (¿falta ssh-keygen?).';
+  $('setup-win').textContent = setupWin(smb);
   $('fp').innerHTML = d.fingerprints.length
-    ? 'Huella fijada: ' + d.fingerprints.map(f => `<div class="mono small">${escapeHtml(f)}</div>`).join('') + ` <button class="btn btn-sm" onclick="forgetHost()">Olvidar huella</button>`
-    : '<span class="muted">Aún no hay huella fijada.</span>';
+    ? 'Huellas fijadas: ' + d.fingerprints.map(f => `<div class="mono small">${escapeHtml(f)}</div>`).join('') + ` <button class="btn btn-sm" onclick="forgetHost()">Olvidar todas</button>`
+    : '<span class="muted">Aún no hay huellas fijadas.</span>';
+  renderDests();
   renderApps();
   if (DETAIL) loadStatus();
 }
 
+function renderDests() {
+  const tb = $('dests-table').tBodies[0];
+  if (!OV.dests.length) { tb.innerHTML = '<tr><td colspan="6" class="muted center">Agrega el primer servidor de respaldos</td></tr>'; return; }
+  tb.innerHTML = OV.dests.map(d => {
+    const n = OV.apps.filter(a => a.dest === d.id).length, t = TESTS[d.id];
+    const st = !t ? '<span class="small muted">Sin probar</span>' : t.busy ? '<span class="small muted">Conectando…</span>'
+      : t.ok ? `<span class="pill ok">Correcta</span>${t.free != null ? ` <span class="small">${escapeHtml(fmtBytes(t.free))} libres</span>` : ''}`
+      : `<span class="pill err" title="${escapeHtml(t.error || '')}">Falló</span> <span class="small muted">${escapeHtml((t.error || '').slice(0, 90))}</span>`;
+    return `<tr><td><b>${escapeHtml(d.name)}</b></td><td class="small">${escapeHtml(destKind(d))}</td>
+      <td class="mono small">${escapeHtml(destTarget(d))}</td><td>${n}</td><td>${st}</td>
+      <td><div class="ab-acts"><button class="btn btn-sm" onclick="testDest(${jsArg(d.id)})">Probar</button>
+        <button class="btn btn-sm" onclick="editDest(${jsArg(d.id)})">Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteDest(${jsArg(d.id)})">Eliminar</button></div></td></tr>`;
+  }).join('');
+}
+
 function renderApps() {
   const tb = $('apps-table').tBodies[0];
-  if (!OV.apps.length) { tb.innerHTML = '<tr><td colspan="7" class="muted center">No hay aplicaciones desplegadas</td></tr>'; return; }
+  if (!OV.apps.length) { tb.innerHTML = '<tr><td colspan="8" class="muted center">No hay aplicaciones desplegadas</td></tr>'; return; }
   // No repintar mientras el usuario edita una fila
   if (tb.contains(document.activeElement) && document.activeElement.matches('input, select')) return;
   tb.innerHTML = OV.apps.map(a => {
@@ -101,10 +177,14 @@ function renderApps() {
     const last = a.busy.busy ? `<span class="pill warn">${escapeHtml(a.busy.busy)}…</span> <span class="small muted">${escapeHtml(a.busy.step || '')}</span>`
       : st.last_t ? (st.last_ok ? `<span class="pill ok">Correcto</span> <span class="small">${escapeHtml(fmtDate(st.last_t))} · ${escapeHtml(fmtBytes(st.last_size || 0))}</span>`
                                 : `<span class="pill err">Falló</span> <span class="small" title="${escapeHtml(st.last_error || '')}">${escapeHtml(fmtDate(st.last_t))}</span>`)
+        + (st.dest_name ? ` <span class="small muted">en ${escapeHtml(st.dest_name)}</span>` : '')
       : '<span class="small muted">Nunca</span>';
+    const dests = OV.dests.length ? OV.dests.map(d => `<option value="${escapeHtml(d.id)}" ${d.id === a.dest ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('')
+      : '<option value="">(sin servidores)</option>';
     return `<tr data-app="${escapeHtml(a.name)}">
       <td><b class="mono">${escapeHtml(a.name)}</b>${a.deployed ? '' : ' <span class="pill mute">sin desplegar</span>'}</td>
       <td class="small">${escapeHtml(what)}</td>
+      <td><select class="input ab-in" data-k="dest">${dests}</select></td>
       <td><div class="ab-sched"><select class="input ab-in" data-k="schedule">${Object.entries(SCHEDULES).map(([k, v]) => `<option value="${k}" ${k === s.schedule ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select>
         <input class="input ab-in ab-time" data-k="time" type="time" value="${escapeHtml(s.time)}" ${s.schedule === '6h' ? 'hidden' : ''}></div></td>
       <td><input class="input ab-in ab-keep" data-k="keep" type="number" min="1" max="365" value="${s.keep}"></td>
@@ -119,35 +199,92 @@ function renderApps() {
   }));
 }
 
-function destBody() {
-  return {host: $('d-host').value.trim(), port: $('d-port').value, user: $('d-user').value.trim(), path: $('d-path').value.trim()};
+// ── Alta y edición de servidores ──
+function showType() {
+  const t = $('dm-type').value;
+  document.querySelectorAll('#dest-modal [data-for]').forEach(el => el.hidden = el.dataset.for !== t);
+  $('dm-port').placeholder = t === 'smb' ? '445' : '22';
+  const host = $('dm-host').value.trim() || 'servidor', share = $('dm-share').value.trim() || 'Recurso';
+  const sub = $('dm-spath').value.trim().split('/').join(BS).replace(/^\\+/, '');
+  $('dm-unc').textContent = t === 'smb' ? `Ruta: ${BS}${BS}${host}${BS}${share}${sub ? BS + sub : ''}${BS}<app>${BS}<fecha>` : '';
+}
+function editDest(id) {
+  const d = id ? destById(id) : null;
+  EDIT = d ? d.id : null;
+  $('dm-title').textContent = d ? `Editar «${d.name}»` : 'Agregar servidor de respaldos';
+  $('dm-name').value = d ? d.name : '';
+  $('dm-type').value = d ? d.type : 'ssh';
+  $('dm-host').value = d ? d.host : '';
+  $('dm-port').value = d ? d.port : '';
+  $('dm-user').value = d && d.type === 'ssh' ? d.user : '';
+  $('dm-path').value = d && d.type === 'ssh' ? d.path : '';
+  $('dm-share').value = d && d.type === 'smb' ? d.share : '';
+  $('dm-spath').value = d && d.type === 'smb' ? (d.path || '').replace(/^\//, '') : '';
+  $('dm-domain').value = d && d.type === 'smb' ? d.domain : '';
+  $('dm-suser').value = d && d.type === 'smb' ? d.user : '';
+  $('dm-pass').value = '';
+  $('dm-pass').placeholder = d && d.has_password ? 'Sin cambios (escribe para reemplazarla)' : '';
+  $('dm-encrypt').checked = d && d.type === 'smb' ? d.encrypt !== false : true;
+  $('dm-status').innerHTML = '';
+  showType();
+  $('dest-modal').classList.add('open');
+  $('dm-name').focus();
+}
+function closeDest() { $('dest-modal').classList.remove('open'); }
+function destForm() {
+  const t = $('dm-type').value, b = {type: t, name: $('dm-name').value.trim(), host: $('dm-host').value.trim(), port: $('dm-port').value};
+  if (EDIT) b.id = EDIT;
+  if (t === 'ssh') Object.assign(b, {user: $('dm-user').value.trim(), path: $('dm-path').value.trim()});
+  else Object.assign(b, {share: $('dm-share').value.trim(), path: $('dm-spath').value.trim(), domain: $('dm-domain').value.trim(),
+                         user: $('dm-suser').value.trim(), password: $('dm-pass').value, encrypt: $('dm-encrypt').checked});
+  return b;
+}
+const testMsg = d => d.ok
+  ? `<span class="pill ok">Conexión correcta</span> Se pudo escribir en la carpeta${d.free != null ? ` · <b>${escapeHtml(fmtBytes(d.free))}</b> libres` : ''}.`
+  : `<span class="pill err">Falló</span> ${escapeHtml(d.error || '')}`;
+async function testForm() {
+  $('dm-status').innerHTML = '<span class="muted">Conectando…</span>';
+  const d = await postJSON(API + 'test', destForm());
+  $('dm-status').innerHTML = testMsg(d);
+  if (d.ok && EDIT) TESTS[EDIT] = d;
 }
 async function saveDest() {
-  const d = await postJSON(API + 'dest', destBody());
+  const d = await postJSON(API + 'dests', destForm());
   if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  closeDest();
   ui.toast('Servidor de respaldos guardado');
-  load();
+  await load();
+  testDest(d.id);
 }
-async function testDest() {
-  const s = await postJSON(API + 'dest', destBody());
-  if (!s.ok) return ui.alert(s.error || 'Datos inválidos', {title: 'Error', icon: 'error'});
-  $('d-status').innerHTML = '<span class="muted">Conectando…</span>';
-  const d = await postJSON(API + 'test', {});
-  $('d-status').innerHTML = d.ok
-    ? `<span class="pill ok">Conexión correcta</span> La carpeta existe y se puede escribir${d.free != null ? ` · <b>${escapeHtml(fmtBytes(d.free))}</b> libres` : ''}.`
-    : `<span class="pill err">Falló</span> ${escapeHtml(d.error || '')}`;
+async function testDest(id) {
+  TESTS[id] = {busy: true}; renderDests();
+  TESTS[id] = await postJSON(API + 'test', {id});
+  renderDests();
+}
+async function deleteDest(id) {
+  const d = destById(id), n = OV.apps.filter(a => a.dest === id).length;
+  if (!await ui.confirm(`Se quitará «${d.name}» del panel. Los respaldos que ya están en ese servidor no se borran.` +
+      (n ? `\n\n${n} app(s) lo usan: pasarán al primer servidor de la lista.` : ''), {title: 'Eliminar servidor', danger: true, confirmText: 'Eliminar'})) return;
+  const r = await postJSON(API + `dests/${encodeURIComponent(id)}/delete`, {});
+  if (!r.ok) return ui.alert(r.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
+  delete TESTS[id];
   load();
 }
 async function forgetHost() {
-  if (!await ui.confirm('Se olvidará la huella del servidor y se aceptará la que presente en la próxima conexión. Hazlo solo si reinstalaste ese servidor o cambiaste su clave.', {title: 'Olvidar huella', confirmText: 'Olvidar'})) return;
+  if (!await ui.confirm('Se olvidarán las huellas de los servidores SSH y se aceptará la que presente cada uno en la próxima conexión. Hazlo solo si reinstalaste un servidor o cambiaste su clave.', {title: 'Olvidar huellas', confirmText: 'Olvidar'})) return;
   await postJSON(API + 'forget-host', {});
   load();
 }
+['dm-type', 'dm-host', 'dm-share', 'dm-spath'].forEach(id => $(id).addEventListener('input', showType));
+$('dest-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeDest(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('dest-modal').classList.contains('open')) closeDest(); });
+
+// ── Programación por app ──
 async function saveApp(name) {
   const tr = document.querySelector(`#apps-table tr[data-app="${CSS.escape(name)}"]`);
   const v = k => tr.querySelector(`[data-k="${k}"]`);
   const d = await postJSON(API + `apps/${encodeURIComponent(name)}/settings`,
-    {schedule: v('schedule').value, time: v('time').value, keep: v('keep').value, enabled: v('enabled').checked});
+    {dest: v('dest').value, schedule: v('schedule').value, time: v('time').value, keep: v('keep').value, enabled: v('enabled').checked});
   if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
   ui.toast(`Programación de «${name}» guardada`);
   document.activeElement.blur(); load();
@@ -160,22 +297,28 @@ async function backupNow(name) {
 }
 
 // ── Detalle de una app ──
+const detDest = () => $('det-dest').value;
+const destQ = () => '?dest=' + encodeURIComponent(detDest());
 async function openDetail(name) {
   DETAIL = name;
+  const app = OV.apps.find(a => a.name === name);
+  $('det-dest').innerHTML = OV.dests.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('');
+  $('det-dest').value = app ? app.dest : '';
+  $('det-dest').hidden = OV.dests.length < 2;
   $('detail').hidden = false;
   $('det-name').textContent = name;
-  $('list-table').tBodies[0].innerHTML = '<tr><td colspan="3" class="muted center">Consultando el servidor de respaldos…</td></tr>';
   $('detail').scrollIntoView({behavior: 'smooth', block: 'start'});
   loadStatus(); loadList();
 }
 function closeDetail() { DETAIL = null; $('detail').hidden = true; }
 async function loadList() {
-  const name = DETAIL;
-  const d = await getJSON(API + `apps/${encodeURIComponent(name)}/list`);
-  if (name !== DETAIL) return;
+  const name = DETAIL, dest = detDest();
+  $('list-table').tBodies[0].innerHTML = '<tr><td colspan="3" class="muted center">Consultando el servidor de respaldos…</td></tr>';
+  const d = await getJSON(API + `apps/${encodeURIComponent(name)}/list` + destQ());
+  if (name !== DETAIL || dest !== detDest()) return;
   const tb = $('list-table').tBodies[0];
   if (!d.ok) { tb.innerHTML = `<tr><td colspan="3" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
-  if (!d.backups.length) { tb.innerHTML = '<tr><td colspan="3" class="muted center">Todavía no hay respaldos en el servidor</td></tr>'; return; }
+  if (!d.backups.length) { tb.innerHTML = '<tr><td colspan="3" class="muted center">Todavía no hay respaldos en este servidor</td></tr>'; return; }
   tb.innerHTML = d.backups.map(b => `<tr><td data-sort="${b.t}">${escapeHtml(fmtDate(b.t))} <span class="small muted mono">${escapeHtml(b.name)}</span></td>
     <td data-sort="${b.size}">${escapeHtml(fmtBytes(b.size))}</td>
     <td class="nowrap"><button class="btn btn-sm" onclick="restoreDlg(${jsArg(name)}, ${jsArg(b.name)})">Restaurar…</button>
@@ -197,7 +340,8 @@ async function loadStatus() {
   if (busy) setTimeout(loadStatus, 1500);
 }
 async function restoreDlg(name, stamp) {
-  const m = await getJSON(API + `apps/${encodeURIComponent(name)}/manifest/${encodeURIComponent(stamp)}`);
+  const dest = detDest(), destName = (destById(dest) || {}).name || '';
+  const m = await getJSON(API + `apps/${encodeURIComponent(name)}/manifest/${encodeURIComponent(stamp)}` + destQ());
   if (!m.ok) return ui.alert(m.error || 'No se pudo leer el respaldo', {title: 'Error', icon: 'error'});
   const files = Object.keys(m.manifest.files);
   const hasDb = files.some(f => f.startsWith('db.')), hasVol = files.some(f => f.startsWith('vol-'));
@@ -207,21 +351,21 @@ async function restoreDlg(name, stamp) {
   if (!fields.length) return ui.alert('Este respaldo no tiene base de datos ni volúmenes que restaurar.', {title: 'Nada que restaurar'});
   fields.push({name: 'confirm', label: `Escribe «${name}» para confirmar`, required: true});
   const r = await ui.form({title: `Restaurar ${name} · ${fmtDate(new Date(stamp.replace(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/, '$1-$2-$3T$4:$5:$6')) / 1000)}`,
-    text: 'La aplicación se detiene mientras se restaura y vuelve a arrancar al terminar. Los datos actuales que elijas se pierden.',
+    text: `Desde «${destName}». La aplicación se detiene mientras se restaura y vuelve a arrancar al terminar. Los datos actuales que elijas se pierden.`,
     fields, confirmText: 'Restaurar', danger: true});
   if (!r) return;
-  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/restore`, {stamp, db: !!r.db, volumes: !!r.volumes, confirm: r.confirm});
+  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/restore`, {stamp, dest, db: !!r.db, volumes: !!r.volumes, confirm: r.confirm});
   if (!d.ok) return ui.alert(d.error || 'No se pudo iniciar', {title: 'Error', icon: 'error'});
   ui.toast('Restauración iniciada', 'info');
   setTimeout(loadStatus, 500);
 }
 async function deleteBackup(name, stamp) {
-  if (!await ui.confirm(`¿Eliminar el respaldo ${stamp} de «${name}» del servidor de respaldos?`, {title: 'Eliminar respaldo', danger: true, confirmText: 'Eliminar'})) return;
-  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/delete/${encodeURIComponent(stamp)}`, {});
+  const destName = (destById(detDest()) || {}).name || '';
+  if (!await ui.confirm(`¿Eliminar el respaldo ${stamp} de «${name}» del servidor «${destName}»?`, {title: 'Eliminar respaldo', danger: true, confirmText: 'Eliminar'})) return;
+  const d = await postJSON(API + `apps/${encodeURIComponent(name)}/delete/${encodeURIComponent(stamp)}` + destQ(), {});
   if (!d.ok) return ui.alert(d.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
   loadList();
 }
-['d-user', 'd-path'].forEach(id => $(id).addEventListener('input', () => { if (OV && OV.pubkey) $('setup-cmd').textContent = setupCmd(OV.pubkey, {user: $('d-user').value.trim(), path: $('d-path').value.trim()}); }));
 load();
 setInterval(load, 15000);
 </script>

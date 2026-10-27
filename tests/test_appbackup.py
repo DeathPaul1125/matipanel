@@ -44,13 +44,13 @@ for fname, meta in m["files"].items():
 assert gzip.decompress(open(loc + "/db.sql.gz", "rb").read()).startswith(b"-- dump de prueba")
 st = B.load()["state"]["quetzal"]
 assert st["last_ok"] and st["last_name"] == r["name"]
-assert [b["name"] for b in B.list_remote(B.load()["dest"], "quetzal")] == [r["name"]]
-assert B.manifest(B.load()["dest"], "quetzal", r["name"])["db_name"] == "laravel"
+assert [b["name"] for b in B.list_remote(B.load()["dests"][0], "quetzal")] == [r["name"]]
+assert B.manifest(B.load()["dests"][0], "quetzal", r["name"])["db_name"] == "laravel"
 
 # conservar 2: tras dos respaldos más quedan solo los dos últimos; no hay .partial colgados
 time.sleep(1.1); r2 = B.backup("quetzal")
 time.sleep(1.1); r3 = B.backup("quetzal")
-names = [b["name"] for b in B.list_remote(B.load()["dest"], "quetzal")]
+names = [b["name"] for b in B.list_remote(B.load()["dests"][0], "quetzal")]
 assert names == [r3["name"], r2["name"]], names
 assert not [d for d in os.listdir(ROOT + "/remote/matipanel/quetzal") if d.endswith(".partial")]
 
@@ -73,6 +73,32 @@ except B.Fail as e:
     assert "tar" in str(e).lower() or "falló" in str(e), e
 assert B.load()["state"]["quetzal"]["last_ok"] is False and not B._run_lock.locked()
 assert not [d for d in os.listdir(ROOT + "/remote/matipanel/quetzal") if d.endswith(".partial")]
-B.delete_remote(B.load()["dest"], "quetzal", r2["name"])
-assert [b["name"] for b in B.list_remote(B.load()["dest"], "quetzal")] == [r3["name"]]
+B.delete_remote(B.load()["dests"][0], "quetzal", r2["name"])
+assert [b["name"] for b in B.list_remote(B.load()["dests"][0], "quetzal")] == [r3["name"]]
+assert B.load()["dests"][0]["type"] == "ssh"  # el formato anterior («dest») se migró solo
+
+# Windows / SMB: el mismo motor sobre el recurso «montado» (aquí, una carpeta local)
+mounts = []
+B.MOUNT_ROOT = ROOT + "/smb"
+B._mount = lambda dest, mp: (mounts.append("mount"), os.makedirs(mp, exist_ok=True))
+B._umount = lambda mp: mounts.append("umount")
+B._local = lambda cmd: ["bash", "-c", cmd]
+B.volume_mountpoint = lambda vol, create=False: ROOT + "/vol"
+w, err = B.validate_dest({"type": "smb", "name": "Windows", "host": "srv-win01", "share": "Respaldos", "path": "MatiPanel",
+                          "user": r"SENABED\svc-respaldos", "password": "x"})
+assert not err, err
+B.update(lambda c: c["dests"].append(w))
+B.update(lambda c: c["apps"]["quetzal"].__setitem__("dest", w["id"]))
+assert B.test(w)["free"] is not None
+r4 = B.backup("quetzal")
+smb_dir = f"{ROOT}/smb/{w['id']}/MatiPanel/quetzal/{r4['name']}"
+assert os.path.isfile(smb_dir + "/manifest.json") and os.path.isfile(smb_dir + "/db.sql.gz"), os.listdir(os.path.dirname(smb_dir))
+assert mounts.count("mount") == mounts.count("umount") >= 2 and not B._mounts, mounts  # siempre se desmonta
+assert B.load()["state"]["quetzal"]["dest_name"] == "Windows"
+assert [b["name"] for b in B.list_remote(w, "quetzal")] == [r4["name"]]
+assert [b["name"] for b in B.list_remote(B.load()["dests"][0], "quetzal")] == [r3["name"]]  # el otro servidor sigue intacto
+shutil.rmtree(ROOT + "/vol"); os.makedirs(ROOT + "/vol")
+B.restore("quetzal", r4["name"], ["volumes"], w["id"])
+assert open(ROOT + "/vol/sub/nota.txt").read() == "hola"
+assert mounts.count("mount") == mounts.count("umount") and not B._mounts
 print("appbackup ok")
