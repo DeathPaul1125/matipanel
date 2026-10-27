@@ -47,7 +47,7 @@
     <button class="btn btn-primary" onclick="openWizard()">+ Nueva aplicación</button>
   </div>
   <div class="table-wrap" id="apps-wrap">
-    <table class="lx" id="apps-table">
+    <table class="lx" id="apps-table" data-table>
       <thead><tr><th>Aplicación</th><th>Estado</th><th>Dirección</th><th>Último despliegue</th><th>Commit</th><th class="right">Acciones</th></tr></thead>
       <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
     </table>
@@ -182,7 +182,7 @@
   <div class="card">
     <div class="card-head"><h3>Historial</h3><span class="small muted">Últimos 50 despliegues · se conservan las imágenes de los últimos 5 exitosos para revertir</span></div>
     <div class="table-wrap">
-      <table class="lx" id="hist-table">
+      <table class="lx" id="hist-table" data-table>
         <thead><tr><th>Estado</th><th>Inicio</th><th>Duración</th><th>Commit</th><th>Origen</th><th class="right">Acciones</th></tr></thead>
         <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
       </table>
@@ -692,8 +692,8 @@ function renderHistory() {
     const live = x.image && x.image === curImage && x.status === 'success' ? ' <span class="pill ok">en línea</span>' : '';
     return `<tr${logState.id === x.id ? ' class="dp-sel"' : ''}>
       <td>${pill(x.status)}${extra}${live}</td>
-      <td class="small" title="${escapeHtml(fmtDate(x.started || x.created))}">${escapeHtml(ago(x.started || x.created))}</td>
-      <td class="small">${escapeHtml(dur(d))}</td>
+      <td class="small" data-sort="${Number(x.started || x.created) || 0}" title="${escapeHtml(fmtDate(x.started || x.created))}">${escapeHtml(ago(x.started || x.created))}</td>
+      <td class="small" data-sort="${Number(d) || 0}">${escapeHtml(dur(d))}</td>
       <td>${commitHtml(x)}${x.error ? `<div class="small dp-bad truncate" title="${escapeHtml(x.error)}">${escapeHtml(x.error)}</div>` : ''}</td>
       <td class="small">${escapeHtml(TRIGGER[x.trigger] || x.trigger)}</td>
       <td class="right dp-nowrap">${acts.join(' ')}</td></tr>`;

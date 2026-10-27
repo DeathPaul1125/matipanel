@@ -33,7 +33,7 @@
 
   <div class="card">
     <h3>Actualizaciones disponibles</h3>
-    <table class="lx" id="pkg-table">
+    <table class="lx" id="pkg-table" data-table>
       <thead><tr><th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)"></th><th>Paquete</th><th>Nueva versión</th><th>Origen</th><th>Tipo</th></tr></thead>
       <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
     </table>
@@ -55,7 +55,7 @@
     <button class="btn btn-primary" onclick="search()">Buscar</button>
   </div>
   <div class="card">
-    <table class="lx" id="search-table">
+    <table class="lx" id="search-table" data-table data-table-filter="off">
       <thead><tr><th>Paquete</th><th>Descripción</th><th>Estado</th><th>Acciones</th></tr></thead>
       <tbody><tr><td colspan="4" class="muted center">Escribe un término y pulsa Buscar</td></tr></tbody>
     </table>
@@ -74,7 +74,7 @@
     <span class="small muted" id="inst-info"></span>
   </div>
   <div class="card">
-    <table class="lx" id="inst-table">
+    <table class="lx" id="inst-table" data-table data-table-filter="off">
       <thead><tr><th>Paquete</th><th>Versión</th><th>Tamaño</th><th>Acciones</th></tr></thead>
       <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
     </table>

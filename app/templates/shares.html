@@ -41,7 +41,7 @@
       <div class="card">
         <div class="card-head"><h3>Conexiones activas</h3><span class="muted small" id="samba-conn-note"></span></div>
         <div class="table-wrap">
-          <table class="lx" id="samba-sessions">
+          <table class="lx" id="samba-sessions" data-table>
             <thead><tr><th>Usuario</th><th>Equipo</th><th>Protocolo</th><th>Cifrado</th></tr></thead>
             <tbody></tbody>
           </table>
@@ -108,7 +108,7 @@
         <button class="btn btn-sm btn-primary" onclick="openShare()">+ Nuevo recurso</button>
       </div>
       <div class="table-wrap">
-        <table class="lx" id="samba-shares">
+        <table class="lx" id="samba-shares" data-table>
           <thead><tr><th>Recurso</th><th>Carpeta</th><th>Acceso</th><th>Usuarios</th><th>Máscaras</th><th class="right">Acciones</th></tr></thead>
           <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
         </table>
@@ -123,7 +123,7 @@
         <button class="btn btn-sm btn-primary" onclick="addSmbUser()">+ Agregar usuario</button>
       </div>
       <div class="table-wrap">
-        <table class="lx" id="samba-users">
+        <table class="lx" id="samba-users" data-table>
           <thead><tr><th>Usuario</th><th>Nombre completo</th><th>Estado</th><th>Contraseña cambiada</th><th class="right">Acciones</th></tr></thead>
           <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
         </table>
@@ -185,7 +185,7 @@
         <button class="btn btn-sm btn-primary" onclick="openExport()">+ Nueva exportación</button>
       </div>
       <div class="table-wrap">
-        <table class="lx" id="nfs-exports">
+        <table class="lx" id="nfs-exports" data-table>
           <thead><tr><th>Carpeta</th><th>Clientes y opciones</th><th>Estado</th><th class="right">Acciones</th></tr></thead>
           <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
         </table>
@@ -198,7 +198,7 @@
       <div class="card">
         <div class="card-head"><h3>Clientes conectados</h3><span class="muted small">Conexiones TCP al puerto 2049</span></div>
         <div class="table-wrap">
-          <table class="lx" id="nfs-clients">
+          <table class="lx" id="nfs-clients" data-table>
             <thead><tr><th>Equipo</th><th>Conexiones</th></tr></thead>
             <tbody></tbody>
           </table>

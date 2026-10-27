@@ -56,7 +56,7 @@
         <button class="btn btn-sm btn-primary" onclick="createPrimary()">+ Zona primaria</button>
       </div>
       <div class="table-wrap">
-        <table class="lx" id="zones-table">
+        <table class="lx" id="zones-table" data-table>
           <thead><tr><th>Zona</th><th>Tipo</th><th>Archivo</th><th>Registros</th><th>Serial</th><th>Acciones</th></tr></thead>
           <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
         </table>
@@ -96,7 +96,7 @@
         <button class="btn btn-primary" onclick="addRecord()">+ Agregar registro</button>
       </div>
       <div class="table-wrap">
-        <table class="lx" id="rec-table">
+        <table class="lx" id="rec-table" data-table data-table-filter="off">
           <thead><tr><th>Nombre</th><th>TTL</th><th>Tipo</th><th>Valor</th><th></th></tr></thead>
           <tbody></tbody>
         </table>

@@ -1225,3 +1225,15 @@ table.dbx-create .center-cell { text-align: center; }
 .dk-cname { display: flex; align-items: center; gap: 4px; }
 .dk-edit { width: 22px; height: 22px; font-size: 12px; opacity: .55; }
 tr:hover .dk-edit, .dk-edit:focus-visible { opacity: 1; }
+
+/* ── Tablas: filtro, orden y paginador (data-table) ── */
+.tbl-tools { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.tbl-tools .input { max-width: 260px; height: 30px; }
+th.tbl-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.tbl-sortable:hover { color: var(--text); }
+th.tbl-sortable::after { content: attr(data-dir); margin-left: 4px; font-size: 9px; color: var(--accent); }
+th.tbl-sortable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tbl-pager { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 2px 2px; }
+.tbl-pager select.input { height: 26px; width: auto; padding: 0 6px; display: inline-block; margin-left: 4px; }
+.tbl-pages { display: flex; gap: 4px; align-items: center; margin-left: auto; }
+.tbl-pages .btn-sm { min-width: 28px; }

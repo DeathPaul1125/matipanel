@@ -38,7 +38,7 @@
     <div class="card-head"><h3>Dispositivos de bloque</h3>
       <span class="muted small"><b>Libre</b> = sin particiones, sin sistema de archivos y sin montar</span></div>
     <div class="table-wrap">
-      <table class="lx" id="dev-table">
+      <table class="lx" id="dev-table" data-table>
         <thead><tr><th>Dispositivo</th><th>Tipo</th><th>Tamaño</th><th>Contenido</th><th>Montaje</th><th>Modelo / serie</th><th>Estado</th><th></th></tr></thead>
         <tbody><tr><td colspan="8" class="muted center">Cargando…</td></tr></tbody>
       </table>
@@ -56,7 +56,7 @@
       <div class="card">
         <div class="card-head"><h3>Volúmenes físicos (PV)</h3></div>
         <div class="table-wrap">
-          <table class="lx" id="pv-table">
+          <table class="lx" id="pv-table" data-table>
             <thead><tr><th>PV</th><th>Grupo</th><th>Tamaño</th><th>Uso</th></tr></thead>
             <tbody></tbody>
           </table>
@@ -68,7 +68,7 @@
       <div class="card-head"><h3>Volúmenes lógicos (LV)</h3>
         <span><span id="xfs-note"></span> <button class="btn btn-sm btn-primary" onclick="lvCreate()">Crear LV</button></span></div>
       <div class="table-wrap">
-        <table class="lx" id="lv-table">
+        <table class="lx" id="lv-table" data-table>
           <thead><tr><th>Volumen</th><th>Tamaño</th><th>Tipo</th><th>Sistema de archivos</th><th>Montaje</th><th>Uso</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
@@ -111,7 +111,7 @@
   <div class="card">
     <div class="card-head"><h3>Sistemas de archivos</h3></div>
     <div class="table-wrap">
-      <table class="lx" id="qfs-table">
+      <table class="lx" id="qfs-table" data-table>
         <thead><tr><th>Punto de montaje</th><th>Dispositivo</th><th>Tipo</th><th>Cuotas en opciones</th><th>Usuarios</th><th>Grupos</th><th></th></tr></thead>
         <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
       </table>

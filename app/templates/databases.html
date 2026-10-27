@@ -33,7 +33,7 @@ apt install postgresql</pre>
     <button class="btn btn-primary" onclick="createDb()">+ Crear base de datos</button>
     <button class="btn" onclick="refresh()">Refrescar</button>
   </div>
-  <table class="lx" id="db-table">
+  <table class="lx" id="db-table" data-table>
     <thead><tr><th>Nombre</th><th>Codificación</th><th>Tablas</th><th>Tamaño</th><th>Acciones</th></tr></thead>
     <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
   </table>
@@ -44,7 +44,7 @@ apt install postgresql</pre>
   <div class="toolbar">
     <button class="btn btn-primary" onclick="openUserModal()">+ Nuevo usuario</button>
   </div>
-  <table class="lx" id="user-table">
+  <table class="lx" id="user-table" data-table>
     <thead><tr><th>Usuario</th><th class="only-mysql">Host</th><th>Tipo / autenticación</th><th>Acceso total a</th><th>Acciones</th></tr></thead>
     <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
   </table>

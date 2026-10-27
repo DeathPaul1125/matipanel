@@ -262,3 +262,136 @@ window.ui = (() => {
     }
   };
 })();
+
+// ── Tablas: filtro, orden por columna y paginador ──────────────────
+// <table class="lx" data-table>                → filtro + orden + paginador (25 por página)
+// <table data-table="50" data-table-filter="off"> → otro tamaño; sin filtro (la página ya tiene el suyo)
+// <th data-nosort> no ordena; <td data-sort="123"> fija el valor con que se ordena esa celda.
+// Funciona aunque la página vuelva a pintar el <tbody> (refresco automático): se re-aplica sola.
+window.enhanceTable = (() => {
+  const SIZES = [10, 25, 50, 100, 0];  // 0 = todos
+  const UNITS = { b: 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
+  const norm = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const isMsg = r => r.cells.length === 1 && r.cells[0].colSpan > 1;  // "Cargando…", "Sin datos"
+
+  function sortKey(td) {
+    if (!td) return '';
+    const raw = (td.dataset.sort ?? td.textContent).trim();
+    let m;
+    if (/^-?\d+([.,]\d+)?\s*%?$/.test(raw)) return parseFloat(raw.replace(',', '.'));
+    if ((m = raw.match(/^([\d.,]+)\s*([KMGTP]?)i?B$/i))) return parseFloat(m[1].replace(',', '.')) * UNITS[(m[2] || 'b').toLowerCase()];
+    if (/^(\d+\s*(d|h|min|s)\b\s*)+$/.test(raw)) {
+      const mult = { d: 86400, h: 3600, min: 60, s: 1 };
+      return [...raw.matchAll(/(\d+)\s*(d|h|min|s)\b/g)].reduce((t, x) => t + x[1] * mult[x[2]], 0);
+    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw) && !isNaN(Date.parse(raw))) return Date.parse(raw);
+    return norm(raw);
+  }
+  const cmp = (a, b) => (typeof a === 'number' && typeof b === 'number') ? a - b
+    : String(a).localeCompare(String(b), 'es', { numeric: true, sensitivity: 'base' });
+
+  function enhance(t) {
+    if (t._tbl || !t.tHead || !t.tBodies[0]) return;
+    const key = 'mp-tbl:' + location.pathname + ':' + (t.id || [...document.querySelectorAll('table[data-table]')].indexOf(t));
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) {}
+    const def = parseInt(t.dataset.table, 10);
+    const st = t._tbl = { key, q: '', page: 1, size: SIZES.includes(saved.size) ? saved.size : (SIZES.includes(def) ? def : 25),
+                          sort: saved.sort || null };
+    const save = () => { try { localStorage.setItem(key, JSON.stringify({ size: st.size, sort: st.sort })); } catch (e) {} };
+
+    if (t.dataset.tableFilter !== 'off') {
+      const tools = document.createElement('div');
+      tools.className = 'tbl-tools';
+      tools.innerHTML = '<input type="search" class="input" placeholder="Filtrar…" aria-label="Filtrar la tabla">';
+      t.before(tools);
+      let timer;
+      tools.querySelector('input').addEventListener('input', e => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { st.q = e.target.value; st.page = 1; apply(t); }, 120);
+      });
+    }
+
+    [...t.tHead.rows[0].cells].forEach((th, i) => {
+      const label = th.textContent.trim();
+      if (th.hasAttribute('data-nosort') || !label || /^acciones$/i.test(label)) return;
+      th.classList.add('tbl-sortable');
+      th.tabIndex = 0;
+      const toggle = () => {
+        st.sort = !st.sort || st.sort.col !== i ? { col: i, dir: 1 } : st.sort.dir === 1 ? { col: i, dir: -1 } : null;
+        st.page = 1; save(); apply(t);
+      };
+      th.addEventListener('click', toggle);
+      th.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
+
+    const pager = st.pager = document.createElement('div');
+    pager.className = 'tbl-pager';
+    t.after(pager);
+    pager.addEventListener('click', e => {
+      const b = e.target.closest('[data-pg]');
+      if (b && !b.disabled) { st.page = +b.dataset.pg; apply(t); }
+    });
+    pager.addEventListener('change', e => {
+      if (e.target.matches('select')) { st.size = +e.target.value; st.page = 1; save(); apply(t); }
+    });
+
+    let raf = 0;
+    st.obs = new MutationObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => apply(t)); });
+    apply(t);
+  }
+
+  function pagesHtml(page, pages) {
+    const nums = new Set([1, pages, page - 1, page, page + 1].filter(n => n >= 1 && n <= pages));
+    const list = [...nums].sort((a, b) => a - b);
+    let out = `<button class="btn btn-sm" data-pg="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="Anterior">‹</button>`;
+    list.forEach((n, i) => {
+      if (i && n - list[i - 1] > 1) out += '<span class="muted">…</span>';
+      out += `<button class="btn btn-sm${n === page ? ' btn-primary' : ''}" data-pg="${n}">${n}</button>`;
+    });
+    return out + `<button class="btn btn-sm" data-pg="${page + 1}" ${page >= pages ? 'disabled' : ''} aria-label="Siguiente">›</button>`;
+  }
+
+  function apply(t) {
+    const st = t._tbl, tb = t.tBodies[0];
+    st.obs.disconnect();
+    const rows = [...tb.rows], data = rows.filter(r => !isMsg(r));
+    if (st.sort && data.length > 1) {
+      const sorted = data.map((r, i) => [sortKey(r.cells[st.sort.col]), i, r])
+        .sort((a, b) => cmp(a[0], b[0]) * st.sort.dir || a[1] - b[1]).map(x => x[2]);
+      if (sorted.some((r, i) => r !== data[i])) tb.append(...sorted, ...rows.filter(isMsg));
+      data.splice(0, data.length, ...sorted);
+    }
+    const q = norm(st.q.trim());
+    const match = q ? data.filter(r => norm(r.textContent).includes(q)) : data;
+    const size = st.size || match.length || 1, pages = Math.max(1, Math.ceil(match.length / size));
+    st.page = Math.min(Math.max(1, st.page), pages);
+    const from = (st.page - 1) * size, shown = new Set(match.slice(from, from + size));
+    data.forEach(r => { r.hidden = !shown.has(r); });
+
+    [...t.tHead.rows[0].cells].forEach((th, i) => {
+      if (!th.classList.contains('tbl-sortable')) return;
+      const dir = st.sort && st.sort.col === i ? st.sort.dir : 0;
+      th.setAttribute('aria-sort', dir === 1 ? 'ascending' : dir === -1 ? 'descending' : 'none');
+      th.dataset.dir = dir === 1 ? '▲' : dir === -1 ? '▼' : '';
+    });
+
+    if (q && !match.length && data.length) {
+      st.pager.hidden = false;
+      st.pager.innerHTML = `<span class="small muted">Ningún resultado para «${escapeHtml(st.q.trim())}» de ${data.length}</span>`;
+    } else if (data.length > SIZES[0] || q) {
+      st.pager.hidden = false;
+      const opts = SIZES.map(n => `<option value="${n}" ${n === st.size ? 'selected' : ''}>${n || 'Todos'}</option>`).join('');
+      st.pager.innerHTML = `<label class="small muted">Mostrar <select class="input">${opts}</select></label>
+        <span class="small muted">${match.length ? from + 1 : 0}–${Math.min(from + size, match.length)} de ${match.length}${q ? ` (filtrado de ${data.length})` : ''}</span>
+        ${pages > 1 ? `<div class="tbl-pages">${pagesHtml(st.page, pages)}</div>` : ''}`;
+    } else {
+      st.pager.hidden = true;
+    }
+    st.obs.observe(t, { childList: true, subtree: true });
+  }
+
+  const init = () => document.querySelectorAll('table[data-table]').forEach(enhance);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  return enhance;
+})();

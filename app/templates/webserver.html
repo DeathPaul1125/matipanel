@@ -38,7 +38,7 @@ apt install nginx</pre>
     <button class="btn btn-sm" onclick="loadSites()">Refrescar</button>
     <button class="btn btn-sm btn-primary" onclick="openCreate()">+ Nuevo sitio</button>
   </div>
-  <table class="lx" id="sites-table">
+  <table class="lx" id="sites-table" data-table>
     <thead><tr><th>Archivo</th><th>Estado</th><th>Dominios</th><th>Document root</th><th>Puertos</th><th>Acciones</th></tr></thead>
     <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
   </table>
@@ -55,7 +55,7 @@ apt install nginx</pre>
       <option value="off">Deshabilitados</option>
     </select>
   </div>
-  <table class="lx" id="mods-table">
+  <table class="lx" id="mods-table" data-table data-table-filter="off">
     <thead><tr><th>Módulo</th><th>Estado</th><th>Acción</th></tr></thead>
     <tbody><tr><td colspan="3" class="muted center">Cargando…</td></tr></tbody>
   </table>

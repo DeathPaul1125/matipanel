@@ -19,7 +19,7 @@
     <button class="btn btn-primary" onclick="openCreateUser()">+ Nuevo usuario</button>
   </div>
   <div class="card">
-    <table class="lx" id="users-table">
+    <table class="lx" id="users-table" data-table data-table-filter="off">
       <thead><tr><th>Usuario</th><th>UID</th><th>Grupos</th><th>Home</th><th>Shell</th><th>Estado</th><th>Acciones</th></tr></thead>
       <tbody><tr><td colspan="7" class="muted center">Cargando…</td></tr></tbody>
     </table>
@@ -37,7 +37,7 @@
     <button class="btn btn-primary" onclick="openModal('m-group')">+ Nuevo grupo</button>
   </div>
   <div class="card">
-    <table class="lx" id="groups-table">
+    <table class="lx" id="groups-table" data-table data-table-filter="off">
       <thead><tr><th>Grupo</th><th>GID</th><th>Miembros</th><th>Acciones</th></tr></thead>
       <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
     </table>
