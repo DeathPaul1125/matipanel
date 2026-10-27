@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.5.1] - 2026-10-26
+
+### Cambiado
+- 💙 **Favicon nuevo** — la «M» de Matías con un corazón azul, en vectores (nítido en pestañas claras y oscuras), con versiones PNG/ICO para todos los navegadores y el ícono de acceso directo en móviles; ahora también en las pantallas de inicio de sesión.
+
 ## [0.5.0] - 2026-10-26
 
 ### Añadido

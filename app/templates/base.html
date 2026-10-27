@@ -7,7 +7,7 @@
   {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <style id="prefs-css">{{ prefs_css|safe }}</style>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text x='2' y='20' font-size='20'>🐧</text></svg>">
+{% include "_favicon.html" %}
 </head>
 <body>
   <div class="layout">

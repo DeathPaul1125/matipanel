@@ -2,9 +2,9 @@
 
 Dedicado a Matías Aceituno, la inspiración de este proyecto. 💙
 """
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
-from flask import Flask, request, abort
+from flask import Flask, request, abort, send_from_directory
 from flask_login import LoginManager, current_user
 from flask_sock import Sock
 from .auth import auth_bp, load_user
@@ -69,6 +69,11 @@ def create_app():
     # El webhook de despliegues lo llama un runner, no un navegador: no trae Origin ni sesión.
     # Se protege con su propia firma HMAC (X-Hub-Signature-256), tope de 1 MB y límite por IP.
     WEBHOOK_PREFIX = "/despliegues/webhook/"
+
+    @app.route("/favicon.ico")
+    def favicon():
+        # Pedido por los navegadores en cualquier página (también sin sesión y en páginas de error)
+        return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/x-icon", max_age=86400)
 
     @app.before_request
     def _limit_anonymous_body():
