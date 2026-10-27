@@ -2,6 +2,26 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.9.0] - 2026-10-27
+
+### Añadido
+- ✉️ **Correos con diseño** — cada aviso llega en HTML (y en texto para los programas que no lo muestran): franja y símbolo de color según el tipo (problema, aviso, correcto, información, también en el asunto), tabla de detalles, el registro del error en un bloque aparte y botón **Abrir en MatiPanel** a la pantalla correspondiente.
+- 👁️ **Vista previa** — en Notificaciones, «Ver ejemplo» muestra cómo llega cada aviso y permite enviarlo de prueba.
+- 🔔 **Avisos nuevos**:
+  - El servidor se reinició (cuánto estuvo fuera de servicio).
+  - Certificados SSL por vencer o vencidos (Let's Encrypt y el del panel).
+  - Inicio de sesión en el panel desde una IP nueva y, opcionalmente, cada inicio de sesión.
+  - Inicios de sesión por SSH en el servidor.
+  - Cambios delicados hechos en el panel: usuarios, permisos, firewall, SSH, apagado, borrados y restauraciones, con quién y desde dónde.
+  - Activar o desactivar el 2FA.
+  - Respaldos programados de carpetas, correctos o fallidos.
+  - **Resumen diario** a la hora elegida: estado, recursos, respaldos, despliegues, actualizaciones, monitor y seguridad de las últimas 24 h.
+- 🐳 La barra de estado (y el aviso de problemas) incluye los contenedores de Docker que se reinician sin parar, se detienen con error o no responden.
+
+### Cambiado
+- Los avisos de despliegues, respaldos, monitor, actualizaciones, bloqueos y versión nueva traen sus datos en tablas; las actualizaciones de seguridad van en su propia tabla y en rojo.
+- La pantalla de Notificaciones agrupa los avisos (Servidor, Seguridad, Apps y respaldos, Resumen).
+
 ## [0.8.0] - 2026-10-27
 
 ### Añadido

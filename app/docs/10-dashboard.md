@@ -22,6 +22,8 @@ Haz clic en el estado para volver al Dashboard. Se actualiza cada 30 segundos y 
 | Memoria entre 85 % y 94 % | Aviso |
 | CPU promedio de 90 % o más durante los últimos 30 segundos | Aviso |
 | Carga de 1 minuto mayor o igual a 1,5 veces el número de núcleos | Aviso |
+| Un contenedor de Docker (de una app o un stack) que se reinicia sin parar o se detuvo con error | Grave |
+| Un contenedor de Docker que no responde a su comprobación de salud (*unhealthy*) | Aviso |
 
 > **Nota:** El veredicto no revisa la swap. Un uso alto de swap solo se refleja en su tacómetro.
 

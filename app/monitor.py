@@ -455,7 +455,10 @@ def _notify(c, r, status, duration):
         body = (f"«{c['name']}» vuelve a responder ({r['ms']:.0f} ms).\n\n{what}\n"
                 f"Caído desde: {fmt(r['t'] - duration)}\nRecuperado: {fmt(r['t'])}\nDuración de la caída: {_duration(duration)}")
     try:
-        notify.event("monitor", subject, body, key=f"monitor:{c['id']}", cooldown=0)
+        lines = body.split("\n\n", 1)
+        rows = [tuple(x.split(": ", 1)) for x in (lines[1] if len(lines) > 1 else "").splitlines() if ": " in x]
+        notify.event("monitor", subject, lines[0], key=f"monitor:{c['id']}", cooldown=0,
+                     level="err" if status == "down" else "ok", link="/monitor/", sections=[{"rows": rows}])
     except Exception:
         pass
 

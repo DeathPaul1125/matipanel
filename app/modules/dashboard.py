@@ -1,5 +1,7 @@
 """Dashboard principal: veredicto de salud y métricas en vivo del sistema."""
 import platform
+import re
+import shutil
 import socket
 import threading
 import time
@@ -188,6 +190,31 @@ def overview():
 # Veredicto de salud para la barra superior (todas las pantallas). Caché corta: varias
 # pestañas abiertas no multiplican las llamadas a systemctl.
 _health_cache = {"at": 0.0, "data": None}
+_docker_cache = {"at": 0.0, "data": []}
+
+
+def docker_issues(now=None):
+    """Contenedores de proyectos Compose (apps, stacks) que se reinician sin parar, terminaron con error o están
+    «unhealthy». ponytail: cada 60 s como mucho; un `docker stop` normal sale con 0, 137 o 143 y no se avisa."""
+    now = now or time.time()
+    if now - _docker_cache["at"] < 60:
+        return _docker_cache["data"]
+    _docker_cache["at"] = now
+    out = []
+    code, text, _ = run(["docker", "ps", "-a", "--filter", "label=com.docker.compose.project",
+                         "--format", "{{.Names}}\t{{.State}}\t{{.Status}}"], timeout=10)
+    for line in text.splitlines() if code == 0 else []:
+        name, _, rest = line.partition("\t")
+        state, _, status = rest.partition("\t")
+        exit_code = re.match(r"Exited \((\d+)\)", status)
+        if state == "restarting":
+            out.append(("err", f"El contenedor {name} se reinicia sin parar", f"docker:{name}"))
+        elif state == "exited" and exit_code and int(exit_code[1]) not in (0, 137, 143):
+            out.append(("err", f"El contenedor {name} se detuvo con error (código {exit_code[1]})", f"docker:{name}"))
+        elif "(unhealthy)" in status:
+            out.append(("warn", f"El contenedor {name} no responde (unhealthy)", f"docker:{name}"))
+    _docker_cache["data"] = out
+    return out
 
 
 def compute_issues():
@@ -215,6 +242,11 @@ def compute_issues():
     try:
         issues += traffic.health_issues()
     except Exception:  # la barra de salud no debe caerse por las alertas de red
+        pass
+    try:
+        if shutil.which("docker"):
+            issues += docker_issues()
+    except Exception:
         pass
     try:
         from .. import monitor

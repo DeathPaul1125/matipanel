@@ -645,12 +645,15 @@ def backup(name, trigger="manual"):
 def _notify(ok, name, text):
     try:
         from . import notify
+        dest = app_dest(load(), name)
+        rows = [("App", name)] + ([("Servidor", f"{dest['name']} · {describe(dest)}")] if dest else [])
         if ok:
-            notify.event("backup_ok", f"Respaldo de «{name}» correcto", text, key=f"backup_ok:{name}", cooldown=0)
+            notify.event("backup_ok", f"Respaldo de «{name}» correcto", text, key=f"backup_ok:{name}", cooldown=0,
+                         sections=[{"rows": rows}], link="/respaldos-apps/")
         else:
-            notify.event("backup_fail", f"Falló el respaldo de «{name}»",
-                         f"El respaldo de «{name}» falló:\n\n{text}\n\nSe reintentará en una hora.",
-                         key=f"backup_fail:{name}", cooldown=6 * 3600)
+            notify.event("backup_fail", f"Falló el respaldo de «{name}»", "Se reintentará en una hora.",
+                         key=f"backup_fail:{name}", cooldown=6 * 3600, sections=[{"rows": rows}], pre=text,
+                         link="/respaldos-apps/")
     except Exception:
         pass
 

@@ -102,8 +102,15 @@ def check(now=None, force_refresh=False):
         if new:
             from . import notify
             subject, body = message(info, new)
-            sent = notify.event("updates", subject, body, key="updates:" + ",".join(sorted(f"{p['name']}={p['new_version']}" for p in new))[:200],
-                                cooldown=0)
+            sec = [p for p in new if p["security"]]
+            rest = [p for p in new if not p["security"]]
+            sections = ([{"title": "De seguridad", "rows": [(p["name"], p["new_version"], "err") for p in sec]}] if sec else []) + \
+                ([{"title": "Otras", "rows": [(p["name"], p["new_version"]) for p in rest[:60]]
+                   + ([("…", f"y {len(rest) - 60} más")] if len(rest) > 60 else [])}] if rest else [])
+            sent = notify.event("updates", subject, body.split("\n\n", 1)[0] + "\n\nInstálalas en Paquetes → Actualizar todo"
+                                " (o activa las actualizaciones automáticas de seguridad).",
+                                key="updates:" + ",".join(sorted(f"{p['name']}={p['new_version']}" for p in new))[:200],
+                                cooldown=0, level="err" if sec else "warn", sections=sections, link="/packages/")
             if sent or not notify.load()["enabled"]:
                 notified |= {f"{p['name']}={p['new_version']}" for p in new}
         _save({"notified": sorted(notified & pending), "checked": now})

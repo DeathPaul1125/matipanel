@@ -35,6 +35,31 @@ MODULES = {
     "monitor": "Monitor", "hardening": "Seguridad del servidor", "stacks": "Stacks",
 }
 
+# Acciones que además se avisan por correo («Cambios delicados en el panel»): endpoint → qué hizo
+SENSITIVE = {
+    "users.create_user": "creó el usuario del sistema", "users.delete_user": "eliminó el usuario del sistema",
+    "users.change_password": "cambió la contraseña del usuario", "users.lock_user": "bloqueó o desbloqueó al usuario",
+    "users.set_groups": "cambió los grupos del usuario", "users.group_member": "cambió los miembros del grupo",
+    "users.delete_group": "eliminó el grupo", "users.user_keys_add": "agregó una clave SSH al usuario",
+    "users.user_keys_delete": "quitó una clave SSH del usuario", "roles.config": "cambió los permisos del panel",
+    "firewall.ufw_toggle": "activó o desactivó el firewall", "firewall.ufw_default": "cambió la política del firewall",
+    "firewall.ufw_add_rule": "agregó una regla al firewall", "firewall.ufw_delete_rule": "borró una regla del firewall",
+    "firewall.nft_apply": "aplicó reglas de nftables", "firewall.firewalld_port": "cambió un puerto en firewalld",
+    "firewall.firewalld_service": "cambió un servicio en firewalld", "hardening.ssh_fix": "cambió la configuración de SSH",
+    "system.ssh_restart": "reinició el servicio SSH", "system.power": "reinició o apagó el servidor",
+    "system.power_schedule": "programó un reinicio o apagado", "system.power_cancel": "canceló un reinicio o apagado programado",
+    "system.set_hostname": "cambió el nombre del servidor", "deploy.delete": "eliminó la aplicación",
+    "deploy.rollback": "revirtió la aplicación a una versión anterior", "databases.db_drop": "eliminó la base de datos",
+    "databases.user_drop": "eliminó el usuario de base de datos", "databases.restore": "restauró la base de datos",
+    "appbackup.restore": "restauró un respaldo de la aplicación", "appbackup.recover": "recuperó la aplicación desde un respaldo",
+    "appbackup.delete": "eliminó un respaldo de la aplicación", "appbackup.dest_delete": "quitó un servidor de respaldos",
+    "backups.restore": "restauró un respaldo de carpetas", "backups.delete": "eliminó un respaldo de carpetas",
+    "stacks.delete": "eliminó el stack", "ssl.delete": "eliminó el certificado", "dns.delete_zone": "eliminó la zona DNS",
+    "storage.lv_remove": "eliminó el volumen lógico", "storage.raid_fail_remove": "retiró un disco del RAID",
+    "shares.smb_delete_share": "eliminó el recurso compartido", "remote.token_create": "creó un token de acceso remoto",
+    "notify.config": "cambió la configuración de notificaciones",
+}
+
 _lock = threading.Lock()
 _db = None
 
@@ -171,7 +196,26 @@ def init_app(app):
         target = next((str(params[k]) for k in ("name", "unit", "path", "container", "iface", "db", "user", "zone",
                                                  "app", "key", "service", "pkg", "package") if params.get(k)), "")
         log(module or "panel", action.replace("_", " "), target, ok, resp.status_code, sanitize(params), user=user)
+        if ok and ep in SENSITIVE:
+            _notify_change(ep, module, target, params)
         return resp
+
+
+def _notify_change(ep, module, target, params):
+    """Correo de «cambio delicado»: quién, desde dónde, qué y los parámetros (sin secretos). Nunca lanza."""
+    try:
+        from flask_login import current_user
+        from . import notify
+        who = current_user.get_id() if current_user.is_authenticated else "?"
+        what = SENSITIVE[ep]
+        rows = [("Quién", who), ("Desde", request.remote_addr or "?"), ("Módulo", MODULES.get(module, module)),
+                ("Acción", what)] + ([("Objetivo", target, "warn")] if target else [])
+        rows += [(k, v) for k, v in sanitize(params).items() if str(v) != target][:6]
+        notify.event("panel_changes", f"{who} {what}" + (f" «{target}»" if target else ""),
+                     "Se hizo un cambio delicado en el panel. Si no lo reconoces, revisa la Auditoría y los accesos.",
+                     key=f"change:{ep}:{target}", cooldown=30, link="/auditoria/", sections=[{"rows": rows}])
+    except Exception:
+        pass
 
 
 def selfcheck():

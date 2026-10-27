@@ -111,10 +111,20 @@ def _notify_block(username, second_factor=False):
     from . import notify
     what = "códigos 2FA incorrectos" if second_factor else "contraseñas incorrectas"
     notify.event("login_block", f"Bloqueado el acceso desde {ip}",
-                 f"La IP {ip} quedó bloqueada 5 minutos en el panel por {what}.\n"
-                 f"Último usuario intentado: {username[:64] or '—'}\n\n"
+                 f"La IP {ip} quedó bloqueada 5 minutos en el panel por {what}.\n\n"
                  "Si no fuiste tú, revisa el registro de Auditoría y considera bloquear esa IP en el Firewall.",
-                 key=f"login:{ip}", cooldown=900)
+                 key=f"login:{ip}", cooldown=900, link="/auditoria/",
+                 sections=[{"rows": [("IP", ip, "err"), ("Motivo", what), ("Último usuario intentado", username[:64] or "—")]}])
+
+
+def _notify_2fa(enabled):
+    from . import notify
+    user = current_user.username
+    notify.event("tfa_change", f"Se {'activó' if enabled else 'desactivó'} el doble factor de {user}",
+                 "La cuenta pide ahora un código de la app de autenticación además de la contraseña." if enabled else
+                 "La cuenta queda protegida solo con su contraseña. Si no fuiste tú, cambia la contraseña y vuelve a activarlo.",
+                 key=f"2fa:{user}:{enabled}", cooldown=60, level="ok" if enabled else "warn", link="/security",
+                 sections=[{"rows": [("Usuario", user, None if enabled else "warn"), ("Desde", request.remote_addr or "?")]}])
 
 
 def _start_session(username):
@@ -123,6 +133,8 @@ def _start_session(username):
     session.clear()
     session.permanent = True  # aplica PERMANENT_SESSION_LIFETIME
     login_user(User(username), remember=False)
+    from . import notify_checks
+    notify_checks.login(username, request.remote_addr or "?", request.headers.get("User-Agent", ""))
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -262,6 +274,7 @@ def tfa_activate():
     code = request.form.get("code", "").strip().replace(" ", "")[:64]
     if totp.activate(current_user.username, code):
         flash("2FA activado correctamente. Guarda tus códigos de recuperación.", "success")
+        _notify_2fa(True)
         return redirect(url_for("auth.security"))
     # Reintento con el MISMO secret: el QR ya escaneado sigue siendo válido.
     secret = totp.pending_secret(current_user.username)
@@ -293,4 +306,5 @@ def tfa_disable():
     user_limiter.reset(ukey)
     totp.disable(current_user.username)
     flash("2FA desactivado.", "info")
+    _notify_2fa(False)
     return redirect(url_for("auth.security"))

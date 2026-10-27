@@ -19,7 +19,7 @@ cfg, err = notify.validate({"enabled": True, "to": "soporte@empresa.gob.gt", "sm
 assert not err and cfg["events"]["updates"], err
 notify.save(cfg)
 SENT = []
-notify.send_now = lambda c, subject, body: SENT.append((subject, body))
+notify.send_now = lambda c, subject, body, **kw: SENT.append((subject, body, kw))
 refreshes = []
 updates.refresh_lists = lambda: refreshes.append(1)
 PKGS = [{"name": "nginx", "new_version": "1.26.3-4", "origin": "trixie", "security": False},
@@ -38,7 +38,9 @@ t0 = 1_000_000.0
 updates.check(t0)
 wait_mail(1)
 assert len(SENT) == 1 and SENT[0][0] == "2 actualizaciones nuevas (1 de seguridad)", SENT
-assert SENT[0][1].index("openssl") < SENT[0][1].index("nginx") and refreshes == [1]
+secs = SENT[0][2]["sections"]  # seguridad primero, en su propia tabla y en rojo
+assert secs[0]["title"] == "De seguridad" and secs[0]["rows"][0][:3] == ("openssl", "3.5.1-1+deb13u1", "err")
+assert secs[1]["rows"][0][0] == "nginx" and SENT[0][2]["level"] == "err" and refreshes == [1]
 updates.check(t0 + 3600)  # lo mismo pendiente: no se repite el correo; la lista no se refresca antes de 12 h
 time.sleep(0.3)
 assert len(SENT) == 1 and refreshes == [1]

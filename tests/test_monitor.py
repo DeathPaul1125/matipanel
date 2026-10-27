@@ -52,8 +52,8 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); CLOSED = s.getsockname()[1]; s.cl
 BASE = f"http://127.0.0.1:{PORT}"
 
 SENT = []
-notify.event = lambda kind, subject, body, key=None, cooldown=600: SENT.append((kind, subject, key, cooldown)) or True
-assert notify.EVENTS["monitor"] == ("Monitor: un servicio deja de responder o se recupera", True)
+notify.event = lambda kind, subject, body, key=None, cooldown=600, **kw: SENT.append((kind, subject, key, cooldown)) or True
+assert notify.EVENTS["monitor"][:2] == ("Monitor: un servicio deja de responder o se recupera", True)
 
 
 def add(**kw):

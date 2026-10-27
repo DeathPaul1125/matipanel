@@ -73,10 +73,14 @@ def record_startup(now=None):
         try:
             from . import notify
             notify.event("panel_update", f"MatiPanel se actualizó a la versión {cur['version']}",
-                         f"El panel pasó de la versión {last.get('version', '?')} a la {cur['version']}"
-                         + (f" (commit {cur['commit']})" if cur["commit"] else "") + ".\n\n"
-                         + (changes(cur["version"]) or "") + "\n\nNovedades completas en Acerca de.",
-                         key=f"panel_update:{cur['version']}:{cur['commit']}", cooldown=0)
+                         "El panel se actualizó y ya está funcionando. Novedades completas en Acerca de.",
+                         key=f"panel_update:{cur['version']}:{cur['commit']}", cooldown=0, link="/acerca",
+                         sections=[{"rows": [("Versión", f"{last.get('version', '?')} → {cur['version']}", "ok")]
+                                    + ([("Commit", cur["commit"])] if cur["commit"] else [])},
+                                   *([{"title": "Novedades", "rows": [("", ln.lstrip("-• ").strip())
+                                                                      for ln in changes(cur["version"]).splitlines()
+                                                                      if ln.strip().startswith(("-", "•"))][:12]}]
+                                     if changes(cur["version"]) else [])])
         except Exception:
             pass
     return entry

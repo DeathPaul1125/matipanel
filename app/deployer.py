@@ -1667,15 +1667,21 @@ def _notify_deploy(name, dep, status, error):
         commit = f"{(d.get('sha') or '')[:7]} {d.get('message') or ''}".strip() or "—"
         origin = {"manual": "manual", "poll": "push detectado", "webhook": "webhook", "rollback": "reversión",
                   "config": "cambio de configuración"}.get(dep.get("trigger"), dep.get("trigger") or "")
+        took = (d.get("finished") or time.time()) - (d.get("started") or d.get("created") or time.time())
+        cfg = load_config(name) or {}
+        rows = [("App", name), ("Commit", commit, "ok" if status == "success" else None), ("Rama", cfg.get("branch", "")),
+                ("Disparado por", origin), ("Duración", f"{int(took // 60)} min {int(took % 60)} s"), ("Despliegue", dep["id"])]
+        if status == "success" and cfg.get("hostname"):
+            rows.append(("Dirección", f"http://{cfg['hostname']}"))
         if status == "failed":
             notify.event("deploy_fail", f"Falló el despliegue de «{name}»",
-                         f"El despliegue {dep['id']} de «{name}» ({origin}) falló:\n\n{error}\n\nCommit: {commit}\n"
-                         "La versión anterior sigue en línea. Revisa el log en Despliegues.",
-                         key=f"deploy:{dep['id']}", cooldown=0)
+                         "La versión anterior sigue en línea. El registro completo está en Despliegues.",
+                         key=f"deploy:{dep['id']}", cooldown=0, sections=[{"rows": rows}], pre=str(error or "")[-3000:],
+                         link=f"/despliegues/app/{name}", badge="Despliegue fallido")
         else:
-            notify.event("deploy_ok", f"«{name}» desplegada",
-                         f"El despliegue {dep['id']} de «{name}» ({origin}) terminó bien.\n\nCommit: {commit}",
-                         key=f"deploy:{dep['id']}", cooldown=0)
+            notify.event("deploy_ok", f"«{name}» desplegada", "La versión nueva ya está en línea.",
+                         key=f"deploy:{dep['id']}", cooldown=0, sections=[{"rows": rows}], link=f"/despliegues/app/{name}",
+                         badge="Despliegue correcto")
     except Exception:  # un fallo del correo no debe afectar al despliegue
         pass
 
