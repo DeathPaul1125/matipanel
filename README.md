@@ -2,9 +2,9 @@
 
 > Administrador web para servidores Linux, inspirado en Webmin y Cockpit, hecho con Python + Flask.
 
-Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Incluye terminal web, historial de métricas de 7 días, ayuda integrada con buscador y tema claro/oscuro.
+Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.4.0-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.8.0-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -26,11 +26,14 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
   </tr>
   <tr>
     <td><img src="docs/screenshots/firewall.png" alt="Firewall"><br><sub><b>Firewall:</b> instala y gestiona UFW, con accesos rápidos para servicios comunes.</sub></td>
-    <td><img src="docs/screenshots/ayuda.png" alt="Ayuda integrada"><br><sub><b>Ayuda:</b> 30 capítulos con índice, buscador (Ctrl+K) y ayuda contextual.</sub></td>
+    <td><img src="docs/screenshots/ayuda.png" alt="Ayuda integrada"><br><sub><b>Ayuda:</b> 40 capítulos con índice, buscador (Ctrl+K) y ayuda contextual.</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/apariencia.png" alt="Apariencia"><br><sub><b>Apariencia:</b> color de acento, barra lateral, tamaño, densidad y secciones del dashboard, por usuario.</sub></td>
+    <td><img src="docs/screenshots/apariencia.png" alt="Apariencia"><br><sub><b>Apariencia:</b> estilo de la interfaz, color de acento, barra lateral, tamaño, densidad y secciones del dashboard, por usuario.</sub></td>
     <td><img src="docs/screenshots/login.png" alt="Inicio de sesión"><br><sub><b>Inicio de sesión:</b> con tus usuarios de Linux (PAM) y doble factor opcional.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/dashboard-moderno.png" alt="Estilo Moderno"><br><sub><b>Estilo «Moderno»</b> (inspirado en TailAdmin), en tema oscuro: se elige en Apariencia y cambia toda la interfaz.</sub></td>
   </tr>
 </table>
 
@@ -48,7 +51,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Discos** | Particiones y uso |
 | **Almacenamiento** | LVM (PV, VG, LV, snapshots), RAID con mdadm y cuotas de disco |
 | **Respaldos** | Respaldos `.tar.gz` de carpetas, descarga, restauración y programación con retención |
-| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otros servidores: Linux por SSH o Windows/NAS por carpeta compartida con cuenta del AD** (varios a la vez, cada app elige el suyo): programados, con retención, verificación SHA-256 y restauración |
+| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otros servidores: Linux por SSH o Windows/NAS por carpeta compartida con cuenta del AD** (varios a la vez, cada app elige el suyo): programados, con retención, verificación SHA-256, restauración y **recuperación ante desastres** en un servidor nuevo |
 | **Usuarios y grupos** | Crear/borrar usuarios, contraseñas, bloqueo, shells, grupos, membresías y **claves SSH** autorizadas |
 | **Permisos del panel** | Roles por usuario: administrador, solo lectura, módulos concretos o sin acceso |
 | **Seguridad del servidor** | Chequeo con semáforo (SSH, firewall, actualizaciones, reinicio pendiente, puertos, cuentas) con correcciones guiadas y gestión de fail2ban |
@@ -110,7 +113,7 @@ El navegador avisará que el certificado es autofirmado: es lo esperado. Elige *
 
 El instalador:
 
-1. Instala las dependencias del sistema (`python3-venv`, compiladores, `openssl`, `zip`, `unzip`).
+1. Instala las dependencias del sistema (`python3-venv`, compiladores, `openssl`, `zip`, `unzip` y `cifs-utils` para respaldar en carpetas compartidas de Windows).
 2. Crea el grupo `matipanel` y agrega a tu usuario.
 3. Copia la aplicación a `/opt/matipanel` con su propio entorno de Python.
 4. Genera un certificado HTTPS autofirmado en `/etc/matipanel/`.
@@ -125,10 +128,22 @@ MatiPanel usa versionado semántico (`MAYOR.MENOR.PARCHE`); la versión está en
 ### Actualizar
 
 ```bash
-cd /tmp/matipanel && git pull && bash scripts/install.sh
+cd /tmp/matipanel && git pull && sudo bash scripts/install.sh TU_USUARIO
 ```
 
-Recarga el navegador con **Ctrl+F5**. Se conservan el certificado, el 2FA, las preferencias, el historial de métricas y los respaldos.
+Recarga el navegador con **Ctrl+F5**. Se conservan el certificado, el 2FA, las preferencias, el historial de métricas, las apps desplegadas y los respaldos.
+
+### Recuperación ante desastres
+
+Si el servidor se pierde, las apps desplegadas se recuperan en uno nuevo desde sus respaldos:
+
+1. Instala MatiPanel en el servidor nuevo (mejor con la misma IP) y, en **Despliegues**, instala Docker y Nginx.
+2. En **Respaldos de apps**, agrega el mismo servidor de respaldos. Si es Linux, autoriza allí la clave SSH nueva del panel.
+3. En **Recuperación ante desastres**, pulsa **Buscar apps en el servidor** y **Recuperar…** en cada app.
+
+Cada app se recrea con su configuración original, se restauran su base de datos y sus archivos **antes** del primer despliegue, y se despliega desde GitHub. Guarda fuera del servidor los datos de acceso al servidor de respaldos (y la contraseña de la cuenta de Windows): sin ellos no hay recuperación. La guía completa está en [Respaldos de apps](app/docs/57-respaldos-apps.md#recuperación-ante-desastres).
+
+> La recuperación cubre las apps desplegadas. Usuarios, firewall, notificaciones, monitor, permisos y stacks del panel se vuelven a configurar a mano.
 
 ### Desinstalar
 
@@ -159,6 +174,7 @@ El servicio corre como **root** (igual que Webmin) porque administra el sistema 
 - **Terminal:** baja a los privilegios de tu usuario; nunca abre un shell root.
 - **Comandos:** todos se ejecutan sin shell y con validación estricta de parámetros.
 - **Permisos y auditoría:** roles por usuario (administrador, solo lectura, módulos concretos) aplicados en cada petición, y registro de quién hizo qué sin guardar secretos.
+- **Respaldos remotos:** claves SSH propias con `restrict` y huella fijada; en Windows la contraseña de la cuenta del AD solo vive en el servidor (nunca vuelve al navegador ni a la auditoría), la conexión SMB 3 va cifrada y sobre la carpeta montada se trabaja sin privilegios. Lo que llega de un respaldo se valida antes de recrear nada.
 - **Acciones destructivas:** piden confirmación, y las más delicadas exigen escribir el nombre de lo que se va a borrar.
 - **Cambios de configuración:** se validan antes de aplicarse (`nginx -t`, `testparm`, `named-checkzone`, `postfix check`…) y se revierten si fallan.
 
@@ -183,7 +199,7 @@ Environment="MATIPANEL_FILE_WRITE=0"   # administrador de archivos en solo lectu
 
 ## Documentación
 
-La guía de usuario completa (más de 40 capítulos) está en [`app/docs/`](app/docs/) y dentro del panel en **Menú → Cuenta → Ayuda**, o con el botón **?** de cada pantalla. Empieza por la [Introducción](app/docs/01-introduccion.md) y la guía de [Instalación](app/docs/02-instalacion.md).
+La guía de usuario completa (40 capítulos) está en [`app/docs/`](app/docs/) y dentro del panel en **Menú → Cuenta → Ayuda**, o con el botón **?** de cada pantalla. Empieza por la [Introducción](app/docs/01-introduccion.md) y la guía de [Instalación](app/docs/02-instalacion.md).
 
 ## Desarrollo
 
@@ -233,6 +249,9 @@ Cada prueba corre en una carpeta temporal con la app de prueba, sin tocar `/var/
 - [x] Despliegues, stacks y respaldos remotos de apps
 - [x] Monitor, notificaciones por correo y auditoría
 - [x] Permisos por usuario y seguridad del servidor
+- [x] Respaldos en Windows/NAS con Active Directory y varios servidores
+- [x] Recuperación ante desastres de las apps
+- [ ] Respaldo de la configuración del propio panel
 - [ ] DNSSEC y zonas inversas IPv6
 - [ ] Buzones virtuales de correo
 
