@@ -1217,6 +1217,84 @@ def tables(engine):
     return jsonify({"ok": True, "tables": out, "readonly": _readonly_reason(engine, db, schema)})
 
 
+ERD_MAX_TABLES = 400  # ponytail: tope para no dibujar miles de tablas; más allá, filtrar en el navegador
+
+
+@dbexplorer_bp.route("/api/<any(mysql, pg):engine>/erd")
+@login_required
+@needs_engine
+def erd(engine):
+    """Diagrama entidad-relación de una base (o esquema): tablas, columnas y claves foráneas."""
+    db, schema = _ctx(engine, request.args)
+    if engine == "mysql":
+        s = my_text(db)
+        trows, crows, frows = _q("mysql", None, [
+            f"SELECT TABLE_NAME, TABLE_TYPE, TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = {s}"
+            " ORDER BY TABLE_NAME",
+            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY FROM information_schema.COLUMNS"
+            f" WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION",
+            "SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_SCHEMA, k.REFERENCED_TABLE_NAME,"
+            " k.REFERENCED_COLUMN_NAME, r.DELETE_RULE, r.UPDATE_RULE FROM information_schema.KEY_COLUMN_USAGE k"
+            " JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA"
+            " AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME"
+            f" WHERE k.TABLE_SCHEMA = {s} AND k.REFERENCED_TABLE_NAME IS NOT NULL"
+            " ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION",
+        ])
+        tables = [{"name": r[0], "type": "view" if "VIEW" in (r[1] or "") else "table", "rows": _int(r[2])} for r in trows]
+        cols = [(r[0], r[1], r[2] or "", r[3] == "YES", (r[4] or "") == "PRI") for r in crows]
+        fkrows = [(r[0], r[1], r[2], r[3] if r[3] != db else None, r[4], r[5], r[6], r[7]) for r in frows]
+    else:
+        ns = pg_text(schema)
+        rels = (f"SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+                f" WHERE n.nspname = {ns} AND c.relkind IN ('r','p','v','m','f')")
+        trows, crows, frows = _q("pg", db, [
+            _pgagg("c.relname, c.relkind::text, c.reltuples::bigint",
+                   "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+                   f" WHERE n.nspname = {ns} AND c.relkind IN ('r','p','v','m','f')", "c.relname"),
+            _pgagg("c.relname, a.attname, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull,"
+                   " EXISTS (SELECT 1 FROM pg_index ix WHERE ix.indrelid = c.oid AND ix.indisprimary"
+                   " AND a.attnum = ANY (ix.indkey::int2[]))",
+                   f"FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.oid IN ({rels})"
+                   " AND a.attnum > 0 AND NOT a.attisdropped", "c.relname, a.attnum"),
+            _pgagg("con.conname, c.relname, a.attname, nf.nspname, cf.relname, af.attname, con.confdeltype::text,"
+                   " con.confupdtype::text",
+                   "FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid"
+                   " JOIN pg_class cf ON cf.oid = con.confrelid JOIN pg_namespace nf ON nf.oid = cf.relnamespace"
+                   " CROSS JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY k(att, fatt, n)"
+                   " JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.att"
+                   " JOIN pg_attribute af ON af.attrelid = con.confrelid AND af.attnum = k.fatt"
+                   f" WHERE con.contype = 'f' AND con.conrelid IN ({rels})", "c.relname, con.conname, k.n"),
+        ])
+        kinds = {"r": "table", "p": "table", "v": "view", "m": "matview", "f": "foreign"}
+        tables = [{"name": r[0], "type": kinds.get(r[1], "other"), "rows": _int(r[2]) if (_int(r[2]) or 0) >= 0 else None}
+                  for r in trows]
+        cols = [(r[0], r[1], r[2] or "", bool(r[3]), bool(r[4])) for r in crows]
+        rules = {"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
+        fkrows = [(r[0], r[1], r[2], r[3] if r[3] != schema else None, r[4], r[5], rules.get(r[6], r[6]),
+                   rules.get(r[7], r[7])) for r in frows]
+    truncated = len(tables) > ERD_MAX_TABLES
+    tables = tables[:ERD_MAX_TABLES]
+    byname = {t["name"]: t for t in tables}
+    for t in tables:
+        t["columns"] = []
+    fkcols = {(r[1], r[2]) for r in fkrows}
+    for tname, cname, ctype, nullable, pk in cols:
+        if tname in byname:
+            byname[tname]["columns"].append({"name": cname, "type": ctype, "nullable": nullable, "pk": pk,
+                                             "fk": (tname, cname) in fkcols})
+    fks = {}
+    for name, tname, cname, ref_schema, ref_table, ref_col, on_del, on_upd in fkrows:
+        if tname not in byname:
+            continue
+        fk = fks.setdefault((tname, name), {"name": name, "table": tname, "columns": [], "ref_schema": ref_schema,
+                                            "ref_table": ref_table, "ref_columns": [], "on_delete": on_del,
+                                            "on_update": on_upd})
+        fk["columns"].append(cname)
+        fk["ref_columns"].append(ref_col)
+    return jsonify({"ok": True, "tables": tables, "fks": list(fks.values()), "truncated": truncated,
+                    "max": ERD_MAX_TABLES})
+
+
 @dbexplorer_bp.route("/api/<any(mysql, pg):engine>/table")
 @login_required
 @needs_engine

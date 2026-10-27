@@ -62,7 +62,7 @@ const ENG_LABEL = {mysql: 'MariaDB / MySQL', pg: 'PostgreSQL'};
 const APPS = {{ apps|tojson }};
 const APP_ENGINE = Object.fromEntries(APPS.map(a => [a.name, a.engine]));
 const engLabel = () => S.srv ? `App «${S.srv}»` : ENG_LABEL[S.engine];
-const DB_TABS = [['tables', 'Tablas'], ['sql', 'SQL'], ['create', 'Crear tabla'], ['export', 'Exportar']];
+const DB_TABS = [['tables', 'Tablas'], ['diagram', 'Diagrama'], ['sql', 'SQL'], ['create', 'Crear tabla'], ['export', 'Exportar']];
 const TABLE_TABS = [['data', 'Datos'], ['structure', 'Estructura'], ['sql', 'SQL'], ['ops', 'Operaciones'], ['io', 'Exportar / Importar']];
 const OPS = [['', '—'], ['like', 'contiene'], ['eq', '='], ['ne', '≠'], ['gt', '>'], ['lt', '<'], ['starts', 'empieza con'], ['null', 'es NULL'], ['notnull', 'no es NULL']];
 const $ = id => document.getElementById(id);
@@ -364,6 +364,7 @@ async function viewDb(tok) {
   if (S.tab === 'tables') return viewOverview(v, tok);
   if (S.tab === 'sql') return viewConsole(v);
   if (S.tab === 'create') return viewCreate(v);
+  if (S.tab === 'diagram') return viewDiagram(v);
   return viewDbExport(v);
 }
 
@@ -414,6 +415,282 @@ function fmtSize(n) {
   let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return n.toFixed(1) + ' ' + u[i];
+}
+
+// ── Diagrama entidad-relación ──────────────────────────────────────
+// Distribución automática: las tablas «padre» (referenciadas) a la izquierda y sus hijas a la derecha;
+// las tablas sin relaciones, en una cuadrícula al final. Las posiciones que arrastres se recuerdan.
+const ERD = {data: null, pos: {}, view: {x: 20, y: 20, k: 1}, keysOnly: false, focus: null};
+const erdKey = () => `dbx-erd:${S.srv}:${S.engine}:${S.db}:${S.schema || ''}`;
+const ERD_ROW = 20, ERD_HEAD = 30, ERD_CH = 7.2;
+
+function erdSize(t) {
+  const cols = ERD.keysOnly ? t.columns.filter(c => c.pk || c.fk) : t.columns;
+  const wName = t.name.length * 8 + 40;
+  const wCols = Math.max(0, ...cols.map(c => (c.name.length + Math.min(c.type.length, 24)) * ERD_CH + 64));
+  return {w: Math.min(360, Math.max(170, wName, wCols)), h: ERD_HEAD + Math.max(1, cols.length) * ERD_ROW + 8, cols};
+}
+
+function erdLayout() {
+  const d = ERD.data, names = d.tables.map(t => t.name), set = new Set(names);
+  const parents = {}, related = new Set();
+  for (const n of names) parents[n] = new Set();
+  for (const f of d.fks) {
+    if (f.ref_schema || !set.has(f.ref_table) || f.ref_table === f.table) continue;
+    parents[f.table].add(f.ref_table);
+    related.add(f.table); related.add(f.ref_table);
+  }
+  // nivel = 1 + nivel máximo de sus padres (con tope por si hay ciclos)
+  const level = {};
+  for (const n of names) level[n] = 0;
+  for (let it = 0; it < names.length; it++) {
+    let changed = false;
+    for (const n of names) for (const p of parents[n]) {
+      if (level[n] < level[p] + 1 && level[p] + 1 < 12) { level[n] = level[p] + 1; changed = true; }
+    }
+    if (!changed) break;
+  }
+  const pos = {}, sizes = Object.fromEntries(d.tables.map(t => [t.name, erdSize(t)]));
+  const cols = [];
+  for (const n of names.filter(n => related.has(n))) (cols[level[n]] = cols[level[n]] || []).push(n);
+  let x = 0, maxY = 0;
+  const COL_MAX = 1400;
+  for (const col of cols.filter(Boolean)) {
+    col.sort((a, b) => (parents[a].size - parents[b].size) || a.localeCompare(b));
+    let y = 0, w = 0;
+    for (const n of col) {
+      if (y > 0 && y + sizes[n].h > COL_MAX) { x += w + 70; y = 0; w = 0; }  // columna muy alta: partirla
+      pos[n] = {x, y}; y += sizes[n].h + 28; w = Math.max(w, sizes[n].w); maxY = Math.max(maxY, y);
+    }
+    x += w + 110;
+  }
+  // tablas sueltas: cuadrícula debajo (o desde el inicio si no hay relaciones)
+  const loose = names.filter(n => !related.has(n));
+  const width = Math.max(x, 1100);
+  let lx = 0, ly = related.size ? maxY + 60 : 0, rowH = 0;
+  for (const n of loose) {
+    if (lx > 0 && lx + sizes[n].w > width) { lx = 0; ly += rowH + 28; rowH = 0; }
+    pos[n] = {x: lx, y: ly}; lx += sizes[n].w + 40; rowH = Math.max(rowH, sizes[n].h);
+  }
+  return pos;
+}
+
+async function viewDiagram(v) {
+  v.innerHTML = '<div class="card"><div class="empty">Leyendo tablas y relaciones…</div></div>';
+  const d = await getJSON(api('erd', {db: S.db, schema: S.schema || ''}));
+  if (!d.ok) { v.innerHTML = `<div class="card"><div class="dbx-err">${esc(d.error || 'No se pudo leer la base')}</div></div>`; return; }
+  ERD.data = d;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(erdKey())) || {}; } catch (e) {}
+  ERD.keysOnly = !!saved.keysOnly;
+  const auto = erdLayout();
+  ERD.pos = Object.fromEntries(d.tables.map(t => [t.name, (saved.pos || {})[t.name] || auto[t.name]]));
+  v.innerHTML = `<div class="card erd-card">
+    <div class="erd-tools">
+      <input type="search" class="input" id="erd-find" placeholder="Buscar tabla…" list="erd-names" autocomplete="off">
+      <datalist id="erd-names">${d.tables.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
+      <label class="dlg-check"><input type="checkbox" id="erd-keys" ${ERD.keysOnly ? 'checked' : ''}> Solo columnas clave</label>
+      <span class="erd-sp"></span>
+      <button type="button" class="btn btn-sm" id="erd-zout" title="Alejar">−</button>
+      <button type="button" class="btn btn-sm" id="erd-zin" title="Acercar">+</button>
+      <button type="button" class="btn btn-sm" id="erd-fit">Ajustar</button>
+      <button type="button" class="btn btn-sm" id="erd-auto">Reorganizar</button>
+      <button type="button" class="btn btn-sm" id="erd-svg">SVG</button>
+      <button type="button" class="btn btn-sm" id="erd-png">PNG</button>
+    </div>
+    <div class="erd-wrap" id="erd-wrap"><svg id="erd-svg-el" class="erd" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <p class="small muted">${d.tables.length} tablas · ${d.fks.length} relaciones${d.truncated ? ` · se muestran las primeras ${d.max}` : ''}.
+      Arrastra una tabla para moverla y el fondo para desplazarte; la rueda acerca o aleja. Pasa el ratón por una tabla para resaltar sus relaciones; doble clic abre su estructura.
+      <span class="erd-legend"><b>PK</b> clave primaria · <b>FK</b> clave foránea · <i>?</i> admite nulos · la línea termina en ⟨ del lado «muchos».</span></p>
+  </div>`;
+  if (!d.tables.length) { $('erd-wrap').innerHTML = '<div class="empty">Esta base no tiene tablas.</div>'; return; }
+  erdDraw();
+  erdFit();
+  erdBind();
+}
+
+function erdSave() {
+  try { localStorage.setItem(erdKey(), JSON.stringify({pos: ERD.pos, keysOnly: ERD.keysOnly})); } catch (e) {}
+}
+
+function erdEdge(f, sizes) {
+  const a = ERD.pos[f.table], b = ERD.pos[f.ref_table];
+  if (!a || !b) return '';
+  const sa = sizes[f.table], sb = sizes[f.ref_table];
+  const rowY = (s, p, col) => {
+    const i = s.cols.findIndex(c => c.name === col);
+    return p.y + (i >= 0 ? ERD_HEAD + i * ERD_ROW + ERD_ROW / 2 : ERD_HEAD / 2);
+  };
+  const y1 = rowY(sa, a, f.columns[0]), y2 = rowY(sb, b, f.ref_columns[0]);
+  let x1, x2, c1, c2;
+  if (f.table === f.ref_table) {  // auto-referencia: lazo por la derecha
+    x1 = a.x + sa.w; x2 = x1;
+    return `M${x1},${y1} C${x1 + 60},${y1} ${x2 + 60},${y2} ${x2},${y2}`;
+  }
+  if (a.x + sa.w / 2 >= b.x + sb.w / 2) { x1 = a.x; x2 = b.x + sb.w; c1 = x1 - 60; c2 = x2 + 60; }
+  else { x1 = a.x + sa.w; x2 = b.x; c1 = x1 + 60; c2 = x2 - 60; }
+  return `M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}`;
+}
+
+function erdDraw() {
+  const d = ERD.data, svg = $('erd-svg-el');
+  const sizes = Object.fromEntries(d.tables.map(t => [t.name, erdSize(t)]));
+  const edges = d.fks.map((f, i) => {
+    const path = erdEdge(f, sizes);
+    if (!path) return '';
+    const tip = `${f.table}(${f.columns.join(', ')}) → ${f.ref_schema ? f.ref_schema + '.' : ''}${f.ref_table}(${f.ref_columns.join(', ')})`
+      + ` · ON DELETE ${f.on_delete || '—'} · ON UPDATE ${f.on_update || '—'}`;
+    return `<path class="erd-edge" data-i="${i}" data-a="${esc(f.table)}" data-b="${esc(f.ref_table)}" d="${path}" marker-start="url(#erd-many)" marker-end="url(#erd-one)"><title>${esc(f.name + ': ' + tip)}</title></path>`;
+  }).join('');
+  const boxes = d.tables.map(t => {
+    const p = ERD.pos[t.name], s = sizes[t.name];
+    const rows = s.cols.map((c, i) => {
+      const y = ERD_HEAD + i * ERD_ROW + 14;
+      const badge = c.pk ? '<tspan class="erd-pk">PK</tspan>' : c.fk ? '<tspan class="erd-fk">FK</tspan>' : '';
+      return `<text class="erd-badge" x="8" y="${y}">${badge}</text>
+        <text class="erd-col${c.pk ? ' pk' : ''}" x="32" y="${y}">${esc(c.name)}${c.nullable && !c.pk ? '<tspan class="erd-null">?</tspan>' : ''}</text>
+        <text class="erd-type" x="${s.w - 8}" y="${y}" text-anchor="end">${esc(c.type.length > 24 ? c.type.slice(0, 23) + '…' : c.type)}</text>`;
+    }).join('') || `<text class="erd-type" x="8" y="${ERD_HEAD + 14}">${ERD.keysOnly ? '(sin columnas clave)' : '(sin columnas)'}</text>`;
+    const tag = t.type !== 'table' ? ` <tspan class="erd-tag">${esc(t.type === 'view' ? 'vista' : t.type)}</tspan>` : '';
+    return `<g class="erd-table${t.type !== 'table' ? ' view' : ''}" data-t="${esc(t.name)}" transform="translate(${p.x},${p.y})">
+      <rect class="erd-box" width="${s.w}" height="${s.h}" rx="6"/>
+      <path class="erd-head" d="M0,6 a6,6 0 0 1 6,-6 h${s.w - 12} a6,6 0 0 1 6,6 v${ERD_HEAD - 6} h-${s.w} z"/>
+      <text class="erd-name" x="10" y="20">${esc(t.name)}${tag}</text>${rows}</g>`;
+  }).join('');
+  svg.innerHTML = `<defs>
+      <marker id="erd-many" viewBox="0 0 12 12" refX="1" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M12,6 L1,1 M12,6 L1,11 M12,6 L1,6" class="erd-mk"/></marker>
+      <marker id="erd-one" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto"><path d="M8,1 L8,11" class="erd-mk"/></marker>
+    </defs><g id="erd-root" transform="translate(${ERD.view.x},${ERD.view.y}) scale(${ERD.view.k})">${edges}${boxes}</g>`;
+  if (ERD.focus) erdHighlight(ERD.focus);
+}
+
+function erdApplyView() {
+  const g = $('erd-root');
+  if (g) g.setAttribute('transform', `translate(${ERD.view.x},${ERD.view.y}) scale(${ERD.view.k})`);
+}
+
+function erdBounds() {
+  const sizes = Object.fromEntries(ERD.data.tables.map(t => [t.name, erdSize(t)]));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [n, p] of Object.entries(ERD.pos)) {
+    if (!sizes[n]) continue;
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + sizes[n].w); y1 = Math.max(y1, p.y + sizes[n].h);
+  }
+  return {x0, y0, x1, y1};
+}
+
+function erdFit() {
+  const wrap = $('erd-wrap'), b = erdBounds();
+  if (!isFinite(b.x0)) return;
+  const k = Math.min(1.2, (wrap.clientWidth - 40) / (b.x1 - b.x0 + 80), (wrap.clientHeight - 40) / (b.y1 - b.y0 + 80));
+  ERD.view.k = Math.max(0.15, k);
+  ERD.view.x = 20 - (b.x0 - 40) * ERD.view.k;
+  ERD.view.y = 20 - (b.y0 - 40) * ERD.view.k;
+  erdApplyView();
+}
+
+function erdZoom(f, cx, cy) {
+  const v = ERD.view, k = Math.min(3, Math.max(0.1, v.k * f));
+  v.x = cx - (cx - v.x) * k / v.k; v.y = cy - (cy - v.y) * k / v.k; v.k = k;
+  erdApplyView();
+}
+
+function erdHighlight(name) {
+  const svg = $('erd-svg-el');
+  if (!svg) return;
+  const near = new Set(name ? [name] : []);
+  svg.querySelectorAll('.erd-edge').forEach(e => {
+    const on = name && (e.dataset.a === name || e.dataset.b === name);
+    e.classList.toggle('on', !!on); e.classList.toggle('dim', !!name && !on);
+    if (on) { near.add(e.dataset.a); near.add(e.dataset.b); }
+  });
+  svg.querySelectorAll('.erd-table').forEach(g => {
+    g.classList.toggle('dim', !!name && !near.has(g.dataset.t));
+    g.classList.toggle('on', g.dataset.t === name);
+  });
+}
+
+function erdBind() {
+  const wrap = $('erd-wrap'), svg = $('erd-svg-el');
+  let drag = null;
+  const pt = e => { const r = svg.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
+  svg.addEventListener('pointerdown', e => {
+    const g = e.target.closest('.erd-table'), p = pt(e);
+    svg.setPointerCapture(e.pointerId);
+    drag = g ? {t: g.dataset.t, g, sx: p.x, sy: p.y, ox: ERD.pos[g.dataset.t].x, oy: ERD.pos[g.dataset.t].y}
+             : {pan: true, sx: p.x, sy: p.y, ox: ERD.view.x, oy: ERD.view.y};
+    wrap.classList.add('grabbing');
+  });
+  svg.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const p = pt(e);
+    if (drag.pan) { ERD.view.x = drag.ox + p.x - drag.sx; ERD.view.y = drag.oy + p.y - drag.sy; erdApplyView(); return; }
+    const pos = ERD.pos[drag.t];
+    pos.x = Math.round(drag.ox + (p.x - drag.sx) / ERD.view.k);
+    pos.y = Math.round(drag.oy + (p.y - drag.sy) / ERD.view.k);
+    drag.moved = true;
+    drag.g.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+    const sizes = Object.fromEntries(ERD.data.tables.map(t => [t.name, erdSize(t)]));
+    svg.querySelectorAll('.erd-edge').forEach(el => {
+      if (el.dataset.a === drag.t || el.dataset.b === drag.t) el.setAttribute('d', erdEdge(ERD.data.fks[+el.dataset.i], sizes));
+    });
+  });
+  const end = () => { if (drag && drag.moved) erdSave(); drag = null; wrap.classList.remove('grabbing'); };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+  svg.addEventListener('wheel', e => { e.preventDefault(); const p = pt(e); erdZoom(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, {passive: false});
+  svg.addEventListener('mouseover', e => { const g = e.target.closest('.erd-table'); if (!drag) erdHighlight(g ? g.dataset.t : ERD.focus); });
+  svg.addEventListener('dblclick', e => { const g = e.target.closest('.erd-table'); if (g) go({table: g.dataset.t, tab: 'structure'}); });
+  $('erd-zin').onclick = () => erdZoom(1.25, wrap.clientWidth / 2, wrap.clientHeight / 2);
+  $('erd-zout').onclick = () => erdZoom(0.8, wrap.clientWidth / 2, wrap.clientHeight / 2);
+  $('erd-fit').onclick = erdFit;
+  $('erd-auto').onclick = () => { ERD.pos = erdLayout(); erdSave(); erdDraw(); erdFit(); };
+  $('erd-keys').onchange = e => { ERD.keysOnly = e.target.checked; erdSave(); erdDraw(); };
+  $('erd-find').oninput = e => {
+    const q = e.target.value.trim().toLowerCase();
+    const t = ERD.data.tables.find(t => t.name.toLowerCase() === q) || (q && ERD.data.tables.find(t => t.name.toLowerCase().includes(q)));
+    ERD.focus = t ? t.name : null;
+    erdHighlight(ERD.focus);
+    if (t) {  // centrar la tabla encontrada
+      const p = ERD.pos[t.name], s = erdSize(t);
+      ERD.view.k = Math.max(ERD.view.k, 0.8);
+      ERD.view.x = wrap.clientWidth / 2 - (p.x + s.w / 2) * ERD.view.k;
+      ERD.view.y = wrap.clientHeight / 2 - (p.y + s.h / 2) * ERD.view.k;
+      erdApplyView();
+    }
+  };
+  $('erd-svg').onclick = () => erdExport('svg');
+  $('erd-png').onclick = () => erdExport('png');
+}
+
+// Exportar: SVG independiente (con los colores del tema ya resueltos) o PNG a 2x
+function erdExport(fmt) {
+  const svg = $('erd-svg-el'), b = erdBounds(), pad = 30;
+  const css = getComputedStyle(svg), v = n => css.getPropertyValue(n).trim();
+  const style = `text{font-family:${v('--mono') || 'monospace'};font-size:12px;fill:${v('--text')}}
+    .erd-box{fill:${v('--surface')};stroke:${v('--border-strong')}} .erd-head{fill:${v('--surface-2')}}
+    .erd-name{font-weight:700;font-size:13px} .erd-type{fill:${v('--text-muted')};font-size:11px} .erd-null{fill:${v('--text-faint')}}
+    .erd-pk{fill:${v('--warn')};font-weight:700;font-size:10px} .erd-fk{fill:${v('--accent')};font-weight:700;font-size:10px}
+    .erd-col.pk{font-weight:700} .erd-tag{fill:${v('--text-muted')};font-size:10px;font-weight:400}
+    .erd-edge{fill:none;stroke:${v('--accent')};stroke-width:1.4} .erd-mk{fill:none;stroke:${v('--accent')};stroke-width:1.4}`;
+  const clone = svg.cloneNode(true);
+  clone.querySelector('#erd-root').setAttribute('transform', `translate(${pad - b.x0},${pad - b.y0})`);
+  clone.querySelectorAll('.dim,.on').forEach(el => el.classList.remove('dim', 'on'));
+  const W = Math.ceil(b.x1 - b.x0 + pad * 2), H = Math.ceil(b.y1 - b.y0 + pad * 2);
+  clone.setAttribute('width', W); clone.setAttribute('height', H); clone.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  clone.insertAdjacentHTML('afterbegin', `<style>${style}</style><rect width="100%" height="100%" fill="${v('--bg') || '#fff'}"/>`);
+  const text = new XMLSerializer().serializeToString(clone);
+  const name = `diagrama-${S.db}${S.schema && S.schema !== 'public' ? '-' + S.schema : ''}`;
+  if (fmt === 'svg') return download(name + '.svg', text, 'image/svg+xml');
+  const img = new Image(), url = URL.createObjectURL(new Blob([text], {type: 'image/svg+xml'}));
+  img.onload = () => {
+    const c = document.createElement('canvas'), scale = Math.min(2, 16000 / Math.max(W, H));
+    c.width = W * scale; c.height = H * scale;
+    const ctx = c.getContext('2d'); ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    c.toBlob(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name + '.png'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
+  };
+  img.src = url;
 }
 
 function viewDbExport(v) {

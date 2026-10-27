@@ -1319,3 +1319,31 @@ tr.sy-boot td { background: var(--surface-2); }
 /* ── Monitor ── */
 .mon-row { cursor: pointer; }
 .mon-row.sel td { background: var(--accent-bg); }
+
+/* ── Explorador BD: diagrama entidad-relación ── */
+.erd-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.erd-tools .input { max-width: 240px; height: 30px; }
+.erd-sp { flex: 1; }
+.erd-wrap { height: 68vh; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  background: var(--bg); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 22px 22px;
+  cursor: grab; touch-action: none; }
+.erd-wrap.grabbing { cursor: grabbing; }
+svg.erd { width: 100%; height: 100%; display: block; user-select: none; }
+.erd text { font-family: var(--mono); font-size: 12px; fill: var(--text); }
+.erd .erd-box { fill: var(--surface); stroke: var(--border-strong); }
+.erd .erd-head { fill: var(--surface-2); }
+.erd .erd-table.view .erd-box { stroke-dasharray: 5 3; }
+.erd .erd-name { font-weight: 700; font-size: 13px; }
+.erd .erd-tag { fill: var(--text-muted); font-size: 10px; font-weight: 400; }
+.erd .erd-type { fill: var(--text-muted); font-size: 11px; }
+.erd .erd-null { fill: var(--text-faint); }
+.erd .erd-col.pk { font-weight: 700; }
+.erd .erd-pk { fill: var(--warn-led); font-weight: 700; font-size: 10px; }
+.erd .erd-fk { fill: var(--accent); font-weight: 700; font-size: 10px; }
+.erd .erd-table { cursor: move; transition: opacity .15s; }
+.erd .erd-table.on .erd-box { stroke: var(--accent); stroke-width: 2; }
+.erd .erd-table.dim, .erd .erd-edge.dim { opacity: .25; }
+.erd .erd-edge { fill: none; stroke: var(--accent); stroke-width: 1.4; opacity: .75; transition: opacity .15s; }
+.erd .erd-edge.on { stroke-width: 2.4; opacity: 1; }
+.erd .erd-mk { fill: none; stroke: var(--accent); stroke-width: 1.4; }
+.erd-legend { display: block; margin-top: 4px; }

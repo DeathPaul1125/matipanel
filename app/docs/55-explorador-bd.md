@@ -26,6 +26,31 @@ El explorador te deja ver y editar el contenido de tus bases de MariaDB/MySQL y 
 
 En PostgreSQL puedes cambiar de esquema con la lista **Esquema** de la barra superior.
 
+## Diagrama entidad-relación
+
+Abre una base (en PostgreSQL, también el esquema) y pulsa la pestaña **Diagrama**. Verás todas sus tablas y cómo se relacionan:
+
+- Cada tabla es una caja con su nombre y sus columnas: **PK** marca la clave primaria (también si es compuesta), **FK** las columnas que apuntan a otra tabla, y **?** las que admiten nulos. A la derecha está el tipo de cada columna. Las **vistas** aparecen con borde punteado y la etiqueta «vista».
+- Cada **línea** es una clave foránea: sale de la columna FK (con la marca ⟨, el lado «muchos») y llega a la columna referenciada (con una barra, el lado «uno»). Pasa el ratón sobre una línea para ver el nombre de la relación y sus reglas `ON DELETE` / `ON UPDATE`.
+- La distribución es automática: las tablas **«padre»** (las referenciadas) quedan a la izquierda y las que dependen de ellas a la derecha; las tablas sin relaciones, abajo.
+
+| Acción | Cómo |
+|---|---|
+| Mover una tabla | Arrástrala. La posición se recuerda en tu navegador para esa base. |
+| Desplazarte | Arrastra el fondo. |
+| Acercar o alejar | Rueda del ratón (hacia donde apunta el cursor) o los botones **−** y **+**. |
+| Ver todo | **Ajustar**. |
+| Volver a la distribución automática | **Reorganizar**. |
+| Resaltar las relaciones de una tabla | Pasa el ratón sobre ella: se atenúa todo lo demás. |
+| Buscar una tabla | Escribe su nombre en **Buscar tabla…**: se centra y se resalta. |
+| Ver solo lo importante | **Solo columnas clave** muestra únicamente las columnas PK y FK. |
+| Abrir la estructura de una tabla | Doble clic sobre ella. |
+| Exportar | **SVG** (vectorial, para documentos) o **PNG** (imagen). Se exporta todo el diagrama con los colores del tema. |
+
+> **Nota:** Se dibujan hasta 400 tablas. Las relaciones hacia tablas de **otra base o esquema** no se dibujan como línea (la tabla destino no está en el diagrama), pero la columna sigue marcada como **FK**.
+
+> **Consejo:** En bases con una tabla central muy referenciada (por ejemplo `users`), marca **Solo columnas clave** y usa **Buscar tabla…** para seguir sus relaciones.
+
 ## Ver y filtrar los datos
 
 1. Abre una tabla. Se muestra la pestaña **Datos**.

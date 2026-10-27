@@ -71,7 +71,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno |
 | **Stacks** | Proyectos de Docker Compose propios (Portainer, Uptime Kuma, wikis…) con plantillas, validación y avisos de configuraciones peligrosas |
 | **Docker** | Contenedores agrupados por proyecto con nombres propios, imágenes, volúmenes y logs |
-| **Explorador BD** | Estilo phpMyAdmin para las bases del servidor y las de cada app desplegada |
+| **Explorador BD** | Estilo phpMyAdmin para las bases del servidor y las de cada app desplegada, con **diagrama entidad-relación** exportable |
 | **Monitor** | Comprueba URLs, puertos y equipos de tu red (HTTP, TCP, ping), con historial, disponibilidad y aviso por correo |
 
 ### Herramientas y cuenta
