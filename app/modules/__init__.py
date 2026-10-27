@@ -8,6 +8,7 @@ from .disk import disk_bp
 from .backups import backups_bp
 from .users import users_bp
 from .network import network_bp
+from .traffic import traffic_bp
 from .firewall import firewall_bp
 from .webserver import webserver_bp
 from .ssl import ssl_bp
@@ -35,7 +36,7 @@ def register_modules(app, sock):
     for bp, prefix in [
         (system_bp, "/system"), (processes_bp, "/processes"), (services_bp, "/services"),
         (cron_bp, "/cron"), (disk_bp, "/disk"), (backups_bp, "/backups"),
-        (users_bp, "/users"), (network_bp, "/network"), (firewall_bp, "/firewall"),
+        (users_bp, "/users"), (network_bp, "/network"), (traffic_bp, "/trafico"), (firewall_bp, "/firewall"),
         (webserver_bp, "/webserver"), (ssl_bp, "/ssl"), (php_bp, "/php"),
         (databases_bp, "/databases"), (docker_bp, "/docker"), (files_bp, "/files"),
         (packages_bp, "/packages"), (logs_bp, "/logs"), (terminal_bp, "/terminal"),

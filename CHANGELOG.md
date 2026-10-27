@@ -3,6 +3,8 @@
 ## [Sin publicar]
 
 ### Añadido
+- 📶 **Tráfico de red** — ancho de banda por interfaz en vivo y con historial de 7 días, quién consume (equipos, servicios, procesos y conversaciones con tcpdump), capturas .pcap para Wireshark y alertas de uso y errores en la barra de estado.
+- 📋 **Tablas** — filtro, orden por columna y paginador (10 por página por defecto) en las tablas del panel.
 - 🐳 **Docker por proyecto** — contenedores agrupados por aplicación o proyecto de Compose (app, base de datos, Redis…), con nombres propios para grupos y contenedores.
 - 🗄️ **Explorador BD para apps desplegadas** — selector «Servidor» para gestionar la base del contenedor de cada aplicación (MariaDB o PostgreSQL), con enlace desde el Resumen de la app.
 - 🔀 **Nombre interno con Apache** — si Apache ocupa el puerto 80, el panel crea un sitio en Apache que reenvía el nombre interno a la app.

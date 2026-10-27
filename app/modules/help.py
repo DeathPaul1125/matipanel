@@ -20,7 +20,7 @@ GROUPS = [(0, "Comenzar"), (10, "Sistema y acceso"), (20, "Red y servidores"), (
 CONTEXT = {
     "dashboard": "10-dashboard", "system": "11-sistema", "processes": "12-procesos",
     "services": "13-servicios", "cron": "14-cron", "disk": "15-discos", "backups": "16-respaldos",
-    "users": "17-usuarios", "network": "18-red", "firewall": "20-firewall",
+    "users": "17-usuarios", "network": "18-red", "traffic": "19-trafico", "firewall": "20-firewall",
     "webserver": "21-servidor-web", "ssl": "22-ssl", "php": "23-php", "databases": "24-bases-de-datos",
     "docker": "25-docker", "files": "26-archivos", "packages": "27-paquetes", "logs": "28-logs",
     "terminal": "29-terminal", "auth": "30-seguridad-2fa", "appearance": "31-apariencia",

@@ -10,6 +10,7 @@ from flask_login import login_required, current_user
 from ..util import bytes_to_human as _bytes_to_human, run
 from ..distro import detect
 from .. import metrics
+from . import traffic
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -50,6 +51,7 @@ def _sample_loop():
             }
             _history.append(sample)
             metrics.insert(sample)
+            traffic.sample(t)  # velocidad por interfaz (Tráfico de red y alertas)
             if t - last_prune > 3600:
                 metrics.prune(t)
                 last_prune = t
@@ -204,6 +206,10 @@ def health():
     load1, cores = psutil.getloadavg()[0], psutil.cpu_count() or 1
     if load1 / cores >= 1.5:
         issues.append(("warn", f"Carga alta ({load1:.2f})"))
+    try:
+        issues += traffic.health_issues()
+    except Exception:  # la barra de salud no debe caerse por las alertas de red
+        pass
     issues.sort(key=lambda i: i[0] != "err")
     level = "err" if any(l == "err" for l, _ in issues) else "warn" if issues else "ok"
     data = {"level": level, "issues": [m for _, m in issues], "failed": failed,

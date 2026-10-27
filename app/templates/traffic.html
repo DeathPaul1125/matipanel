@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+{% block title %}Tráfico de red{% endblock %}
+{% block heading %}Tráfico de red{% endblock %}
+
+{% block content %}
+{% if not has_tcpdump %}
+<div class="card tr-note">
+  <div><b>Falta tcpdump.</b> <span class="muted">El ancho de banda y las alertas funcionan sin él; «Quién consume» y las capturas lo necesitan.</span></div>
+  {% if apt %}<button class="btn btn-primary btn-sm" onclick="installTcpdump()">Instalar tcpdump</button>
+  {% else %}<code>sudo dnf install tcpdump</code>{% endif %}
+</div>
+{% endif %}
+
+<div class="tabs" id="tr-tabs">
+  <button class="tab active" data-tab="bw">Ancho de banda</button>
+  <button class="tab" data-tab="top">Quién consume</button>
+  <button class="tab" data-tab="cap">Capturas</button>
+  <button class="tab" data-tab="alerts">Alertas</button>
+</div>
+
+<!-- Ancho de banda -->
+<div data-panel="bw">
+  <div class="card">
+    <h3>Interfaces</h3>
+    <table class="lx" id="if-table">
+      <thead><tr><th>Interfaz</th><th>Enlace</th><th>Direcciones</th><th>Bajada</th><th>Subida</th>
+        <th>Recibido</th><th>Enviado</th><th>Errores</th><th>Descartes</th></tr></thead>
+      <tbody><tr><td colspan="9" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+    <p class="small muted">Velocidades medidas cada 2 s; totales desde que arrancó el servidor. Haz clic en una interfaz para ver sus gráficas.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>En vivo · <span class="mono" id="live-name">—</span></h3><span class="chart-now" id="live-now"></span></div>
+    <div class="charts">
+      <div><div class="chart-head"><span class="chart-title">Ancho de banda</span></div><div id="ch-live-bw"></div></div>
+      <div><div class="chart-head"><span class="chart-title">Paquetes por segundo</span></div><div id="ch-live-pk"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Historial · <span class="mono" id="hist-name">—</span></h3>
+      <div class="seg" id="range-seg">
+        {% for r, label in [(300, '5 min'), (3600, '1 h'), (21600, '6 h'), (86400, '24 h'), (604800, '7 días')] %}
+        <button type="button" data-range="{{ r }}" {% if r == 3600 %}class="active"{% endif %}>{{ label }}</button>
+        {% endfor %}
+      </div></div>
+    <div class="charts">
+      <div><div class="chart-head"><span class="chart-title">Ancho de banda</span></div><div id="ch-hist-bw"></div></div>
+      <div><div class="chart-head"><span class="chart-title">Errores y descartes por segundo</span></div><div id="ch-hist-q"></div></div>
+    </div>
+    <p class="small muted">Se guarda un punto cada 30 s durante 7 días.</p>
+  </div>
+</div>
+
+<!-- Quién consume -->
+<div data-panel="top" hidden>
+  <div class="card">
+    <div class="tr-toolbar">
+      <label class="form-row"><span>Interfaz</span><select class="input" id="top-iface"></select></label>
+      <label class="form-row"><span>Muestra</span>
+        <select class="input" id="top-secs"><option value="3">3 s</option><option value="5" selected>5 s</option><option value="10">10 s</option><option value="20">20 s</option></select></label>
+      <button class="btn btn-primary" id="top-run" onclick="runTop()" {% if not has_tcpdump %}disabled{% endif %}>Analizar</button>
+      <label class="dlg-check"><input type="checkbox" id="top-auto"> Repetir sin parar</label>
+      <span class="small muted" id="top-status"></span>
+    </div>
+    <p class="small muted">Escucha la interfaz unos segundos (solo cabeceras) y muestra quién mueve más datos. Las velocidades son promedio de la muestra.</p>
+    <div id="top-sum" class="tr-sum"></div>
+  </div>
+  <div class="grid grid-2" id="top-grid" hidden>
+    <div class="card"><h3>Equipos</h3>
+      <table class="lx" id="t-hosts" data-table="10"><thead><tr><th>IP</th><th>Envía</th><th>Recibe</th><th>Paquetes</th></tr></thead><tbody></tbody></table></div>
+    <div class="card"><h3>Servicios (puertos)</h3>
+      <table class="lx" id="t-svcs" data-table="10"><thead><tr><th>Servicio</th><th>Tráfico</th><th>Paquetes</th></tr></thead><tbody></tbody></table></div>
+    <div class="card"><h3>Procesos de este servidor</h3>
+      <table class="lx" id="t-procs" data-table="10"><thead><tr><th>Proceso</th><th>Tráfico</th><th>Paquetes</th></tr></thead><tbody></tbody></table></div>
+    <div class="card"><h3>Conversaciones</h3>
+      <table class="lx" id="t-flows" data-table="10"><thead><tr><th>Protocolo</th><th>Extremo A</th><th>Extremo B</th><th>Tráfico</th><th>Paquetes</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<!-- Capturas -->
+<div data-panel="cap" hidden>
+  <div class="card">
+    <h3>Nueva captura</h3>
+    <p class="small muted">Guarda los paquetes en un archivo <span class="mono">.pcap</span> que puedes revisar aquí o abrir en Wireshark. La captura termina al cumplirse la duración o la cantidad de paquetes, lo que pase primero.</p>
+    <div class="tr-form">
+      <label class="form-row"><span>Interfaz</span><select class="input" id="c-iface"></select></label>
+      <label class="form-row"><span>Duración (s)</span><input class="input" id="c-secs" type="number" min="1" max="300" value="30"></label>
+      <label class="form-row"><span>Máximo de paquetes</span><input class="input" id="c-count" type="number" min="1" max="200000" value="10000"></label>
+      <label class="form-row"><span>Protocolo</span>
+        <select class="input" id="c-proto"><option value="">Todos</option><option value="tcp">TCP</option><option value="udp">UDP</option><option value="icmp">ICMP</option><option value="arp">ARP</option></select></label>
+      <label class="form-row"><span>Equipo (IP o nombre)</span><input class="input mono" id="c-host" placeholder="192.168.1.20"></label>
+      <label class="form-row"><span>Puerto</span><input class="input mono" id="c-port" placeholder="443"></label>
+      <label class="form-row"><span>Red</span><input class="input mono" id="c-net" placeholder="192.168.1.0/24"></label>
+      <label class="form-row"><span>Filtro avanzado (BPF)</span><input class="input mono" id="c-expr" placeholder="not port 22"></label>
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" onclick="startCapture()" {% if not has_tcpdump %}disabled{% endif %}>Iniciar captura</button></div>
+  </div>
+  <div class="card">
+    <h3>Capturas guardadas</h3>
+    <table class="lx" id="cap-table" data-table="10">
+      <thead><tr><th>Fecha</th><th>Archivo</th><th>Tamaño</th><th>Acciones</th></tr></thead>
+      <tbody><tr><td colspan="4" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+    <p class="small muted">Se conservan las últimas 20 (hasta 1 GB) en <span class="mono">/var/lib/matipanel/captures</span>.</p>
+  </div>
+  <div class="card" id="cap-sum-card" hidden>
+    <div class="card-head"><h3>Resumen · <span class="mono" id="cap-sum-name"></span></h3></div>
+    <div id="cap-sum"></div>
+  </div>
+</div>
+
+<!-- Alertas -->
+<div data-panel="alerts" hidden>
+  <div class="card">
+    <h3>Alertas de consumo</h3>
+    <p class="small muted">Se muestran en la barra de estado de arriba cuando se mantienen durante un minuto.
+      <b>Uso</b>: vacío = automático ({{ 90 }} % de la velocidad del enlace, si se conoce); 0 = sin aviso.
+      <b>Errores</b>: vacío = <span id="def-err">60</span> por minuto. <b>Descartes</b>: vacío = sin aviso (en redes con mucho broadcast o IPv6 son normales).</p>
+    <table class="lx" id="al-table">
+      <thead><tr><th>Interfaz</th><th>Enlace</th><th>Uso máximo (Mbit/s)</th><th>Errores por minuto</th><th>Descartes por minuto</th></tr></thead>
+      <tbody><tr><td colspan="5" class="muted center">Cargando…</td></tr></tbody>
+    </table>
+    <div class="form-actions"><button class="btn btn-primary" onclick="saveAlerts()">Guardar alertas</button></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+const API = {{ url_for('traffic.index')|tojson }} + 'api/';
+const $ = id => document.getElementById(id);
+const getJSON = async url => { try { return await (await fetch(url)).json(); } catch (e) { return {ok: false, error: String(e)}; } };
+const fmtBytes = n => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + u[i]; };
+const fmtBits = bps => { const b = bps * 8, u = ['bit/s', 'kbit/s', 'Mbit/s', 'Gbit/s']; let v = b, i = 0; while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; } return (v < 10 && i ? v.toFixed(1) : Math.round(v)) + ' ' + u[i]; };
+const fmtPk = v => v >= 1000 ? (v / 1000).toFixed(1) + ' k/s' : Math.round(v) + '/s';
+const rateCell = v => `<td data-sort="${v}" class="mono">${escapeHtml(fmtRate(v))}</td>`;
+
+// ── Pestañas ──
+function showTab(tab) {
+  document.querySelectorAll('#tr-tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== tab; });
+  if (tab === 'cap') loadCaptures();
+  if (tab === 'alerts') renderAlerts();
+  history.replaceState(null, '', '#' + tab);
+}
+$('tr-tabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
+
+// ── Interfaces y velocidades en vivo ──
+let IFACES = [], SEL = null, prevC = null, live = [], rates = {}, RANGE = 3600;
+const charts = {
+  liveBw: lineChart($('ch-live-bw'), {series: [{key: 'rx', label: 'Bajada'}, {key: 'tx', label: 'Subida', alt: true}], max: 'auto', min: 1024, fmt: fmtRate}),
+  livePk: lineChart($('ch-live-pk'), {series: [{key: 'rxp', label: 'Recibidos'}, {key: 'txp', label: 'Enviados', alt: true}], max: 'auto', min: 10, fmt: fmtPk}),
+  histBw: lineChart($('ch-hist-bw'), {series: [{key: 'rx', label: 'Bajada'}, {key: 'tx', label: 'Subida', alt: true}], max: 'auto', min: 1024, fmt: fmtRate}),
+  histQ: lineChart($('ch-hist-q'), {series: [{key: 'errs', label: 'Errores'}, {key: 'drops', label: 'Descartes', alt: true}], max: 'auto', min: 1, fmt: v => v.toFixed(v < 10 ? 2 : 0)}),
+};
+
+async function loadIfaces() {
+  const d = await getJSON(API + 'ifaces');
+  if (!d.ifaces) return;
+  IFACES = d.ifaces;
+  $('def-err').textContent = d.default_errors;
+  if (!SEL || !IFACES.some(i => i.name === SEL)) {
+    const best = IFACES.find(i => i.up && !i.kind && i.ips.length) || IFACES[0];
+    if (best) selectIface(best.name);
+  }
+  const opts = IFACES.map(i => `<option value="${escapeHtml(i.name)}">${escapeHtml(i.name)}${i.kind === 'docker' ? ' (Docker)' : ''}</option>`).join('');
+  for (const id of ['top-iface', 'c-iface']) {
+    const s = $(id), cur = s.value;
+    s.innerHTML = opts + '<option value="any">Todas (any)</option>';
+    s.value = cur || SEL || '';
+  }
+  renderIfTable();
+}
+
+function renderIfTable() {
+  const tb = $('if-table').tBodies[0];
+  if (!IFACES.length) { tb.innerHTML = '<tr><td colspan="9" class="muted center">Sin interfaces</td></tr>'; return; }
+  tb.innerHTML = IFACES.map(i => {
+    const r = rates[i.name] || {rx: 0, tx: 0};
+    const link = i.speed > 0 ? (i.speed >= 1000 ? i.speed / 1000 + ' Gbit/s' : i.speed + ' Mbit/s') : '—';
+    return `<tr class="tr-row${i.name === SEL ? ' sel' : ''}" onclick="selectIface(${jsArg(i.name)})">
+      <td><span class="led sm ${i.up ? '' : 'mute'}"></span><b class="mono">${escapeHtml(i.name)}</b>${i.kind === 'docker' ? ' <span class="pill mute">Docker</span>' : ''}</td>
+      <td class="small">${escapeHtml(link)}${i.mtu ? ` <span class="muted">· MTU ${i.mtu}</span>` : ''}</td>
+      <td class="small mono">${i.ips.map(escapeHtml).join('<br>') || '—'}</td>
+      <td class="mono">${escapeHtml(fmtRate(r.rx))}</td><td class="mono">${escapeHtml(fmtRate(r.tx))}</td>
+      <td class="small">${escapeHtml(fmtBytes(i.totals.rx))}</td><td class="small">${escapeHtml(fmtBytes(i.totals.tx))}</td>
+      <td class="small ${i.totals.errs ? 'tr-bad' : 'muted'}">${i.totals.errs}</td><td class="small muted">${i.totals.drops}</td></tr>`;
+  }).join('');
+}
+
+function selectIface(name) {
+  if (name !== SEL) { live = []; }
+  SEL = name;
+  $('live-name').textContent = name; $('hist-name').textContent = name;
+  renderIfTable();
+  loadHistory();
+}
+
+async function poll() {
+  const d = await getJSON(API + 'counters');
+  if (d.c) {
+    if (prevC) {
+      const dt = Math.max(d.t - prevC.t, 0.001);
+      for (const [name, c] of Object.entries(d.c)) {
+        const p = prevC.c[name];
+        if (!p) continue;
+        const r = k => Math.max(0, c[k] - p[k]) / dt;
+        rates[name] = {t: d.t, rx: r(0), tx: r(1), rxp: r(2), txp: r(3)};
+      }
+      if (SEL && rates[SEL]) {
+        live.push(rates[SEL]);
+        live = live.filter(p => p.t > d.t - 300);
+        charts.liveBw.update(live, 300, 2); charts.livePk.update(live, 300, 2);
+        $('live-now').textContent = `↓ ${fmtBits(rates[SEL].rx)} · ↑ ${fmtBits(rates[SEL].tx)}`;
+      }
+      if (!$('if-table').closest('[data-panel]').hidden) renderIfTable();
+    }
+    prevC = d;
+  }
+  setTimeout(poll, 2000);
+}
+
+async function loadHistory() {
+  if (!SEL) return;
+  const d = await getJSON(API + 'history?' + new URLSearchParams({iface: SEL, range: RANGE}));
+  if (!d.points) return;
+  charts.histBw.update(d.points, RANGE, d.bucket); charts.histQ.update(d.points, RANGE, d.bucket);
+}
+$('range-seg').addEventListener('click', e => {
+  const b = e.target.closest('[data-range]');
+  if (!b) return;
+  RANGE = +b.dataset.range;
+  document.querySelectorAll('#range-seg button').forEach(x => x.classList.toggle('active', x === b));
+  loadHistory();
+});
+
+// ── Quién consume ──
+function fillTop(r) {
+  const fill = (id, rows) => { $(id).tBodies[0].innerHTML = rows.join('') || '<tr><td colspan="5" class="muted center">Sin datos</td></tr>'; };
+  fill('t-hosts', r.hosts.map(h => `<tr><td class="mono">${escapeHtml(h.host)}</td>${rateCell(h.sent)}${rateCell(h.recv)}<td>${h.packets}</td></tr>`));
+  fill('t-svcs', r.services.map(s => `<tr><td class="mono">${escapeHtml(s.service)}</td>${rateCell(s.rate)}<td>${s.packets}</td></tr>`));
+  fill('t-procs', r.processes.map(p => `<tr><td class="mono">${escapeHtml(p.process)}</td>${rateCell(p.rate)}<td>${p.packets}</td></tr>`));
+  fill('t-flows', r.flows.map(f => `<tr><td>${escapeHtml(f.proto)}</td><td class="mono small">${escapeHtml(f.a)}</td><td class="mono small">${escapeHtml(f.b)}</td>${rateCell(f.rate)}<td>${f.packets}</td></tr>`));
+}
+function summaryHtml(r) {
+  const protos = Object.entries(r.protocols).map(([k, v]) => `<span class="pill mute">${escapeHtml(k)} ${escapeHtml(fmtRate(v))}</span>`).join(' ');
+  return `<div class="tr-kpis">
+    <div class="stat"><div class="stat-lbl">Tráfico medio</div><div class="stat-val">${escapeHtml(fmtBits(r.rate))}</div><div class="stat-sub">${escapeHtml(fmtRate(r.rate))}</div></div>
+    <div class="stat"><div class="stat-lbl">Paquetes</div><div class="stat-val">${r.packets.toLocaleString('es')}</div><div class="stat-sub">en ${r.seconds} s</div></div>
+    <div class="stat"><div class="stat-lbl">Datos</div><div class="stat-val">${escapeHtml(fmtBytes(r.bytes))}</div><div class="stat-sub">${protos || '—'}</div></div></div>`;
+}
+let topBusy = false;
+async function runTop() {
+  if (topBusy) return;
+  topBusy = true;
+  $('top-run').disabled = true;
+  $('top-status').textContent = `Escuchando ${$('top-secs').value} s…`;
+  const d = await getJSON(API + 'top?' + new URLSearchParams({iface: $('top-iface').value, seconds: $('top-secs').value}));
+  topBusy = false;
+  $('top-run').disabled = false;
+  if (!d.ok) { $('top-status').textContent = ''; return ui.alert(d.error || 'No se pudo analizar', {title: 'Error', icon: 'error'}); }
+  $('top-status').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es');
+  $('top-sum').innerHTML = summaryHtml(d);
+  $('top-grid').hidden = false;
+  fillTop(d);
+  if ($('top-auto').checked && !$('top-run').closest('[data-panel]').hidden) setTimeout(runTop, 500);
+}
+$('top-auto').addEventListener('change', e => { if (e.target.checked) runTop(); });
+
+// ── Capturas ──
+async function loadCaptures() {
+  const d = await getJSON(API + 'captures');
+  const tb = $('cap-table').tBodies[0];
+  if (!d.captures || !d.captures.length) { tb.innerHTML = '<tr><td colspan="4" class="muted center">Todavía no hay capturas</td></tr>'; return; }
+  tb.innerHTML = d.captures.map(c => `<tr>
+    <td data-sort="${c.mtime}" class="small">${escapeHtml(new Date(c.mtime * 1000).toLocaleString('es'))}</td>
+    <td class="mono small">${escapeHtml(c.name)}</td><td data-sort="${c.size}">${escapeHtml(fmtBytes(c.size))}</td>
+    <td class="nowrap"><button class="btn btn-sm" onclick="showCapture(${jsArg(c.name)})">Resumen</button>
+      <a class="btn btn-sm" href="${escapeHtml(API + 'captures/' + encodeURIComponent(c.name))}">Descargar</a>
+      <button class="btn btn-sm btn-danger" onclick="deleteCapture(${jsArg(c.name)})">Eliminar</button></td></tr>`).join('');
+}
+function renderCapSummary(name, s) {
+  $('cap-sum-card').hidden = false;
+  $('cap-sum-name').textContent = name;
+  const rows = (list, f) => list.map(f).join('') || '<tr><td colspan="4" class="muted center">Sin datos</td></tr>';
+  $('cap-sum').innerHTML = summaryHtml(s) + `<div class="grid grid-2">
+    <div><h4>Equipos</h4><table class="lx"><thead><tr><th>IP</th><th>Envía</th><th>Recibe</th><th>Paquetes</th></tr></thead><tbody>${rows(s.hosts, h => `<tr><td class="mono">${escapeHtml(h.host)}</td>${rateCell(h.sent)}${rateCell(h.recv)}<td>${h.packets}</td></tr>`)}</tbody></table></div>
+    <div><h4>Servicios</h4><table class="lx"><thead><tr><th>Servicio</th><th>Tráfico</th><th>Paquetes</th></tr></thead><tbody>${rows(s.services, x => `<tr><td class="mono">${escapeHtml(x.service)}</td>${rateCell(x.rate)}<td>${x.packets}</td></tr>`)}</tbody></table></div>
+    <div><h4>Conversaciones</h4><table class="lx"><thead><tr><th>Proto</th><th>A</th><th>B</th><th>Tráfico</th></tr></thead><tbody>${rows(s.flows, f => `<tr><td>${escapeHtml(f.proto)}</td><td class="mono small">${escapeHtml(f.a)}</td><td class="mono small">${escapeHtml(f.b)}</td>${rateCell(f.rate)}</tr>`)}</tbody></table></div>
+  </div>
+  <h4>Primeros paquetes</h4><pre class="terminal tr-preview">${escapeHtml((s.preview || []).join('\n') || '(vacío)')}</pre>`;
+  $('cap-sum-card').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+async function showCapture(name) {
+  const d = await getJSON(API + 'captures/' + encodeURIComponent(name) + '/summary');
+  if (!d.ok) return ui.alert(d.error || 'No se pudo leer', {title: 'Error', icon: 'error'});
+  renderCapSummary(name, d.summary);
+}
+async function startCapture() {
+  const body = {iface: $('c-iface').value, seconds: $('c-secs').value, count: $('c-count').value, proto: $('c-proto').value,
+                host: $('c-host').value.trim(), port: $('c-port').value.trim(), net: $('c-net').value.trim(), expr: $('c-expr').value.trim()};
+  const d = await postJSON(API + 'capture', body);
+  if (!d.ok) return ui.alert(d.error || 'La captura falló', {title: 'Error', icon: 'error'});
+  ui.toast('Captura guardada: ' + d.name);
+  loadCaptures();
+  renderCapSummary(d.name, d.summary);
+}
+async function deleteCapture(name) {
+  if (!await ui.confirm(`¿Eliminar la captura ${name}?`, {title: 'Eliminar captura', danger: true, confirmText: 'Eliminar'})) return;
+  const d = await postJSON(API + 'captures/' + encodeURIComponent(name) + '/delete', {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
+  if ($('cap-sum-name').textContent === name) $('cap-sum-card').hidden = true;
+  loadCaptures();
+}
+async function installTcpdump() {
+  const d = await postJSON(API + 'install', {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo instalar', {title: 'Error', icon: 'error'});
+  location.reload();
+}
+
+// ── Alertas ──
+function renderAlerts() {
+  const tb = $('al-table').tBodies[0];
+  if (!IFACES.length) { tb.innerHTML = '<tr><td colspan="5" class="muted center">Sin interfaces</td></tr>'; return; }
+  const val = v => v === undefined || v === null ? '' : String(v);
+  tb.innerHTML = IFACES.map(i => `<tr data-if="${escapeHtml(i.name)}">
+    <td><b class="mono">${escapeHtml(i.name)}</b></td>
+    <td class="small">${i.speed > 0 ? i.speed + ' Mbit/s' : 'desconocido'}</td>
+    <td><input class="input input-num" data-k="mbps" type="number" min="0" value="${escapeHtml(val(i.alerts.mbps))}"
+      placeholder="${i.effective.mbps ? 'auto: ' + i.effective.mbps : 'sin aviso'}"></td>
+    <td><input class="input input-num" data-k="errors" type="number" min="0" value="${escapeHtml(val(i.alerts.errors))}" placeholder="${$('def-err').textContent}"></td>
+    <td><input class="input input-num" data-k="drops" type="number" min="0" value="${escapeHtml(val(i.alerts.drops))}" placeholder="sin aviso"></td></tr>`).join('');
+}
+async function saveAlerts() {
+  const ifaces = {};
+  document.querySelectorAll('#al-table tr[data-if]').forEach(tr => {
+    const row = {};
+    tr.querySelectorAll('input[data-k]').forEach(inp => { if (inp.value.trim() !== '') row[inp.dataset.k] = inp.value.trim(); });
+    if (Object.keys(row).length) ifaces[tr.dataset.if] = row;
+  });
+  const d = await postJSON(API + 'alerts', {ifaces});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  ui.toast('Alertas guardadas');
+  await loadIfaces();
+  renderAlerts();
+}
+
+loadIfaces().then(() => {
+  const tab = location.hash.slice(1);
+  if (['bw', 'top', 'cap', 'alerts'].includes(tab)) showTab(tab);
+});
+poll();
+setInterval(loadIfaces, 30000);
+setInterval(() => { if (!$('ch-hist-bw').closest('[data-panel]').hidden) loadHistory(); }, 60000);
+</script>
+{% endblock %}

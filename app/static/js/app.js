@@ -264,7 +264,7 @@ window.ui = (() => {
 })();
 
 // ── Tablas: filtro, orden por columna y paginador ──────────────────
-// <table class="lx" data-table>                → filtro + orden + paginador (25 por página)
+// <table class="lx" data-table>                → filtro + orden + paginador (10 por página)
 // <table data-table="50" data-table-filter="off"> → otro tamaño; sin filtro (la página ya tiene el suyo)
 // <th data-nosort> no ordena; <td data-sort="123"> fija el valor con que se ordena esa celda.
 // Funciona aunque la página vuelva a pintar el <tbody> (refresco automático): se re-aplica sola.
@@ -296,7 +296,7 @@ window.enhanceTable = (() => {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(key)) || {}; } catch (e) {}
     const def = parseInt(t.dataset.table, 10);
-    const st = t._tbl = { key, q: '', page: 1, size: SIZES.includes(saved.size) ? saved.size : (SIZES.includes(def) ? def : 25),
+    const st = t._tbl = { key, q: '', page: 1, size: SIZES.includes(saved.size) ? saved.size : (SIZES.includes(def) ? def : 10),
                           sort: saved.sort || null };
     const save = () => { try { localStorage.setItem(key, JSON.stringify({ size: st.size, sort: st.sort })); } catch (e) {} };
 

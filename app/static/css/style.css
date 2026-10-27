@@ -1237,3 +1237,20 @@ th.tbl-sortable:focus-visible { outline: 2px solid var(--accent); outline-offset
 .tbl-pager select.input { height: 26px; width: auto; padding: 0 6px; display: inline-block; margin-left: 4px; }
 .tbl-pages { display: flex; gap: 4px; align-items: center; margin-left: auto; }
 .tbl-pages .btn-sm { min-width: 28px; }
+
+/* ── Tráfico de red ── */
+.tr-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tr-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.tr-toolbar .form-row { margin: 0; min-width: 140px; }
+.tr-toolbar .dlg-check { margin-bottom: 7px; }
+.tr-toolbar .small { margin-bottom: 9px; }
+.tr-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 14px; }
+@media (max-width: 900px) { .tr-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tr-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 8px 0 14px; }
+.tr-row { cursor: pointer; }
+.tr-row.sel td { background: var(--accent-bg); }
+.tr-bad { color: var(--err); font-weight: 600; }
+.tr-preview { max-height: 320px; overflow: auto; font-size: 12px; }
+.input-num { max-width: 140px; }
+.nowrap { white-space: nowrap; }
+.tr-row .led { display: inline-block; vertical-align: middle; margin: 0 8px 2px 2px; }
