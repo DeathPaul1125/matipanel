@@ -21,6 +21,7 @@
 </div>
 
 <div id="tab-updates">
+  <p class="small muted">El panel revisa cada hora si hay actualizaciones y te avisa por correo cuando aparecen versiones nuevas (las de seguridad, marcadas). Actívalo en <a href="{{ url_for('notify.index') }}">Notificaciones</a> → «Actualizaciones de paquetes disponibles».</p>
   <div class="toolbar">
     <button class="btn" data-pm onclick="pkgRun('refresh')">Actualizar listas</button>
     <button class="btn btn-primary" data-pm onclick="pkgRun('upgrade', [], '¿Actualizar todos los paquetes?')">Actualizar todo</button>

@@ -126,6 +126,22 @@ Con las actualizaciones activadas, el sistema actualiza a diario la lista de paq
 | **dpkg quedó interrumpido: ejecuta 'dpkg --configure -a'…** | Una instalación anterior se cortó. | En la [Terminal](29-terminal.md) ejecuta `sudo dpkg --configure -a` y reintenta. |
 | **Búsqueda inválida (letras, números y + . _ -)** | El término tiene caracteres no permitidos o más de 5 palabras. | Simplifica la búsqueda. |
 
+## Aviso de actualizaciones por correo
+
+El panel revisa **cada hora** qué paquetes se pueden actualizar. Cada 12 horas refresca antes la lista de paquetes (`apt-get update`), aunque el temporizador `apt-daily` del sistema esté apagado.
+
+Cuando aparecen **versiones nuevas** te llega un correo, si activaste [Notificaciones](33-notificaciones.md) y el evento **Actualizaciones de paquetes disponibles**:
+
+- El asunto dice cuántas son y cuántas de **seguridad**, por ejemplo `3 actualizaciones nuevas (1 de seguridad)`.
+- El cuerpo lista primero las de seguridad y luego las demás, con la versión nueva.
+- Cada versión se avisa **una sola vez**: si no actualizas, no recibes el mismo correo cada hora. Cuando la instalas, se olvida; si después sale otra versión del mismo paquete, se avisa de nuevo.
+
+Además, mientras haya actualizaciones **de seguridad** pendientes, la barra de estado de arriba lo indica, y el contador **actualizaciones** muestra el total.
+
+Al pulsar **Actualizar listas**, **Actualizar todo** o instalar algo, el panel vuelve a revisar en el momento.
+
+> **Consejo:** Para no depender del aviso, activa las **actualizaciones automáticas de seguridad** (unattended-upgrades) en esta misma pantalla o desde [Seguridad del servidor](34-seguridad-servidor.md).
+
 ## Preguntas frecuentes
 
 ### Actualicé todo pero siguen apareciendo paquetes actualizables.

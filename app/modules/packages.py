@@ -96,8 +96,26 @@ def run_action():
     else:
         ok, output, error = _result(*run([pm, "-y", *args], timeout=1800, env=PM_ENV))
     if ok:
+        _recheck_updates(act)
         return jsonify({"ok": True, "output": output})
     return jsonify({"ok": False, "error": error, "output": output}), 409 if LOCK_RE.search(output) else 500
+
+
+def _recheck_updates(act):
+    """Tras actualizar listas o instalar: revisar en segundo plano (avisa lo nuevo y olvida lo instalado)."""
+    import threading
+    import time
+    from .. import updates
+    if act == "refresh":
+        updates._last["refresh"] = time.time()  # la lista recién se refrescó: no repetir apt-get update
+    threading.Thread(target=lambda: _quiet(updates.check), daemon=True).start()
+
+
+def _quiet(fn):
+    try:
+        fn()
+    except Exception:
+        pass
 
 
 @packages_bp.route("/api/search")

@@ -217,6 +217,11 @@ def compute_issues():
         issues += monitor.health_issues()
     except Exception:
         pass
+    try:
+        from .. import updates
+        issues += updates.security_issue()  # del último chequeo horario (no consulta APT aquí)
+    except Exception:
+        pass
     issues.sort(key=lambda i: i[0] != "err")
     return issues, failed
 

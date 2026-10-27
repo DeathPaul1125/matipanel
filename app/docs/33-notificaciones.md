@@ -22,6 +22,8 @@ El panel puede avisarte **por correo** cuando algo pasa en el servidor, aunque n
 | **Cuando un problema se resuelve** | Al desaparecer, con cuánto duró. |
 | **Despliegue fallido / exitoso** | Al terminar cada despliegue de [Despliegues](56-despliegues.md), con el commit y el error. |
 | **Respaldo de app fallido / correcto** | Al terminar cada [respaldo de app](57-respaldos-apps.md). Un fallo se avisa como mucho cada 6 h por app. |
+| **Actualizaciones de paquetes disponibles** | Cuando aparecen versiones nuevas de paquetes del sistema (se revisa cada hora). El correo lista las **de seguridad primero** y lo indica en el asunto. Cada versión se avisa **una sola vez**; si la instalas y luego sale otra, se vuelve a avisar. Ver [Paquetes](27-paquetes.md). |
+| **Monitor** | Cuando un servicio vigilado por el [Monitor](58-monitor.md) deja de responder y cuando se recupera. |
 | **Bloqueo por intentos fallidos** | Cuando una IP queda bloqueada en el inicio de sesión del panel por contraseñas o códigos 2FA incorrectos (como mucho cada 15 min por IP). |
 
 **Recordar cada…**: si un problema sigue activo, vuelve a avisar con esa frecuencia («No recordar» = solo al aparecer).

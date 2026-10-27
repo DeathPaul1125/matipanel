@@ -34,6 +34,7 @@ EVENTS = {  # clave: (etiqueta, activo por defecto)
     "backup_fail": ("Respaldo de app fallido", True),
     "backup_ok": ("Respaldo de app correcto", False),
     "login_block": ("Bloqueo por intentos fallidos de inicio de sesión", True),
+    "updates": ("Actualizaciones de paquetes disponibles (las de seguridad, marcadas)", True),
     "monitor": ("Monitor: un servicio deja de responder o se recupera", True),
 }
 DEFAULTS = {"enabled": False, "panel_url": "",
@@ -218,8 +219,8 @@ def check_health(issues, now=None):
     """issues: [(nivel, mensaje, clave)] actuales → envía avisos de los nuevos y de los resueltos."""
     now = now or time.time()
     cfg = load()
-    # Los servicios del Monitor mandan su propio correo (Caído / Recuperado): aquí no se repiten
-    current = {key: (level, msg) for level, msg, key in issues if not key.startswith("monitor:")}
+    # El Monitor (Caído / Recuperado) y las actualizaciones (lista de paquetes) mandan su propio correo
+    current = {key: (level, msg) for level, msg, key in issues if not key.startswith(("monitor:", "updates:"))}
     repeat = cfg.get("repeat_minutes", 0) * 60
     for key, (level, msg) in current.items():
         prev = _active.get(key)
@@ -248,6 +249,11 @@ def _health_loop():
         try:
             issues, _ = dashboard.compute_issues()
             check_health(issues)
+        except Exception:
+            pass
+        try:
+            from . import updates
+            updates.tick()  # cada hora: paquetes con versión nueva → correo
         except Exception:
             pass
         time.sleep(CHECK_EVERY)
