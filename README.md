@@ -85,7 +85,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Auditoría** | Quién hizo qué, cuándo y desde dónde; filtros y exportación CSV |
 | **Terminal** | Shell real en el navegador con tu usuario (nunca root) |
 | **Seguridad** | 2FA TOTP (Google Authenticator, Aegis…) con códigos de recuperación |
-| **Apariencia** | Tema, color de acento, barra lateral, tamaño, densidad, bordes, tipografía y secciones del dashboard |
+| **Apariencia** | Estilo (Clásico o Moderno), tema, color de acento, barra lateral, tamaño, densidad, bordes, tipografía y secciones del dashboard |
 | **Ayuda** | Guía de usuario completa con índice, buscador y botón **?** en cada pantalla |
 
 ## Instalación en Debian

@@ -15,6 +15,7 @@ HEX = re.compile(r"#[0-9a-fA-F]{6}\Z")  # \Z (no $): "$" aceptaría un salto de 
 DASH_SECTIONS = ("gauges", "history", "info", "procs", "quick")
 
 DEFAULTS = {
+    "skin": "clasico",         # clasico | moderno (estilo de toda la interfaz)
     "accent": "default",       # "default" (verde fósforo) o "#rrggbb"
     "sidebar": "navy",         # navy | light | graphite | accent | "#rrggbb"
     "sbmini": False,           # barra lateral solo con iconos
@@ -27,6 +28,7 @@ DEFAULTS = {
     "range": "900",            # 300 | 900 | 3600 | 21600 | 86400 | 604800 (segundos)
 }
 CHOICES = {
+    "skin": ("clasico", "moderno"),
     "density": ("comfortable", "compact"),
     "zoom": ("90", "100", "110", "120"),
     "radius": ("square", "soft", "round"),
@@ -132,4 +134,5 @@ if __name__ == "__main__":
     assert "--sb-bg:#0F1E3A" in css(clean({}))            # azul oscuro por defecto
     assert "--sb-text:#16181c" in css(clean({"sidebar": "#F5F5F0"}))  # color claro → texto oscuro
     assert css(clean({"sidebar": "light"})) == ""
+    assert clean({"skin": "moderno"})["skin"] == "moderno" and clean({"skin": "x\"><script>"})["skin"] == "clasico"
     print("ok")

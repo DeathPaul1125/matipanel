@@ -6,6 +6,14 @@
 <div style="max-width: 920px;">
 
 <div class="card">
+  <div class="card-head"><h3>Estilo</h3><span class="muted small">Cambia toda la interfaz: menú, tarjetas, tablas y controles</span></div>
+  <div class="opts" id="skin-opts">
+    <button class="opt" data-skin-opt="clasico"><span class="opt-preview"><i style="background:#0F1E3A"></i><b style="background:#F6F5F0; border-left:6px solid #F6F5F0; box-shadow: inset 0 0 0 1px rgba(48,40,20,.12)"></b></span>Clásico<small class="muted">Papel cálido, menú azul oscuro</small></button>
+    <button class="opt" data-skin-opt="moderno"><span class="opt-preview"><i style="background:#fff; border-right:1px solid #E4E7EC"></i><b style="background:linear-gradient(#fff 0 22%, #F1F5F9 22%); position:relative"><u style="position:absolute; left:10%; right:10%; top:36%; bottom:12%; background:#fff; border-radius:6px; box-shadow:0 1px 3px rgba(16,24,40,.12)"></u></b></span>Moderno<small class="muted">Estilo TailAdmin, tarjetas con sombra</small></button>
+  </div>
+</div>
+
+<div class="card">
   <div class="card-head"><h3>Tema</h3><span class="muted small">Se guarda en este navegador</span></div>
   <div class="opts" id="theme-opts">
     <button class="opt" data-theme-opt="auto"><span class="opt-preview"><i style="background:#0F1E3A"></i><b style="background:linear-gradient(90deg,#F6F5F0 50%,#161614 50%)"></b></span>Según el sistema</button>
@@ -76,11 +84,15 @@
 const API = "{{ url_for('appearance.save') }}";
 const P = {{ prefs|tojson }};
 const ACCENTS = [
-  ['default', '#0E7C6B', 'Fósforo (predeterminado)'], ['#2563EB', '#2563EB', 'Azul'], ['#4F46E5', '#4F46E5', 'Índigo'],
+  ['default', '#0E7C6B', 'Fósforo (predeterminado)'], ['#465FFF', '#465FFF', 'Azul brillante (Moderno)'], ['#2563EB', '#2563EB', 'Azul'], ['#4F46E5', '#4F46E5', 'Índigo'],
   ['#7C3AED', '#7C3AED', 'Violeta'], ['#DB2777', '#DB2777', 'Rosa'], ['#DC2626', '#DC2626', 'Rojo'],
   ['#EA580C', '#EA580C', 'Naranja'], ['#D97706', '#D97706', 'Ámbar'], ['#16A34A', '#16A34A', 'Verde'],
   ['#0891B2', '#0891B2', 'Cian'], ['#475569', '#475569', 'Pizarra'],
 ];
+const SKINS = {
+  clasico: { skin: 'clasico', accent: 'default', sidebar: 'navy' },
+  moderno: { skin: 'moderno', accent: '#465FFF', sidebar: 'light' },
+};
 const $ = id => document.getElementById(id);
 
 // Swatches de acento
@@ -93,7 +105,7 @@ async function setPref(patch) {
   Object.assign(P, d.prefs);
   $('prefs-css').textContent = d.css;
   const h = document.documentElement.dataset;
-  Object.assign(h, { density: P.density, radius: P.radius, font: P.font, motion: P.motion, zoom: P.zoom, sbmini: P.sbmini ? '1' : '0' });
+  Object.assign(h, { skin: P.skin, density: P.density, radius: P.radius, font: P.font, motion: P.motion, zoom: P.zoom, sbmini: P.sbmini ? '1' : '0' });
   render();
   ui.toast('Apariencia guardada', 'success', 1400);
 }
@@ -111,12 +123,16 @@ function render() {
   document.querySelectorAll('.seg[data-pref]').forEach(seg =>
     seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.v === String(P[seg.dataset.pref]))));
   document.querySelectorAll('[data-sec]').forEach(cb => cb.checked = P.dash[cb.dataset.sec]);
+  document.querySelectorAll('[data-skin-opt]').forEach(b => b.classList.toggle('active', b.dataset.skinOpt === P.skin));
   const t = localStorage.getItem('mp-theme') || 'auto';
   document.querySelectorAll('[data-theme-opt]').forEach(b => b.classList.toggle('active', b.dataset.themeOpt === t));
 }
 
 // Eventos
 document.addEventListener('click', e => {
+  // Cada estilo trae su acento y su barra lateral; después se pueden cambiar
+  const sk = e.target.closest('[data-skin-opt]');
+  if (sk) { localStorage.setItem('mp-skin', sk.dataset.skinOpt); return setPref(SKINS[sk.dataset.skinOpt]); }
   const sw = e.target.closest('[data-accent]');
   if (sw) return setPref({ accent: sw.dataset.accent });
   const sb = e.target.closest('button[data-sb]');

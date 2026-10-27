@@ -755,6 +755,83 @@ a.chip:hover { border-color: var(--border-strong); text-decoration: none; color:
   *, *::before, *::after { animation: none !important; transition-property: opacity, color, background-color !important; }
 }
 
+/* ── Estilo «Moderno» (Apariencia → Estilo; data-skin en <html>, ver app/prefs.py) ──
+ * Inspirado en TailAdmin: lienzo gris azulado, tarjetas blancas con sombra leve y radios amplios,
+ * menú claro con el elemento activo tintado y cabeceras de tabla con fondo. Va ANTES de las
+ * preferencias: acento, densidad, bordes, tamaño y barra compacta siguen mandando encima
+ * (misma especificidad, declaradas después). */
+html[data-skin="moderno"] {
+  --bg: #F1F5F9; --surface: #FFFFFF; --surface-2: #F8FAFC; --control: #FFFFFF;
+  --border: #E4E7EC; --border-strong: #D0D5DD; --track: #EEF2F6;
+  --text: #1D2939; --text-muted: #667085; --text-faint: #98A2B3;
+  --radius-sm: 8px; --radius: 10px; --radius-lg: 16px; --radius-xl: 20px;
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 24px 48px -12px rgba(16, 24, 40, 0.22);
+}
+html[data-skin="moderno"][data-theme="dark"] {
+  --bg: #0F1623; --surface: #182131; --surface-2: #202B3D; --control: #121A27;
+  --border: rgba(255, 255, 255, 0.08); --border-strong: rgba(255, 255, 255, 0.14); --track: rgba(255, 255, 255, 0.08);
+  --text: #E4E7EC; --text-muted: #A4AEBF; --text-faint: #7A8699;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 48px -12px rgba(0, 0, 0, 0.6);
+}
+/* Estructura: menú y barra superior sobre superficie blanca */
+html[data-skin="moderno"] .sidebar { width: 252px; background: var(--sb-bg, var(--surface)); }
+html[data-skin="moderno"] .brand { padding: 22px 20px 18px; }
+html[data-skin="moderno"] .brand-icon { width: 36px; height: 36px; border-radius: 10px; font-size: 17px; box-shadow: 0 6px 14px -6px var(--accent); }
+html[data-skin="moderno"] .brand-name { font-size: 16px; font-weight: 700; }
+html[data-skin="moderno"] .sidebar nav { padding: 4px 14px 14px; }
+html[data-skin="moderno"] .nav-search { margin: 0 16px 8px; height: 38px; border-radius: var(--radius); }
+html[data-skin="moderno"] .nav-group { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; padding: 18px 12px 6px; }
+html[data-skin="moderno"] .nav-item { gap: 12px; padding: 9px 12px; margin-top: 2px; border-radius: var(--radius); font-size: 13.5px; font-weight: 500; }
+html[data-skin="moderno"] .nav-item.active { font-weight: 600; }
+html[data-skin="moderno"] .sidebar-foot { padding: 12px 14px; }
+html[data-skin="moderno"] .topbar { height: 68px; padding: 0 28px; background: var(--surface); backdrop-filter: none; box-shadow: var(--shadow); }
+html[data-skin="moderno"] .topbar-title { font-size: 18px; font-weight: 700; }
+html[data-skin="moderno"] .icon-btn { width: 40px; height: 40px; border-radius: 50%; }
+html[data-skin="moderno"] .content { padding: 28px; }
+html[data-skin="moderno"] .tw { height: calc(100vh - 68px - 56px); }
+@media (max-width: 900px) {
+  html[data-skin="moderno"] .topbar { height: 60px; padding: 0 16px; }
+  html[data-skin="moderno"] .content { padding: 16px; }
+}
+/* Tarjetas */
+html[data-skin="moderno"] .card, html[data-skin="moderno"] .stat, html[data-skin="moderno"] .gauge,
+html[data-skin="moderno"] .health { box-shadow: var(--shadow); }
+html[data-skin="moderno"] .card { padding: 20px 22px; margin-bottom: 16px; }
+html[data-skin="moderno"] .grid > .card { margin-bottom: 0; }
+html[data-skin="moderno"] .grid, html[data-skin="moderno"] .gauges, html[data-skin="moderno"] .dash-cols { gap: 16px; margin-bottom: 16px; }
+html[data-skin="moderno"] .card h3 { font-size: 15px; }
+html[data-skin="moderno"] .card-head { margin-bottom: 16px; }
+html[data-skin="moderno"] .stat { padding: 18px 20px; }
+html[data-skin="moderno"] .stat-lbl { text-transform: none; letter-spacing: 0; font-size: 13px; }
+html[data-skin="moderno"] .stat-val { font-size: 26px; font-weight: 700; }
+html[data-skin="moderno"] .health { padding: 24px 26px; }
+html[data-skin="moderno"] .health-verdict { font-size: 24px; font-weight: 700; }
+html[data-skin="moderno"] .gauge { padding: 16px 16px 18px; }
+html[data-skin="moderno"] .bar, html[data-skin="moderno"] .bar > span { height: 8px; border-radius: 999px; }
+html[data-skin="moderno"] .bar > span { height: 100%; }
+html[data-skin="moderno"] .quick a { padding: 12px 14px; background: var(--surface-2); border-color: transparent; }
+html[data-skin="moderno"] .quick a:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-text); }
+html[data-skin="moderno"] .quick svg { box-sizing: content-box; padding: 7px; border-radius: var(--radius-sm); background: var(--accent-bg); }
+/* Tablas: cabecera con fondo, sin mayúsculas, filas más altas */
+html[data-skin="moderno"] table.lx th { background: var(--surface-2); text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 600; color: var(--text-muted); padding: 11px 14px; }
+html[data-skin="moderno"] table.lx td { padding: 12px 14px; }
+/* Controles */
+html[data-skin="moderno"] .btn:not(.btn-sm) { padding: 0 16px; }
+html[data-skin="moderno"] .btn { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05); }
+html[data-skin="moderno"] .btn-primary { box-shadow: 0 6px 14px -8px var(--accent); }
+html[data-skin="moderno"] .seg { gap: 2px; padding: 3px; background: var(--surface-2); border-color: var(--border); border-radius: var(--radius); }
+html[data-skin="moderno"] .seg button { background: transparent; border-radius: 6px; padding: 5px 12px; }
+html[data-skin="moderno"] .seg button + button { border-left: none; }
+html[data-skin="moderno"] .seg button.active { background: var(--surface); color: var(--accent-text); box-shadow: var(--shadow); }
+html[data-skin="moderno"] .tab { font-weight: 500; }
+/* Ventanas y avisos */
+html[data-skin="moderno"] .modal-box, html[data-skin="moderno"] dialog.dlg, html[data-skin="moderno"] .user-pop { box-shadow: var(--shadow-lg); }
+html[data-skin="moderno"] .modal-box { padding: 24px; }
+html[data-skin="moderno"] .login-body { background: var(--bg); }
+html[data-skin="moderno"] .login-card { box-shadow: var(--shadow-lg); padding: 40px 36px 32px; }
+
 /* ── Preferencias de apariencia (atributos data-* en <html>, ver app/prefs.py) ── */
 html[data-zoom="90"] body { zoom: 0.9; }
 html[data-zoom="110"] body { zoom: 1.1; }

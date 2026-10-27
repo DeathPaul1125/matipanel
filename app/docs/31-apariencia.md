@@ -1,6 +1,6 @@
 # Apariencia
 
-Esta página te permite personalizar cómo se ve el panel: tema claro u oscuro, colores, barra lateral, tamaño del texto, densidad y secciones del dashboard. La encuentras en **menú de usuario (tu nombre, abajo a la izquierda) → Apariencia**.
+Esta página te permite personalizar cómo se ve el panel: estilo de toda la interfaz, tema claro u oscuro, colores, barra lateral, tamaño del texto, densidad y secciones del dashboard. La encuentras en **menú de usuario (tu nombre, abajo a la izquierda) → Apariencia**.
 
 ## Dónde se guarda cada preferencia
 
@@ -12,6 +12,22 @@ Esta página te permite personalizar cómo se ve el panel: tema claro u oscuro, 
 > **Nota:** El tamaño de letra de la [Terminal](29-terminal.md) también se guarda en el navegador, no aquí.
 
 Los cambios se aplican y se guardan al instante, sin botón de guardar. Verás el aviso **Apariencia guardada** (excepto con el tema, que no se envía al servidor).
+
+## Elegir el estilo de la interfaz
+
+La tarjeta **Estilo** cambia el aspecto de todo el panel: menú, barra superior, tarjetas, tablas, botones y ventanas.
+
+| Estilo | Cómo se ve |
+|---|---|
+| **Clásico** | Predeterminado. Fondo de papel cálido, menú azul oscuro y bordes finos. |
+| **Moderno** | Inspirado en TailAdmin. Fondo gris azulado, menú claro con la opción activa resaltada, tarjetas blancas con sombra suave y esquinas amplias, y cabeceras de tabla con fondo. En tema oscuro usa azul noche. |
+
+1. Abre **Apariencia**.
+2. En **Estilo**, pulsa **Clásico** o **Moderno**.
+
+Cada estilo trae su color de acento y su barra lateral (**Moderno**: azul brillante y barra clara; **Clásico**: verde fósforo y azul oscuro). Después puedes cambiarlos, y también el tema, el tamaño, la densidad y los bordes: todo funciona con los dos estilos.
+
+> **Nota:** La pantalla de inicio de sesión usa el último estilo que elegiste en ese navegador.
 
 ## Cambiar entre tema claro y oscuro
 
@@ -73,7 +89,7 @@ Ver [Dashboard](10-dashboard.md) para saber qué muestra cada sección.
 1. Pulsa **Restablecer apariencia** al final de la página.
 2. Confirma en **Restablecer apariencia** con **Restablecer**.
 
-Vuelven a sus valores por defecto los colores, la barra lateral, los tamaños y las secciones del dashboard.
+Vuelven a sus valores por defecto el estilo (**Clásico**), los colores, la barra lateral, los tamaños y las secciones del dashboard.
 
 > **Nota:** **Restablecer apariencia** no cambia el tema. Si quieres volver al predeterminado, elige **Según el sistema** en la tarjeta **Tema**.
 

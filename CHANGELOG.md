@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.6.0] - 2026-10-27
+
+### Añadido
+- 🎨 **Estilo «Moderno»** — en Apariencia → Estilo, un aspecto nuevo para toda la interfaz inspirado en TailAdmin: menú claro, barra superior blanca, tarjetas con sombra suave y esquinas amplias, tablas con cabecera tintada, controles segmentados y versión oscura en azul noche. Se elige por usuario, se puede volver a «Clásico» en un clic y respeta acento, tema, tamaño, densidad y bordes.
+
 ## [0.5.1] - 2026-10-26
 
 ### Cambiado

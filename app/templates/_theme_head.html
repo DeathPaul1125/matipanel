@@ -4,5 +4,8 @@
   var t = localStorage.getItem('mp-theme');
   if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   document.documentElement.dataset.theme = t;
+  // Estilo: el del usuario (lo pone el servidor) se recuerda para el inicio de sesión
+  var d = document.documentElement.dataset, s = localStorage.getItem('mp-skin');
+  if (d.skin) localStorage.setItem('mp-skin', d.skin); else if (s === 'moderno') d.skin = s;
 })();
 </script>
