@@ -1321,16 +1321,17 @@ tr.sy-boot td { background: var(--surface-2); }
 .mon-row.sel td { background: var(--accent-bg); }
 
 /* ── Explorador BD: diagrama entidad-relación ── */
-.erd-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.erd-tools { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .erd-tools .input { max-width: 240px; height: 30px; }
 .erd-sp { flex: 1; }
-.erd-wrap { height: 68vh; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+.erd-note { padding: 8px 12px; margin-bottom: 10px; border-radius: var(--radius); background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+.erd-wrap { height: 70vh; min-height: 440px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
   background: var(--bg); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 22px 22px;
   cursor: grab; touch-action: none; }
 .erd-wrap.grabbing { cursor: grabbing; }
 svg.erd { width: 100%; height: 100%; display: block; user-select: none; }
 .erd text { font-family: var(--mono); font-size: 12px; fill: var(--text); }
-.erd .erd-box { fill: var(--surface); stroke: var(--border-strong); }
+.erd .erd-box { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.2; }
 .erd .erd-head { fill: var(--surface-2); }
 .erd .erd-table.view .erd-box { stroke-dasharray: 5 3; }
 .erd .erd-name { font-weight: 700; font-size: 13px; }
@@ -1338,12 +1339,31 @@ svg.erd { width: 100%; height: 100%; display: block; user-select: none; }
 .erd .erd-type { fill: var(--text-muted); font-size: 11px; }
 .erd .erd-null { fill: var(--text-faint); }
 .erd .erd-col.pk { font-weight: 700; }
+.erd .erd-col.fk { fill: var(--accent-text); }
 .erd .erd-pk { fill: var(--warn-led); font-weight: 700; font-size: 10px; }
 .erd .erd-fk { fill: var(--accent); font-weight: 700; font-size: 10px; }
+.erd .erd-fk.inf { fill: var(--warn-led); }
 .erd .erd-table { cursor: move; transition: opacity .15s; }
-.erd .erd-table.on .erd-box { stroke: var(--accent); stroke-width: 2; }
-.erd .erd-table.dim, .erd .erd-edge.dim { opacity: .25; }
-.erd .erd-edge { fill: none; stroke: var(--accent); stroke-width: 1.4; opacity: .75; transition: opacity .15s; }
-.erd .erd-edge.on { stroke-width: 2.4; opacity: 1; }
-.erd .erd-mk { fill: none; stroke: var(--accent); stroke-width: 1.4; }
+.erd .erd-table.on .erd-box { stroke: var(--accent); stroke-width: 2.5; }
+.erd .erd-table.dim { opacity: .2; }
+/* Las líneas conservan su grosor con cualquier zoom (vector-effect) */
+.erd .erd-edge { fill: none; stroke: var(--accent); stroke-width: 2; opacity: .85; transition: opacity .15s, stroke-width .15s; }
+.erd .erd-rel.inferred .erd-edge { stroke: var(--warn-led); stroke-dasharray: 7 5; }
+.erd .erd-hit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; }
+.erd .erd-rel.on .erd-edge { stroke-width: 3.5; opacity: 1; }
+.erd .erd-rel.dim { opacity: .08; }
+.erd.far .erd-edge { stroke-width: 1.4; opacity: .9; }
+.erd .erd-mk { fill: var(--accent); }
+.erd .erd-mk.inf { fill: var(--warn-led); }
 .erd-legend { display: block; margin-top: 4px; }
+.erd-lg-pk { color: var(--warn-led); } .erd-lg-fk { color: var(--accent); }
+.erd-rel-row { cursor: pointer; }
+
+/* ── Acerca de: novedades ── */
+.ab-notes { border-top: 1px solid var(--border); padding: 10px 0; }
+.ab-notes:first-of-type { border-top: none; }
+.ab-notes summary { cursor: pointer; }
+.ab-notes .docs-body { margin-top: 8px; font-size: 13.5px; }
+.erd-rels-card { overflow-x: auto; }
+#erd-rels td { word-break: break-word; }
+#erd-rels td:last-child { white-space: nowrap; }

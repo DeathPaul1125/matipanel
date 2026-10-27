@@ -32,7 +32,20 @@ Abre una base (en PostgreSQL, también el esquema) y pulsa la pestaña **Diagram
 
 - Cada tabla es una caja con su nombre y sus columnas: **PK** marca la clave primaria (también si es compuesta), **FK** las columnas que apuntan a otra tabla, y **?** las que admiten nulos. A la derecha está el tipo de cada columna. Las **vistas** aparecen con borde punteado y la etiqueta «vista».
 - Cada **línea** es una clave foránea: sale de la columna FK (con la marca ⟨, el lado «muchos») y llega a la columna referenciada (con una barra, el lado «uno»). Pasa el ratón sobre una línea para ver el nombre de la relación y sus reglas `ON DELETE` / `ON UPDATE`.
-- La distribución es automática: las tablas **«padre»** (las referenciadas) quedan a la izquierda y las que dependen de ellas a la derecha; las tablas sin relaciones, abajo.
+- La distribución es automática: las tablas **«padre»** (las referenciadas) quedan a la izquierda y las que dependen de ellas a la derecha, ordenadas para que las líneas se crucen lo menos posible; las tablas sin relaciones, abajo.
+- Las líneas mantienen su grosor con cualquier zoom; la **flecha** apunta a la tabla referenciada. Pasa el ratón sobre una tabla o una línea para resaltarla.
+
+### Relaciones deducidas por nombre
+
+Muchas bases (por ejemplo de Laravel o PHP, si las migraciones no usan `foreign()` / `constrained()`) **no declaran claves foráneas**, así que no hay relaciones que leer del catálogo. En ese caso el diagrama activa **Deducir relaciones por nombre**: una columna `cliente_id`, `id_cliente` o `clienteId` se une con la tabla `cliente` o `clientes` que exista y tenga clave primaria (también `proveedor_id` → `proveedores`, `categoria_id` → `categorias`). También reconoce prefijos comunes de tablas (`ost_`, `wp_`…). Las relaciones deducidas se dibujan **punteadas en ámbar** y su FK aparece en ámbar; las declaradas, continuas.
+
+Puedes activar o desactivar la deducción en cualquier base con la casilla; se recuerda por base.
+
+> **Nota:** Una relación deducida es una suposición por el nombre: la base no la garantiza (no impide borrar el registro referenciado). Para que sea real, crea la clave foránea.
+
+### Lista de relaciones
+
+Debajo del diagrama, la tabla **Relaciones** muestra todas: origen (`tabla.columna`), destino, reglas al borrar y al actualizar, y si es **declarada** o **deducida**. Se puede filtrar y ordenar; al hacer clic en una fila, el diagrama se centra en ella y la resalta.
 
 | Acción | Cómo |
 |---|---|

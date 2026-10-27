@@ -35,6 +35,7 @@ EVENTS = {  # clave: (etiqueta, activo por defecto)
     "backup_ok": ("Respaldo de app correcto", False),
     "login_block": ("Bloqueo por intentos fallidos de inicio de sesión", True),
     "updates": ("Actualizaciones de paquetes disponibles (las de seguridad, marcadas)", True),
+    "panel_update": ("MatiPanel se actualizó a una versión nueva", True),
     "monitor": ("Monitor: un servicio deja de responder o se recupera", True),
 }
 DEFAULTS = {"enabled": False, "panel_url": "",

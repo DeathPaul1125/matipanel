@@ -80,7 +80,14 @@ mkdir -p "$INSTALL_DIR" "$CERT_DIR" "$DATA_DIR"
 chmod 700 "$CERT_DIR" "$DATA_DIR"
 SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 rm -rf "$INSTALL_DIR/app"
-cp -r "$SOURCE_DIR"/{app,wsgi.py,requirements.txt} "$INSTALL_DIR/"
+cp -r "$SOURCE_DIR"/{app,wsgi.py,requirements.txt,CHANGELOG.md} "$INSTALL_DIR/"
+# Qué versión se instaló y cuándo (el panel lo muestra en «Acerca de»)
+PANEL_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SOURCE_DIR/app/__init__.py")"
+GIT_COMMIT="$(git -c safe.directory="$SOURCE_DIR" -C "$SOURCE_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+GIT_BRANCH="$(git -c safe.directory="$SOURCE_DIR" -C "$SOURCE_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+printf '{"version": "%s", "commit": "%s", "branch": "%s", "installed_at": "%s"}\n' \
+    "$PANEL_VERSION" "$GIT_COMMIT" "$GIT_BRANCH" "$(date -Iseconds)" > "$INSTALL_DIR/BUILD.json"
+echo "→ Versión $PANEL_VERSION${GIT_COMMIT:+ (commit $GIT_COMMIT)}"
 chown -R root:root "$INSTALL_DIR" "$CERT_DIR" "$DATA_DIR"
 
 # Virtualenv

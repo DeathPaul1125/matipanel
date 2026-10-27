@@ -74,7 +74,7 @@
             <a href="{{ url_for('auth.security') }}" role="menuitem" class="{{ 'active' if request.blueprint == 'auth' }}">Seguridad (2FA)</a>
             <a href="{{ url_for('appearance.index') }}" role="menuitem" class="{{ 'active' if request.blueprint == 'appearance' }}">Apariencia</a>
             <a href="{{ url_for('help.page') }}" role="menuitem" class="{{ 'active' if request.blueprint == 'help' }}">Ayuda</a>
-            <a href="{{ url_for('dashboard.about') }}" role="menuitem" class="{{ 'active' if request.endpoint == 'dashboard.about' }}">Acerca de</a>
+            <a href="{{ url_for('dashboard.about') }}" role="menuitem" class="{{ 'active' if request.endpoint == 'dashboard.about' }}">Acerca de <span class="muted small">v{{ PANEL_VERSION }}</span></a>
             <hr>
             <form method="post" action="{{ url_for('auth.logout') }}"><button type="submit" role="menuitem" class="danger">Cerrar sesión</button></form>
           </div>

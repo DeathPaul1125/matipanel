@@ -113,8 +113,12 @@ def index():
 @dashboard_bp.route("/acerca")
 @login_required
 def about():
-    from .. import __version__
-    return render_template("about.html", version=__version__, hostname=socket.gethostname())
+    import markdown
+    from .. import version
+    cur, hist = version.current(), list(reversed(version.history()))
+    notes = [{"version": v, "date": d, "html": markdown.markdown(body)} for v, d, body in version.changelog_sections()[:6]]
+    return render_template("about.html", version=cur["version"], hostname=socket.gethostname(), build=cur,
+                           history=hist[:20], notes=notes, updated_at=hist[0]["at"] if hist else None)
 
 
 @dashboard_bp.route("/api/stats")

@@ -19,7 +19,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELFCHECKS = ["app.metrics", "app.audit", "app.notify", "app.roles", "app.sshkeys", "app.appbackup", "app.deployer",
-              "app.modules.traffic", "app.monitor", "app.updates"]
+              "app.modules.traffic", "app.monitor", "app.updates", "app.version"]
 # En Windows (desarrollo) faltan módulos de Linux: se simulan para poder importar la app
 STUBS = ("import sys, types\nfor n in ('pwd', 'grp', 'pty', 'termios', 'fcntl', 'pam'):\n"
          "    sys.modules.setdefault(n, types.ModuleType(n))\n") if os.name == "nt" else ""

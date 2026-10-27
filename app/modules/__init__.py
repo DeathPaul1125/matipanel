@@ -1,4 +1,5 @@
 """Registro de todos los módulos."""
+import os
 from .dashboard import dashboard_bp
 from .system import system_bp
 from .processes import processes_bp
@@ -58,7 +59,14 @@ def register_modules(app, sock):
     from .. import jobs, audit, roles
     jobs.init_app(app)
     audit.init_app(app)  # registro de auditoría de toda acción que cambia algo
-    roles.init_app(app)  # permisos por usuario (antes de cada vista)  # salida en vivo de los botones (ventana de terminal)
+    roles.init_app(app)  # permisos por usuario (antes de cada vista)
+    from .. import version
+    app.jinja_env.globals["PANEL_VERSION"] = version.__version__
+    if os.name == "posix" or os.environ.get("MATIPANEL_VERSION_HISTORY"):
+        try:
+            version.record_startup()  # historial de actualizaciones (Acerca de) + aviso por correo
+        except OSError:
+            pass  # salida en vivo de los botones (ventana de terminal)
     app.jinja_env.globals["HELP_CONTEXT"] = HELP_CONTEXT  # botón "?" de cada pantalla
     app.jinja_env.globals["VIEW_FUNCS"] = app.view_functions  # el menú oculta módulos no registrados
     register_terminal_ws(sock)

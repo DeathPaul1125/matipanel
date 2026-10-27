@@ -1,8 +1,12 @@
 # Changelog
 
-## [Sin publicar]
+Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
+
+## [0.5.0] - 2026-10-26
 
 ### Añadido
+- 🏷️ **Versión e historial de actualizaciones** — «Acerca de» muestra la versión, el commit, la fecha de instalación, cada actualización y las novedades; la actualización queda en la Auditoría y avisa por correo.
+- 🔗 **Diagrama: relaciones deducidas y lista de relaciones** — para bases sin claves foráneas declaradas (Laravel/PHP), con prefijos de tablas; líneas visibles con cualquier zoom, menos cruces y tabla de relaciones con clic para ubicarlas.
 - 🗺️ **Diagrama entidad-relación** — pestaña «Diagrama» en el Explorador BD (MariaDB/MySQL y PostgreSQL): tablas con PK/FK, relaciones, distribución automática padre→hijo, mover, zoom, búsqueda, solo columnas clave y exportación a SVG/PNG.
 - 📦 **Aviso de actualizaciones** — revisión horaria de paquetes (APT/DNF) con correo cuando aparecen versiones nuevas, las de seguridad primero; cada versión se avisa una sola vez y la barra de estado indica las de seguridad pendientes.
 - 📡 **Monitor de servicios** — comprueba URLs (HTTP/HTTPS con código y palabra clave), puertos TCP y equipos (ping) de tu red; disponibilidad 24 h/7 d/30 d, latencia, incidentes, aviso por correo y en la barra de estado.

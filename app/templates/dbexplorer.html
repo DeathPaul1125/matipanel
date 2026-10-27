@@ -418,14 +418,55 @@ function fmtSize(n) {
 }
 
 // ── Diagrama entidad-relación ──────────────────────────────────────
-// Distribución automática: las tablas «padre» (referenciadas) a la izquierda y sus hijas a la derecha;
-// las tablas sin relaciones, en una cuadrícula al final. Las posiciones que arrastres se recuerdan.
-const ERD = {data: null, pos: {}, view: {x: 20, y: 20, k: 1}, keysOnly: false, focus: null};
+// Distribución automática: las tablas «padre» (referenciadas) a la izquierda y sus hijas a la derecha,
+// ordenadas dentro de cada columna cerca de sus relacionadas (menos cruces); las tablas sin relaciones,
+// en una cuadrícula al final. Si la base no declara claves foráneas (frecuente en Laravel/PHP), las
+// relaciones se deducen por el nombre de las columnas (cliente_id → clientes) y se dibujan punteadas.
+const ERD = {data: null, pos: {}, view: {x: 20, y: 20, k: 1}, keysOnly: false, infer: false, focus: null, rels: []};
 const erdKey = () => `dbx-erd:${S.srv}:${S.engine}:${S.db}:${S.schema || ''}`;
 const ERD_ROW = 20, ERD_HEAD = 30, ERD_CH = 7.2;
 
+// Relaciones: las declaradas (claves foráneas) y, si se pide, las deducidas por el nombre de la columna
+function erdRelations() {
+  const d = ERD.data, out = d.fks.map((f, i) => ({...f, id: 'd' + i, inferred: false}));
+  ERD.inferredCols = new Set();
+  if (!ERD.infer) return out;
+  const byName = new Map(d.tables.map(t => [t.name.toLowerCase(), t]));
+  const declared = new Set(out.flatMap(f => f.columns.map(c => f.table + '.' + c)));
+  // Prefijo común de las tablas (ost_, wp_, app_…): cuenta si lo comparten al menos 3 y el 40 %
+  const counts = {};
+  for (const t of d.tables) { const m = /^([a-z0-9]+_)/i.exec(t.name); if (m) counts[m[1].toLowerCase()] = (counts[m[1].toLowerCase()] || 0) + 1; }
+  const prefixes = ['', ...Object.keys(counts).filter(p => counts[p] >= 3 && counts[p] >= d.tables.length * 0.4)];
+  const target = base => {
+    base = base.toLowerCase();
+    for (const pre of prefixes) {
+      for (const n of [base, base + 's', base + 'es', base.replace(/y$/, 'ies'), base.replace(/s$/, '')]) {
+        const t = byName.get(pre + n);
+        if (t) return t;
+      }
+    }
+    return null;
+  };
+  let n = 0;
+  for (const t of d.tables) for (const c of t.columns) {
+    if (c.pk && t.columns.filter(x => x.pk).length === 1 && c.name.toLowerCase() === 'id') continue;
+    if (declared.has(t.name + '.' + c.name)) continue;
+    const m = /^(.+?)_id$/i.exec(c.name) || /^id_(.+)$/i.exec(c.name) || /^([a-z][a-z0-9]*?)Id$/.exec(c.name);
+    if (!m) continue;
+    const ref = target(m[1]);
+    if (!ref || (ref === t && c.pk)) continue;  // la clave primaria de la propia tabla (ost_ticket.ticket_id) no es relación
+    const pk = ref.columns.find(x => x.pk) || ref.columns.find(x => x.name.toLowerCase() === 'id');
+    if (!pk) continue;
+    out.push({name: `${t.name}.${c.name} (deducida)`, id: 'i' + n++, table: t.name, columns: [c.name], ref_schema: null,
+              ref_table: ref.name, ref_columns: [pk.name], on_delete: '', on_update: '', inferred: true});
+    ERD.inferredCols.add(t.name + '.' + c.name);
+  }
+  return out;
+}
+
 function erdSize(t) {
-  const cols = ERD.keysOnly ? t.columns.filter(c => c.pk || c.fk) : t.columns;
+  const isKey = c => c.pk || c.fk || ERD.inferredCols.has(t.name + '.' + c.name);
+  const cols = ERD.keysOnly ? t.columns.filter(isKey) : t.columns;
   const wName = t.name.length * 8 + 40;
   const wCols = Math.max(0, ...cols.map(c => (c.name.length + Math.min(c.type.length, 24)) * ERD_CH + 64));
   return {w: Math.min(360, Math.max(170, wName, wCols)), h: ERD_HEAD + Math.max(1, cols.length) * ERD_ROW + 8, cols};
@@ -433,11 +474,11 @@ function erdSize(t) {
 
 function erdLayout() {
   const d = ERD.data, names = d.tables.map(t => t.name), set = new Set(names);
-  const parents = {}, related = new Set();
-  for (const n of names) parents[n] = new Set();
-  for (const f of d.fks) {
+  const parents = {}, children = {}, related = new Set();
+  for (const n of names) { parents[n] = new Set(); children[n] = new Set(); }
+  for (const f of ERD.rels) {
     if (f.ref_schema || !set.has(f.ref_table) || f.ref_table === f.table) continue;
-    parents[f.table].add(f.ref_table);
+    parents[f.table].add(f.ref_table); children[f.ref_table].add(f.table);
     related.add(f.table); related.add(f.ref_table);
   }
   // nivel = 1 + nivel máximo de sus padres (con tope por si hay ciclos)
@@ -450,24 +491,35 @@ function erdLayout() {
     }
     if (!changed) break;
   }
-  const pos = {}, sizes = Object.fromEntries(d.tables.map(t => [t.name, erdSize(t)]));
   const cols = [];
   for (const n of names.filter(n => related.has(n))) (cols[level[n]] = cols[level[n]] || []).push(n);
+  const columns = cols.filter(Boolean);
+  // Orden dentro de cada columna por baricentro: cada tabla cerca de la posición media de sus relacionadas
+  const rank = {};
+  columns.forEach(col => { col.sort((a, b) => (children[b].size - children[a].size) || a.localeCompare(b)); col.forEach((n, i) => { rank[n] = i / col.length; }); });
+  const bary = (n, rel) => { const r = [...rel].filter(x => x in rank).map(x => rank[x]); return r.length ? r.reduce((a, b) => a + b, 0) / r.length : rank[n]; };
+  for (let sweep = 0; sweep < 4; sweep++) {
+    const order = sweep % 2 ? [...columns].reverse() : columns;
+    for (const col of order) {
+      const key = Object.fromEntries(col.map(n => [n, bary(n, sweep % 2 ? children[n] : parents[n])]));
+      col.sort((a, b) => key[a] - key[b]);
+      col.forEach((n, i) => { rank[n] = i / col.length; });
+    }
+  }
+  const pos = {}, sizes = Object.fromEntries(d.tables.map(t => [t.name, erdSize(t)]));
   let x = 0, maxY = 0;
-  const COL_MAX = 1400;
-  for (const col of cols.filter(Boolean)) {
-    col.sort((a, b) => (parents[a].size - parents[b].size) || a.localeCompare(b));
+  const COL_MAX = 1600;
+  for (const col of columns) {
     let y = 0, w = 0;
     for (const n of col) {
       if (y > 0 && y + sizes[n].h > COL_MAX) { x += w + 70; y = 0; w = 0; }  // columna muy alta: partirla
-      pos[n] = {x, y}; y += sizes[n].h + 28; w = Math.max(w, sizes[n].w); maxY = Math.max(maxY, y);
+      pos[n] = {x, y}; y += sizes[n].h + 30; w = Math.max(w, sizes[n].w); maxY = Math.max(maxY, y);
     }
-    x += w + 110;
+    x += w + 140;
   }
-  // tablas sueltas: cuadrícula debajo (o desde el inicio si no hay relaciones)
   const loose = names.filter(n => !related.has(n));
   const width = Math.max(x, 1100);
-  let lx = 0, ly = related.size ? maxY + 60 : 0, rowH = 0;
+  let lx = 0, ly = related.size ? maxY + 80 : 0, rowH = 0;
   for (const n of loose) {
     if (lx > 0 && lx + sizes[n].w > width) { lx = 0; ly += rowH + 28; rowH = 0; }
     pos[n] = {x: lx, y: ly}; lx += sizes[n].w + 40; rowH = Math.max(rowH, sizes[n].h);
@@ -483,6 +535,8 @@ async function viewDiagram(v) {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(erdKey())) || {}; } catch (e) {}
   ERD.keysOnly = !!saved.keysOnly;
+  ERD.infer = saved.infer !== undefined ? !!saved.infer : !d.fks.length;  // sin claves foráneas: deducirlas
+  ERD.rels = erdRelations();
   const auto = erdLayout();
   ERD.pos = Object.fromEntries(d.tables.map(t => [t.name, (saved.pos || {})[t.name] || auto[t.name]]));
   v.innerHTML = `<div class="card erd-card">
@@ -490,6 +544,7 @@ async function viewDiagram(v) {
       <input type="search" class="input" id="erd-find" placeholder="Buscar tabla…" list="erd-names" autocomplete="off">
       <datalist id="erd-names">${d.tables.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
       <label class="dlg-check"><input type="checkbox" id="erd-keys" ${ERD.keysOnly ? 'checked' : ''}> Solo columnas clave</label>
+      <label class="dlg-check" title="cliente_id → clientes, id_proveedor → proveedores…"><input type="checkbox" id="erd-infer" ${ERD.infer ? 'checked' : ''}> Deducir relaciones por nombre</label>
       <span class="erd-sp"></span>
       <button type="button" class="btn btn-sm" id="erd-zout" title="Alejar">−</button>
       <button type="button" class="btn btn-sm" id="erd-zin" title="Acercar">+</button>
@@ -498,10 +553,18 @@ async function viewDiagram(v) {
       <button type="button" class="btn btn-sm" id="erd-svg">SVG</button>
       <button type="button" class="btn btn-sm" id="erd-png">PNG</button>
     </div>
+    ${d.fks.length ? '' : `<div class="erd-note">Esta base no tiene <b>claves foráneas declaradas</b> (es habitual en Laravel/PHP si las migraciones no usan <span class="mono">foreign()</span> o <span class="mono">constrained()</span>).
+      Las relaciones que ves se <b>deducen por el nombre</b> de las columnas (<span class="mono">cliente_id → clientes</span>) y se dibujan punteadas.</div>`}
     <div class="erd-wrap" id="erd-wrap"><svg id="erd-svg-el" class="erd" xmlns="http://www.w3.org/2000/svg"></svg></div>
-    <p class="small muted">${d.tables.length} tablas · ${d.fks.length} relaciones${d.truncated ? ` · se muestran las primeras ${d.max}` : ''}.
-      Arrastra una tabla para moverla y el fondo para desplazarte; la rueda acerca o aleja. Pasa el ratón por una tabla para resaltar sus relaciones; doble clic abre su estructura.
-      <span class="erd-legend"><b>PK</b> clave primaria · <b>FK</b> clave foránea · <i>?</i> admite nulos · la línea termina en ⟨ del lado «muchos».</span></p>
+    <p class="small muted" id="erd-count"></p>
+    <p class="small muted">Arrastra una tabla para moverla y el fondo para desplazarte; la rueda acerca o aleja. Pasa el ratón por una tabla o una relación para resaltarla; doble clic abre la estructura.
+      <span class="erd-legend"><b class="erd-lg-pk">PK</b> clave primaria · <b class="erd-lg-fk">FK</b> clave foránea · <i>?</i> admite nulos · línea continua: declarada · línea punteada: deducida · la flecha apunta a la tabla referenciada.</span></p>
+  </div>
+  <div class="card erd-rels-card"><h3>Relaciones</h3>
+    <table class="lx" id="erd-rels" data-table>
+      <thead><tr><th>Desde (tabla.columna)</th><th>Hacia (tabla.columna)</th><th>Al borrar</th><th>Al actualizar</th><th>Tipo</th></tr></thead>
+      <tbody></tbody></table>
+    <p class="small muted">Haz clic en una relación para ubicarla en el diagrama.</p>
   </div>`;
   if (!d.tables.length) { $('erd-wrap').innerHTML = '<div class="empty">Esta base no tiene tablas.</div>'; return; }
   erdDraw();
@@ -509,46 +572,69 @@ async function viewDiagram(v) {
   erdBind();
 }
 
+function erdRenderList() {
+  const declared = ERD.rels.filter(r => !r.inferred).length, inferred = ERD.rels.length - declared;
+  $('erd-count').textContent = `${ERD.data.tables.length} tablas · ${declared} relaciones declaradas`
+    + (ERD.infer ? ` · ${inferred} deducidas por nombre` : '') + (ERD.data.truncated ? ` · se muestran las primeras ${ERD.data.max} tablas` : '');
+  const tb = $('erd-rels').tBodies[0];
+  tb.innerHTML = ERD.rels.map(r => `<tr class="erd-rel-row" data-rel="${esc(r.id)}">
+      <td class="mono small">${esc(r.table)}.<b>${esc(r.columns.join(', '))}</b></td>
+      <td class="mono small">${r.ref_schema ? esc(r.ref_schema) + '.' : ''}${esc(r.ref_table)}.<b>${esc(r.ref_columns.join(', '))}</b>${r.ref_schema ? ' <span class="pill mute">otro esquema</span>' : ''}</td>
+      <td class="small">${esc(r.on_delete || '—')}</td><td class="small">${esc(r.on_update || '—')}</td>
+      <td>${r.inferred ? '<span class="pill warn">deducida</span>' : '<span class="pill ok">declarada</span>'}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted center">Sin relaciones. Activa «Deducir relaciones por nombre» si la base no declara claves foráneas.</td></tr>';
+}
+
 function erdSave() {
-  try { localStorage.setItem(erdKey(), JSON.stringify({pos: ERD.pos, keysOnly: ERD.keysOnly})); } catch (e) {}
+  try { localStorage.setItem(erdKey(), JSON.stringify({pos: ERD.pos, keysOnly: ERD.keysOnly, infer: ERD.infer})); } catch (e) {}
 }
 
 function erdEdge(f, sizes) {
   const a = ERD.pos[f.table], b = ERD.pos[f.ref_table];
-  if (!a || !b) return '';
+  if (!a || !b || f.ref_schema) return '';
   const sa = sizes[f.table], sb = sizes[f.ref_table];
   const rowY = (s, p, col) => {
     const i = s.cols.findIndex(c => c.name === col);
     return p.y + (i >= 0 ? ERD_HEAD + i * ERD_ROW + ERD_ROW / 2 : ERD_HEAD / 2);
   };
   const y1 = rowY(sa, a, f.columns[0]), y2 = rowY(sb, b, f.ref_columns[0]);
-  let x1, x2, c1, c2;
   if (f.table === f.ref_table) {  // auto-referencia: lazo por la derecha
-    x1 = a.x + sa.w; x2 = x1;
-    return `M${x1},${y1} C${x1 + 60},${y1} ${x2 + 60},${y2} ${x2},${y2}`;
+    const x = a.x + sa.w;
+    return `M${x},${y1} C${x + 70},${y1} ${x + 70},${y2} ${x},${y2}`;
   }
-  if (a.x + sa.w / 2 >= b.x + sb.w / 2) { x1 = a.x; x2 = b.x + sb.w; c1 = x1 - 60; c2 = x2 + 60; }
-  else { x1 = a.x + sa.w; x2 = b.x; c1 = x1 + 60; c2 = x2 - 60; }
+  let x1, x2, c1, c2;
+  const ca = a.x + sa.w / 2, cb = b.x + sb.w / 2;
+  if (Math.abs(ca - cb) < Math.max(sa.w, sb.w) / 2) {  // una sobre otra: salir y entrar por la derecha
+    x1 = a.x + sa.w; x2 = b.x + sb.w; const cx = Math.max(x1, x2) + 70;
+    return `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`;
+  }
+  if (ca > cb) { x1 = a.x; x2 = b.x + sb.w; } else { x1 = a.x + sa.w; x2 = b.x; }
+  const dx = Math.max(50, Math.abs(x2 - x1) / 2);
+  c1 = x1 + (ca > cb ? -dx : dx); c2 = x2 + (ca > cb ? dx : -dx);
   return `M${x1},${y1} C${c1},${y1} ${c2},${y2} ${x2},${y2}`;
 }
 
 function erdDraw() {
   const d = ERD.data, svg = $('erd-svg-el');
   const sizes = Object.fromEntries(d.tables.map(t => [t.name, erdSize(t)]));
-  const edges = d.fks.map((f, i) => {
+  const edges = ERD.rels.map((f, i) => {
     const path = erdEdge(f, sizes);
     if (!path) return '';
-    const tip = `${f.table}(${f.columns.join(', ')}) → ${f.ref_schema ? f.ref_schema + '.' : ''}${f.ref_table}(${f.ref_columns.join(', ')})`
-      + ` · ON DELETE ${f.on_delete || '—'} · ON UPDATE ${f.on_update || '—'}`;
-    return `<path class="erd-edge" data-i="${i}" data-a="${esc(f.table)}" data-b="${esc(f.ref_table)}" d="${path}" marker-start="url(#erd-many)" marker-end="url(#erd-one)"><title>${esc(f.name + ': ' + tip)}</title></path>`;
+    const tip = `${f.table}(${f.columns.join(', ')}) → ${f.ref_table}(${f.ref_columns.join(', ')})`
+      + (f.inferred ? ' · deducida por el nombre de la columna' : ` · ON DELETE ${f.on_delete || '—'} · ON UPDATE ${f.on_update || '—'}`);
+    // trazo ancho invisible debajo: facilita pasar el ratón por la línea
+    return `<g class="erd-rel${f.inferred ? ' inferred' : ''}" data-i="${i}" data-a="${esc(f.table)}" data-b="${esc(f.ref_table)}">
+      <path class="erd-hit" d="${path}" vector-effect="non-scaling-stroke"/>
+      <path class="erd-edge" d="${path}" vector-effect="non-scaling-stroke" marker-end="url(#erd-arrow${f.inferred ? '-i' : ''})"/>
+      <title>${esc((f.inferred ? '' : f.name + ': ') + tip)}</title></g>`;
   }).join('');
   const boxes = d.tables.map(t => {
     const p = ERD.pos[t.name], s = sizes[t.name];
     const rows = s.cols.map((c, i) => {
-      const y = ERD_HEAD + i * ERD_ROW + 14;
-      const badge = c.pk ? '<tspan class="erd-pk">PK</tspan>' : c.fk ? '<tspan class="erd-fk">FK</tspan>' : '';
+      const y = ERD_HEAD + i * ERD_ROW + 14, inf = ERD.inferredCols.has(t.name + '.' + c.name);
+      const badge = c.pk ? '<tspan class="erd-pk">PK</tspan>' : c.fk ? '<tspan class="erd-fk">FK</tspan>' : inf ? '<tspan class="erd-fk inf">FK</tspan>' : '';
       return `<text class="erd-badge" x="8" y="${y}">${badge}</text>
-        <text class="erd-col${c.pk ? ' pk' : ''}" x="32" y="${y}">${esc(c.name)}${c.nullable && !c.pk ? '<tspan class="erd-null">?</tspan>' : ''}</text>
+        <text class="erd-col${c.pk ? ' pk' : ''}${c.fk || inf ? ' fk' : ''}" x="32" y="${y}">${esc(c.name)}${c.nullable && !c.pk ? '<tspan class="erd-null">?</tspan>' : ''}</text>
         <text class="erd-type" x="${s.w - 8}" y="${y}" text-anchor="end">${esc(c.type.length > 24 ? c.type.slice(0, 23) + '…' : c.type)}</text>`;
     }).join('') || `<text class="erd-type" x="8" y="${ERD_HEAD + 14}">${ERD.keysOnly ? '(sin columnas clave)' : '(sin columnas)'}</text>`;
     const tag = t.type !== 'table' ? ` <tspan class="erd-tag">${esc(t.type === 'view' ? 'vista' : t.type)}</tspan>` : '';
@@ -558,15 +644,18 @@ function erdDraw() {
       <text class="erd-name" x="10" y="20">${esc(t.name)}${tag}</text>${rows}</g>`;
   }).join('');
   svg.innerHTML = `<defs>
-      <marker id="erd-many" viewBox="0 0 12 12" refX="1" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M12,6 L1,1 M12,6 L1,11 M12,6 L1,6" class="erd-mk"/></marker>
-      <marker id="erd-one" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto"><path d="M8,1 L8,11" class="erd-mk"/></marker>
-    </defs><g id="erd-root" transform="translate(${ERD.view.x},${ERD.view.y}) scale(${ERD.view.k})">${edges}${boxes}</g>`;
+      <marker id="erd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="erd-mk"/></marker>
+      <marker id="erd-arrow-i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="erd-mk inf"/></marker>
+    </defs><g id="erd-root" transform="translate(${ERD.view.x},${ERD.view.y}) scale(${ERD.view.k})"><g class="erd-edges">${edges}</g>${boxes}</g>`;
+  erdRenderList();
   if (ERD.focus) erdHighlight(ERD.focus);
 }
 
 function erdApplyView() {
   const g = $('erd-root');
   if (g) g.setAttribute('transform', `translate(${ERD.view.x},${ERD.view.y}) scale(${ERD.view.k})`);
+  const svg = $('erd-svg-el');
+  if (svg) svg.classList.toggle('far', ERD.view.k < 0.45);  // alejado: líneas más marcadas
 }
 
 function erdBounds() {
@@ -574,7 +663,7 @@ function erdBounds() {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [n, p] of Object.entries(ERD.pos)) {
     if (!sizes[n]) continue;
-    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + sizes[n].w); y1 = Math.max(y1, p.y + sizes[n].h);
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + sizes[n].w + 80); y1 = Math.max(y1, p.y + sizes[n].h);
   }
   return {x0, y0, x1, y1};
 }
@@ -583,7 +672,7 @@ function erdFit() {
   const wrap = $('erd-wrap'), b = erdBounds();
   if (!isFinite(b.x0)) return;
   const k = Math.min(1.2, (wrap.clientWidth - 40) / (b.x1 - b.x0 + 80), (wrap.clientHeight - 40) / (b.y1 - b.y0 + 80));
-  ERD.view.k = Math.max(0.15, k);
+  ERD.view.k = Math.max(0.12, k);
   ERD.view.x = 20 - (b.x0 - 40) * ERD.view.k;
   ERD.view.y = 20 - (b.y0 - 40) * ERD.view.k;
   erdApplyView();
@@ -595,17 +684,28 @@ function erdZoom(f, cx, cy) {
   erdApplyView();
 }
 
-function erdHighlight(name) {
+function erdCenter(name) {
+  const wrap = $('erd-wrap'), p = ERD.pos[name], t = ERD.data.tables.find(x => x.name === name);
+  if (!p || !t) return;
+  const s = erdSize(t);
+  ERD.view.k = Math.max(ERD.view.k, 0.7);
+  ERD.view.x = wrap.clientWidth / 2 - (p.x + s.w / 2) * ERD.view.k;
+  ERD.view.y = wrap.clientHeight / 2 - (p.y + s.h / 2) * ERD.view.k;
+  erdApplyView();
+}
+
+// Resaltar una tabla (sus relaciones y vecinas) o una relación concreta ({rel: índice})
+function erdHighlight(name, rel) {
   const svg = $('erd-svg-el');
   if (!svg) return;
-  const near = new Set(name ? [name] : []);
-  svg.querySelectorAll('.erd-edge').forEach(e => {
-    const on = name && (e.dataset.a === name || e.dataset.b === name);
-    e.classList.toggle('on', !!on); e.classList.toggle('dim', !!name && !on);
+  const near = new Set(name ? [name] : []), active = name || rel !== undefined;
+  svg.querySelectorAll('.erd-rel').forEach(e => {
+    const on = rel !== undefined ? +e.dataset.i === rel : !!name && (e.dataset.a === name || e.dataset.b === name);
+    e.classList.toggle('on', on); e.classList.toggle('dim', active && !on);
     if (on) { near.add(e.dataset.a); near.add(e.dataset.b); }
   });
   svg.querySelectorAll('.erd-table').forEach(g => {
-    g.classList.toggle('dim', !!name && !near.has(g.dataset.t));
+    g.classList.toggle('dim', active && !near.has(g.dataset.t));
     g.classList.toggle('on', g.dataset.t === name);
   });
 }
@@ -631,34 +731,48 @@ function erdBind() {
     drag.moved = true;
     drag.g.setAttribute('transform', `translate(${pos.x},${pos.y})`);
     const sizes = Object.fromEntries(ERD.data.tables.map(t => [t.name, erdSize(t)]));
-    svg.querySelectorAll('.erd-edge').forEach(el => {
-      if (el.dataset.a === drag.t || el.dataset.b === drag.t) el.setAttribute('d', erdEdge(ERD.data.fks[+el.dataset.i], sizes));
+    svg.querySelectorAll('.erd-rel').forEach(g => {
+      if (g.dataset.a === drag.t || g.dataset.b === drag.t) {
+        const path = erdEdge(ERD.rels[+g.dataset.i], sizes);
+        g.querySelectorAll('path').forEach(pth => pth.setAttribute('d', path));
+      }
     });
   });
   const end = () => { if (drag && drag.moved) erdSave(); drag = null; wrap.classList.remove('grabbing'); };
   svg.addEventListener('pointerup', end);
   svg.addEventListener('pointercancel', end);
   svg.addEventListener('wheel', e => { e.preventDefault(); const p = pt(e); erdZoom(e.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, {passive: false});
-  svg.addEventListener('mouseover', e => { const g = e.target.closest('.erd-table'); if (!drag) erdHighlight(g ? g.dataset.t : ERD.focus); });
+  svg.addEventListener('mouseover', e => {
+    if (drag) return;
+    const g = e.target.closest('.erd-table'), r = e.target.closest('.erd-rel');
+    if (g) erdHighlight(g.dataset.t); else if (r) erdHighlight(null, +r.dataset.i); else erdHighlight(ERD.focus);
+  });
   svg.addEventListener('dblclick', e => { const g = e.target.closest('.erd-table'); if (g) go({table: g.dataset.t, tab: 'structure'}); });
   $('erd-zin').onclick = () => erdZoom(1.25, wrap.clientWidth / 2, wrap.clientHeight / 2);
   $('erd-zout').onclick = () => erdZoom(0.8, wrap.clientWidth / 2, wrap.clientHeight / 2);
   $('erd-fit').onclick = erdFit;
   $('erd-auto').onclick = () => { ERD.pos = erdLayout(); erdSave(); erdDraw(); erdFit(); };
   $('erd-keys').onchange = e => { ERD.keysOnly = e.target.checked; erdSave(); erdDraw(); };
+  $('erd-infer').onchange = e => {
+    ERD.infer = e.target.checked; ERD.rels = erdRelations();
+    ERD.pos = erdLayout(); erdSave(); erdDraw(); erdFit();
+  };
   $('erd-find').oninput = e => {
     const q = e.target.value.trim().toLowerCase();
     const t = ERD.data.tables.find(t => t.name.toLowerCase() === q) || (q && ERD.data.tables.find(t => t.name.toLowerCase().includes(q)));
     ERD.focus = t ? t.name : null;
     erdHighlight(ERD.focus);
-    if (t) {  // centrar la tabla encontrada
-      const p = ERD.pos[t.name], s = erdSize(t);
-      ERD.view.k = Math.max(ERD.view.k, 0.8);
-      ERD.view.x = wrap.clientWidth / 2 - (p.x + s.w / 2) * ERD.view.k;
-      ERD.view.y = wrap.clientHeight / 2 - (p.y + s.h / 2) * ERD.view.k;
-      erdApplyView();
-    }
+    if (t) erdCenter(t.name);
   };
+  $('erd-rels').addEventListener('click', e => {
+    const tr = e.target.closest('[data-rel]');
+    if (!tr) return;
+    const i = ERD.rels.findIndex(r => r.id === tr.dataset.rel);
+    if (i < 0) return;
+    erdCenter(ERD.rels[i].table);
+    erdHighlight(null, i);
+    $('erd-wrap').scrollIntoView({behavior: 'smooth', block: 'center'});
+  });
   $('erd-svg').onclick = () => erdExport('svg');
   $('erd-png').onclick = () => erdExport('png');
 }
@@ -670,9 +784,11 @@ function erdExport(fmt) {
   const style = `text{font-family:${v('--mono') || 'monospace'};font-size:12px;fill:${v('--text')}}
     .erd-box{fill:${v('--surface')};stroke:${v('--border-strong')}} .erd-head{fill:${v('--surface-2')}}
     .erd-name{font-weight:700;font-size:13px} .erd-type{fill:${v('--text-muted')};font-size:11px} .erd-null{fill:${v('--text-faint')}}
-    .erd-pk{fill:${v('--warn')};font-weight:700;font-size:10px} .erd-fk{fill:${v('--accent')};font-weight:700;font-size:10px}
-    .erd-col.pk{font-weight:700} .erd-tag{fill:${v('--text-muted')};font-size:10px;font-weight:400}
-    .erd-edge{fill:none;stroke:${v('--accent')};stroke-width:1.4} .erd-mk{fill:none;stroke:${v('--accent')};stroke-width:1.4}`;
+    .erd-pk{fill:${v('--warn-led')};font-weight:700;font-size:10px} .erd-fk{fill:${v('--accent')};font-weight:700;font-size:10px}
+    .erd-fk.inf{fill:${v('--warn')}} .erd-col.pk{font-weight:700} .erd-tag{fill:${v('--text-muted')};font-size:10px;font-weight:400}
+    .erd-hit{display:none} .erd-edge{fill:none;stroke:${v('--accent')};stroke-width:1.8}
+    .erd-rel.inferred .erd-edge{stroke:${v('--warn-led')};stroke-dasharray:6 4}
+    .erd-mk{fill:${v('--accent')}} .erd-mk.inf{fill:${v('--warn-led')}}`;
   const clone = svg.cloneNode(true);
   clone.querySelector('#erd-root').setAttribute('transform', `translate(${pad - b.x0},${pad - b.y0})`);
   clone.querySelectorAll('.dim,.on').forEach(el => el.classList.remove('dim', 'on'));

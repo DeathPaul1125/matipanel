@@ -118,6 +118,10 @@ El instalador:
 
 Para usar otro puerto: `MATIPANEL_PORT=9443 bash scripts/install.sh TU_USUARIO`. Si tienes firewall activo, abre el puerto (`ufw allow 8443/tcp`).
 
+### Versiones
+
+MatiPanel usa versionado semántico (`MAYOR.MENOR.PARCHE`); la versión está en `app/__init__.py` y las novedades de cada una, con su fecha, en [CHANGELOG.md](CHANGELOG.md). En el panel, **Acerca de** muestra la versión instalada, el commit, cuándo se instaló, el **historial de actualizaciones** y las novedades; con las notificaciones activas llega un correo cada vez que el panel se actualiza.
+
 ### Actualizar
 
 ```bash

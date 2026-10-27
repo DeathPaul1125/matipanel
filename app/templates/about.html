@@ -32,10 +32,49 @@
     <div class="card-head"><h3>Sobre MatiPanel</h3><span class="pill ok">v{{ version }}</span></div>
     <dl class="kv" style="grid-template-columns: minmax(0, 1fr);">
       <div><dt>Qué es</dt><dd>Administrador web para servidores Linux, inspirado en Webmin y Cockpit.</dd></div>
+      <div><dt>Versión</dt><dd><b>{{ version }}</b>{% if build.commit %} · commit <span class="mono">{{ build.commit }}</span>{% endif %}{% if build.branch %} · rama <span class="mono">{{ build.branch }}</span>{% endif %}</dd></div>
+      <div><dt>Instalada</dt><dd>{% if build.installed_at %}<span class="ab-ts" data-iso="{{ build.installed_at }}">{{ build.installed_at }}</span>{% else %}<span class="muted">sin datos (instálalo con scripts/install.sh)</span>{% endif %}</dd></div>
+      <div><dt>Última actualización</dt><dd>{% if updated_at %}<span class="ab-ts" data-epoch="{{ updated_at }}"></span>{% else %}<span class="muted">—</span>{% endif %}</dd></div>
       <div><dt>Servidor</dt><dd class="mono">{{ hostname }}</dd></div>
       <div><dt>Hecho con</dt><dd>Python · Flask · gevent · psutil · xterm.js · IBM Plex</dd></div>
       <div><dt>Licencia</dt><dd>MIT</dd></div>
     </dl>
   </div>
+
+  {% if history %}
+  <div class="card">
+    <h3>Historial de actualizaciones</h3>
+    <table class="lx" data-table>
+      <thead><tr><th>Fecha</th><th>Versión</th><th>Desde</th><th>Commit</th></tr></thead>
+      <tbody>{% for h in history %}
+        <tr><td data-sort="{{ h.at }}"><span class="ab-ts" data-epoch="{{ h.at }}"></span></td>
+          <td><b>{{ h.version }}</b></td><td class="muted">{{ h.previous or 'primera instalación registrada' }}</td>
+          <td class="mono small">{{ h.commit or '—' }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="small muted">Se anota cada vez que el panel arranca con una versión o un commit distinto. Con las <a href="{{ url_for('notify.index') }}">Notificaciones</a> activas también llega un correo.</p>
+  </div>
+  {% endif %}
+
+  {% if notes %}
+  <div class="card">
+    <h3>Novedades</h3>
+    {% for n in notes %}
+    <details class="ab-notes" {% if loop.first %}open{% endif %}>
+      <summary><b>{{ n.version }}</b>{% if n.date %} <span class="muted small">· {{ n.date }}</span>{% endif %}{% if n.version == version %} <span class="pill ok">instalada</span>{% endif %}</summary>
+      <div class="docs-body">{{ n.html|safe }}</div>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.ab-ts').forEach(el => {
+  const d = el.dataset.epoch ? new Date(el.dataset.epoch * 1000) : new Date(el.dataset.iso);
+  if (!isNaN(d)) el.textContent = d.toLocaleString('es', {dateStyle: 'long', timeStyle: 'short'});
+});
+</script>
 {% endblock %}
