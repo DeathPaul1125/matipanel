@@ -2,6 +2,8 @@
 import os
 import time
 
+import psutil
+
 from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required
 
@@ -20,14 +22,16 @@ def _start(_state):
 @login_required
 def index():
     groups = [(g, [(k, v[0]) for k, v in notify.EVENTS.items() if v[2] == g]) for g in notify.GROUPS]
-    return render_template("notify.html", groups=groups)
+    from .. import thresholds
+    return render_template("notify.html", groups=groups, metrics=thresholds.METRICS, switches=thresholds.SWITCHES,
+                           minutes=thresholds.MINUTES, thr_defaults=thresholds.DEFAULTS)
 
 
 @notify_bp.route("/api/config", methods=["GET", "POST"])
 @login_required
 def config():
     if request.method == "GET":
-        return jsonify({"config": notify.public(notify.load()), "history": notify.history()})
+        return jsonify({"config": notify.public(notify.load()), "history": notify.history(), "now": _now_values()})
     cfg, err = notify.validate(request.get_json(silent=True) or {}, notify.load())
     if err:
         return jsonify({"ok": False, "error": err}), 400
@@ -37,6 +41,20 @@ def config():
     except OSError as e:
         return jsonify({"ok": False, "error": f"No se pudo guardar: {e}"}), 500
     return jsonify({"ok": True, "config": notify.public(cfg)})
+
+
+def _now_values():
+    """Valores actuales para mostrar junto a cada umbral («ahora: 23 %»)."""
+    from . import dashboard
+    from .. import thresholds
+    try:
+        last = dashboard._history[-1] if dashboard._history else {}
+        cores = psutil.cpu_count() or 1
+        return {"cpu": last.get("cpu"), "mem": psutil.virtual_memory().percent, "swap": psutil.swap_memory().percent,
+                "load": round(psutil.getloadavg()[0] / cores, 2), "cores": cores, "temp": thresholds.cpu_temperature(),
+                "partitions": [{**p, "inodes": thresholds.inode_percent(p["mount"])} for p in dashboard._partitions()]}
+    except Exception:
+        return {"partitions": []}
 
 
 def _test_mail(cfg):

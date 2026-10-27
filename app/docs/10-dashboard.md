@@ -13,19 +13,20 @@ Haz clic en el estado para volver al Dashboard. Se actualiza cada 30 segundos y 
 
 ### Qué revisa el veredicto
 
-| Condición | Nivel |
-|---|---|
-| Uno o más servicios systemd en estado `failed` | Grave |
-| Una partición al 90 % o más | Grave |
-| Una partición entre 80 % y 89 % | Aviso |
-| Memoria al 95 % o más | Grave |
-| Memoria entre 85 % y 94 % | Aviso |
-| CPU promedio de 90 % o más durante los últimos 30 segundos | Aviso |
-| Carga de 1 minuto mayor o igual a 1,5 veces el número de núcleos | Aviso |
-| Un contenedor de Docker (de una app o un stack) que se reinicia sin parar o se detuvo con error | Grave |
-| Un contenedor de Docker que no responde a su comprobación de salud (*unhealthy*) | Aviso |
+Los umbrales se configuran en [Notificaciones → Umbrales del servidor](33-notificaciones.md#umbrales-del-servidor) y son los mismos para la barra de estado y para los correos. Valores por defecto:
 
-> **Nota:** El veredicto no revisa la swap. Un uso alto de swap solo se refleja en su tacómetro.
+| Condición | Aviso | Grave |
+|---|---|---|
+| CPU, promedio de los últimos 5 minutos | 85 % | 95 % |
+| Memoria (RAM) | 85 % | 95 % |
+| Swap, promedio de 5 minutos (desactivada por defecto) | 50 % | 80 % |
+| Carga, promedio de 5 minutos, por núcleo | 1,5 × núcleos | 3 × núcleos |
+| Uso de cada partición | 80 % | 90 % |
+| Inodos usados de cada partición | 85 % | 95 % |
+| Temperatura de la CPU (si el servidor tiene sensores) | 80 °C | 90 °C |
+| Uno o más servicios systemd en estado `failed` | — | Grave |
+| Un contenedor de Docker (de una app o un stack) que se reinicia sin parar o se detuvo con error | — | Grave |
+| Un contenedor de Docker que no responde a su comprobación de salud (*unhealthy*) | Aviso | — |
 
 ### Los tres contadores junto al estado
 

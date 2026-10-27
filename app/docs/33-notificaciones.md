@@ -87,6 +87,50 @@ El resumen trae, en un solo correo:
 
 El asunto dice el veredicto («Resumen diario: todo en orden» o «… 1 problema y 2 avisos») y la franja toma el color correspondiente.
 
+## Umbrales del servidor
+
+La tarjeta **Umbrales del servidor** decide cuándo algo es un **aviso** (ámbar) o un **problema grave** (rojo). Los mismos valores usan la barra de estado de todas las pantallas y los correos de **Problemas del servidor**.
+
+| Columna | Qué es |
+|---|---|
+| **Vigilar** | Desmárcala para no revisar esa métrica. |
+| **Ahora** | El valor actual, en color según los umbrales que tienes escritos (se actualiza mientras los cambias, antes de guardar). |
+| **Aviso** y **Grave** | A partir de qué valor es aviso o problema grave. Pon **0** para no usar ese nivel (por ejemplo, solo grave). El grave debe ser mayor que el aviso. |
+| **Sostenido** | Cuántos minutos debe mantenerse el valor (se promedian las muestras de cada 5 s). **Al instante** usa el valor actual. Sirve para no recibir avisos por un pico de un momento. |
+
+| Métrica | Unidad | Por defecto | Notas |
+|---|---|---|---|
+| **Uso de CPU** | % | aviso 85 · grave 95 · 5 min | Promedio de todos los núcleos. |
+| **Uso de memoria (RAM)** | % | aviso 85 · grave 95 · al instante | |
+| **Uso de swap** | % | aviso 50 · grave 80 · 5 min | Desactivada por defecto: muchos servidores usan algo de swap sin problema. |
+| **Carga del sistema** | × núcleos | aviso 1,5 · grave 3 · 5 min | Carga de 1 minuto dividida entre los núcleos: 1,5 en un servidor de 4 núcleos es una carga de 6. |
+| **Uso de disco** | % | aviso 80 · grave 90 | Cada partición; ver **Discos**. |
+| **Inodos usados** | % | aviso 85 · grave 95 | Cada partición. Un disco puede «llenarse» de archivos pequeños aunque tenga espacio. Algunos sistemas de archivos (btrfs) no los informan. |
+| **Temperatura de la CPU** | °C | aviso 80 · grave 90 | Solo si el servidor tiene sensores; en máquinas virtuales dice «sin sensor». |
+| **Servicios de systemd caídos** | — | grave | |
+| **Contenedores de Docker con error** | — | grave | Se reinician sin parar o se detuvieron con error; *unhealthy* es aviso. |
+
+La red (ancho de banda y errores por interfaz) se configura en [Tráfico de red](19-trafico.md) y los servicios web, puertos y equipos en el [Monitor](58-monitor.md).
+
+### Discos
+
+La tabla **Discos** lista las particiones montadas con su uso y sus inodos. En **Umbral** elige:
+
+- **Usar el general**: el de **Uso de disco** de arriba.
+- **Propio**: sus propios **Aviso** y **Grave**. Útil para una partición de respaldos que siempre está casi llena (por ejemplo, aviso 95 y grave 98).
+- **No vigilar**: no se revisa (ni el uso ni los inodos).
+
+### Enviar correo de
+
+Arriba a la derecha de la tarjeta:
+
+- **Avisos y problemas graves** (por defecto): llega un correo por cada aviso y cada problema grave.
+- **Solo problemas graves**: los avisos se ven en la barra de estado pero no generan correo.
+
+Si un aviso **empeora** a grave (por ejemplo, el disco pasa del 85 % al 92 %), llega un correo «Empeoró: …», aunque ya se hubiera avisado. Cada correo de problema incluye el **umbral configurado** que lo disparó.
+
+**Valores por defecto** vuelve a cargar los valores de fábrica en la tarjeta; pulsa **Guardar** para aplicarlos.
+
 ### Otras opciones
 
 - **Recordar cada…**: si un problema sigue activo, vuelve a avisar con esa frecuencia («No recordar» = solo al aparecer).

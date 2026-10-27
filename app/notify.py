@@ -78,7 +78,7 @@ def load():
         data = {}
     cfg = json.loads(json.dumps(DEFAULTS))
     if isinstance(data, dict):
-        for k in ("enabled", "panel_url", "to", "repeat_minutes", "summary_hour"):
+        for k in ("enabled", "panel_url", "to", "repeat_minutes", "summary_hour", "thresholds"):
             if k in data:
                 cfg[k] = data[k]
         if isinstance(data.get("smtp"), dict):
@@ -147,6 +147,12 @@ def validate(data, current):
         return None, "Hora del resumen inválida"
     if not 0 <= hour <= 23:
         return None, "Hora del resumen inválida"
+    if "thresholds" in data:
+        from . import thresholds
+        thr, err = thresholds.validate(data["thresholds"])
+        if err:
+            return None, err
+        cfg["thresholds"] = thr
     events = data.get("events") if isinstance(data.get("events"), dict) else {}
     cfg.update(enabled=bool(data.get("enabled")), to=to, repeat_minutes=repeat, summary_hour=hour,
                events={k: bool(events.get(k, cfg["events"].get(k))) for k in EVENTS})
@@ -423,33 +429,45 @@ def check_health(issues, now=None):
     """issues: [(nivel, mensaje, clave)] actuales → envía avisos de los nuevos y de los resueltos."""
     now = now or time.time()
     cfg = load()
-    # El Monitor (Caído / Recuperado) y las actualizaciones (lista de paquetes) mandan su propio correo
-    current = {key: (level, msg) for level, msg, key in issues if not key.startswith(("monitor:", "updates:"))}
+    from . import thresholds
+    thr = thresholds.merge(cfg.get("thresholds"))
+    # El Monitor (Caído / Recuperado) y las actualizaciones (lista de paquetes) mandan su propio correo.
+    # «Solo problemas graves»: los avisos no generan correo (si empeoran a grave, sí).
+    current = {key: (level, msg) for level, msg, key in issues if not key.startswith(("monitor:", "updates:"))
+               and (level == "err" or thr["email_level"] == "warn")}
     repeat = cfg.get("repeat_minutes", 0) * 60
     others = lambda key: [(m, lv) for k2, (lv, m) in current.items() if k2 != key]  # noqa: E731
 
     def rows(key, extra):
         r = [*extra]
+        rule = thresholds.describe(thr, key)
+        if rule:
+            r.append(("Umbral configurado", rule))
         if others(key):
             r.append(("Otros problemas activos", " · ".join(m for m, _ in others(key))))
         return [{"rows": r}]
     for key, (level, msg) in current.items():
         prev = _active.get(key)
         if prev is None:
-            _active[key] = [msg, now, now]
+            _active[key] = [msg, now, now, level]
             event("health", ("Problema: " if level == "err" else "Aviso: ") + msg,
                   f"{msg}.\n\nSe revisa cada minuto: te avisaremos cuando se resuelva.",
                   key=f"health:{key}", cooldown=0, level=level, link="/",
                   sections=rows(key, [("Problema", msg, level), ("Detectado", fmt_time(now))]))
+        elif level == "err" and prev[3] != "err":  # el aviso empeoró a grave: se avisa aparte
+            prev[0], prev[2], prev[3] = msg, now, level
+            event("health", "Empeoró: " + msg, f"{msg}: pasó de aviso a problema grave.",
+                  key=f"health:{key}", cooldown=0, level="err", link="/",
+                  sections=rows(key, [("Problema", msg, "err"), ("Activo desde", fmt_time(prev[1]))]))
         else:
-            prev[0] = msg
+            prev[0], prev[3] = msg, level
             if repeat and now - prev[2] >= repeat:
                 prev[2] = now
                 event("health", "Sigue: " + msg, f"{msg}: el problema sigue activo.",
                       key=f"health:{key}", cooldown=0, level=level, link="/",
                       sections=rows(key, [("Problema", msg, level), ("Activo desde", fmt_time(prev[1]))]))
     for key in [k for k in _active if k not in current]:
-        msg, since, _ = _active.pop(key)
+        msg, since = _active.pop(key)[:2]
         mins = max(1, round((now - since) / 60))
         event("resolved", "Resuelto: " + msg, f"Se resolvió: {msg}.", key=f"resolved:{key}", cooldown=0, link="/",
               sections=[{"rows": [("Duró", f"unos {mins} min", "ok"), ("Desde", fmt_time(since)), ("Resuelto", fmt_time(now))]}])
@@ -521,8 +539,18 @@ if __name__ == "__main__":
     check_health([("err", "Disco / al 94 %", "disk:/")], now=1060)          # sigue: sin repetir antes de 60 min
     check_health([("err", "Disco / al 95 %", "disk:/")], now=1000 + 3700)  # recordatorio
     check_health([], now=1000 + 4000)                                        # resuelto
+    check_health([("warn", "Memoria al 88 %", "mem")], now=5000)
+    check_health([("err", "Memoria al 96 %", "mem")], now=5060)               # empeoró
+    check_health([], now=5120)
     time.sleep(0.5)
     assert sent == [("Problema: Disco / al 93 %", "err"), ("Sigue: Disco / al 95 %", "err"),
-                    ("Resuelto: Disco / al 95 %", "ok")], sent
+                    ("Resuelto: Disco / al 95 %", "ok"), ("Aviso: Memoria al 88 %", "warn"),
+                    ("Empeoró: Memoria al 96 %", "err"), ("Resuelto: Memoria al 96 %", "ok")], sent
+    sent.clear()
+    save({**cfg, "thresholds": {"email_level": "err"}})                       # solo problemas graves
+    check_health([("warn", "Disco /srv al 85 %", "disk:/srv")], now=6000)
+    check_health([("err", "Disco /srv al 92 %", "disk:/srv")], now=6060)
+    time.sleep(0.5)
+    assert sent == [("Problema: Disco /srv al 92 %", "err")], sent
     assert event("deploy_ok", "Despliegue x", "ok", key="d1") and not event("deploy_ok", "Despliegue x", "ok", key="d1")
     print("ok")

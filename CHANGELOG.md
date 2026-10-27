@@ -2,6 +2,16 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.11.0] - 2026-10-27
+
+### Añadido
+- 🎚️ **Umbrales del servidor configurables** — en Notificaciones: aviso y grave para CPU, memoria, swap, carga (por núcleo), disco, inodos y temperatura de la CPU, con tiempo **sostenido** (promedio de 1 a 60 min) para no avisar por picos; activar o no servicios caídos y contenedores con error. Cada partición puede usar el umbral general, uno propio o no vigilarse. Se ve el valor actual en color junto a cada umbral.
+- La barra de estado y los correos usan los mismos umbrales; se puede elegir recibir correo solo de los problemas graves.
+- Correo «Empeoró» cuando un aviso pasa a problema grave, y cada correo de problema indica el umbral que lo disparó.
+
+### Cambiado
+- Valores por defecto: CPU aviso 85 % / grave 95 % sostenido 5 min (antes 90 % durante 30 s, solo aviso); carga sostenida 5 min con nivel grave a 3 × núcleos; nuevas métricas de inodos y temperatura.
+
 ## [0.10.1] - 2026-10-27
 
 ### Cambiado

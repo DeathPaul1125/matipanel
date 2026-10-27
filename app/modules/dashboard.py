@@ -11,6 +11,7 @@ from flask import Blueprint, render_template, jsonify, request
 from flask_login import login_required, current_user
 from ..util import bytes_to_human as _bytes_to_human, run
 from ..distro import detect
+from .. import thresholds
 from .. import metrics
 from . import traffic
 from .. import audit
@@ -223,28 +224,23 @@ def compute_issues():
     La clave identifica el problema aunque cambie el número (las notificaciones por correo la usan
     para avisar una vez al aparecer y otra al resolverse)."""
     issues = []
+    t = thresholds.get()  # los umbrales de Notificaciones → Umbrales del servidor
     failed = _failed_units()
-    for u in failed:
-        issues.append(("err", f"El servicio {u} falló", f"unit:{u}"))
-    for p in _partitions():
-        if p["percent"] >= 80:
-            issues.append(("err" if p["percent"] >= 90 else "warn", f"Disco {p['mount']} al {round(p['percent'])} %",
-                           f"disk:{p['mount']}"))
-    mem = psutil.virtual_memory().percent
-    if mem >= 85:
-        issues.append(("err" if mem >= 95 else "warn", f"Memoria al {round(mem)} %", "mem"))
-    recent = [p["cpu"] for p in list(_history)[-6:]]
-    if len(recent) >= 6 and sum(recent) / len(recent) >= 90:
-        issues.append(("warn", f"CPU sostenida al {round(sum(recent) / len(recent))} %", "cpu"))
-    load1, cores = psutil.getloadavg()[0], psutil.cpu_count() or 1
-    if load1 / cores >= 1.5:
-        issues.append(("warn", f"Carga alta ({load1:.2f})", "load"))
+    if t["services"]["on"]:
+        for u in failed:
+            issues.append(("err", f"El servicio {u} falló", f"unit:{u}"))
+    now = time.time()
+    hist = list(_history) or [{"t": now, "cpu": psutil.cpu_percent(None), "mem": psutil.virtual_memory().percent,
+                               "swap": psutil.swap_memory().percent, "load": psutil.getloadavg()[0]}]
+    parts = [{**p, "inodes": thresholds.inode_percent(p["mount"]) if t["inodes"]["on"] else None} for p in _partitions()]
+    issues += thresholds.evaluate(t, hist, now, parts, psutil.cpu_count() or 1,
+                                  thresholds.cpu_temperature() if t["temp"]["on"] else None)
     try:
         issues += traffic.health_issues()
     except Exception:  # la barra de salud no debe caerse por las alertas de red
         pass
     try:
-        if shutil.which("docker"):
+        if t["containers"]["on"] and shutil.which("docker"):
             issues += docker_issues()
     except Exception:
         pass

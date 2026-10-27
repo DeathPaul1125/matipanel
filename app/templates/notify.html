@@ -47,6 +47,48 @@
   </div>
 </div>
 
+<div class="card" id="thresholds">
+  <div class="card-head"><h3>Umbrales del servidor</h3>
+    <label class="nt-lvl"><span class="small muted">Enviar correo de</span>
+      <select class="input" id="t-level"><option value="warn">Avisos y problemas graves</option><option value="err">Solo problemas graves</option></select></label></div>
+  <p class="small muted">Deciden cuándo algo es un <b>aviso</b> (ámbar) o un <b>problema grave</b> (rojo), en la barra de estado y en los correos de «Problemas del servidor».
+    Pon <b>0</b> para no usar ese nivel. <b>Sostenido</b> promedia los últimos minutos para no avisar por picos de un momento.</p>
+  <div class="table-wrap">
+  <table class="lx nt-thr">
+    <thead><tr><th>Vigilar</th><th>Métrica</th><th>Ahora</th><th>Aviso</th><th>Grave</th><th>Sostenido</th></tr></thead>
+    <tbody>
+    {% for key, m in metrics.items() %}
+    <tr data-thr="{{ key }}">
+      <td><input type="checkbox" data-f="on" aria-label="Vigilar {{ m[0] }}"></td>
+      <td>{{ m[0] }}</td>
+      <td class="nowrap" data-now="{{ key }}"><span class="muted">—</span></td>
+      <td><span class="nt-num"><input class="input" type="number" data-f="warn" min="0" max="{{ m[6] }}" step="any" aria-label="Aviso"> <small>{{ m[1] }}</small></span></td>
+      <td><span class="nt-num"><input class="input" type="number" data-f="crit" min="0" max="{{ m[6] }}" step="any" aria-label="Grave"> <small>{{ m[1] }}</small></span></td>
+      <td>{% if m[4] is not none %}<select class="input" data-f="minutes" aria-label="Sostenido">{% for x in minutes %}<option value="{{ x }}">{{ 'Al instante' if x == 0 else x ~ ' min' }}</option>{% endfor %}</select>{% else %}<span class="muted small">Al instante</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    {% for key, label in switches.items() %}
+    <tr data-thr="{{ key }}"><td><input type="checkbox" data-f="on" aria-label="Vigilar {{ label }}"></td><td colspan="5">{{ label }}</td></tr>
+    {% endfor %}
+    <tr><td></td><td colspan="5" class="small muted">Red (uso del ancho de banda y errores por interfaz): se configura en <a href="{{ url_for('traffic.index') }}#alerts">Tráfico de red</a>.
+      Servicios web y puertos: en el <a href="{{ url_for('monitor.index') }}">Monitor</a>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <h4 class="nt-h4">Discos</h4>
+  <p class="small muted">Cada partición usa el umbral general de disco, uno propio (por ejemplo, una partición de respaldos que siempre está casi llena) o no se vigila.</p>
+  <div class="table-wrap">
+  <table class="lx nt-thr" id="t-disks">
+    <thead><tr><th>Partición</th><th>Uso ahora</th><th>Inodos</th><th>Umbral</th><th>Aviso</th><th>Grave</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Cargando…</td></tr></tbody>
+  </table>
+  </div>
+  <div class="form-actions">
+    <button class="btn" onclick="resetThr()">Valores por defecto</button>
+    <button class="btn btn-primary" onclick="saveCfg()">Guardar</button>
+  </div>
+</div>
+
 <div class="card">
   <h3>Últimos envíos</h3>
   <table class="lx" id="h-table" data-table>
@@ -72,6 +114,93 @@ const API = {{ url_for('notify.index')|tojson }} + 'api/';
 const $ = id => document.getElementById(id);
 let CFG = null;
 
+const THR_DEFAULTS = {{ thr_defaults|tojson }};
+let NOW = {partitions: []}, THR = null;
+
+// Color según el umbral del formulario (lo que se ve en pantalla, aunque aún no esté guardado)
+function lvl(v, warn, crit) {
+  if (v == null) return '';
+  return crit && v >= crit ? 'err' : warn && v >= warn ? 'warn' : 'ok';
+}
+const rowVal = (key, f) => { const el = document.querySelector(`[data-thr="${key}"] [data-f="${f}"]`); return el ? Number(el.value) || 0 : 0; };
+function nowCell(key, v, text) {
+  const td = document.querySelector(`[data-now="${key}"]`);
+  if (!td) return;
+  if (v == null) { td.innerHTML = `<span class="muted small">${escapeHtml(text || '—')}</span>`; return; }
+  td.innerHTML = `<span class="pill ${lvl(v, rowVal(key, 'warn'), rowVal(key, 'crit'))}">${escapeHtml(text)}</span>`;
+}
+function updateNow() {
+  const n = NOW;
+  nowCell('cpu', n.cpu, n.cpu != null ? `${Math.round(n.cpu)} %` : 'sin datos aún');
+  nowCell('mem', n.mem, `${Math.round(n.mem)} %`);
+  nowCell('swap', n.swap, `${Math.round(n.swap)} %`);
+  nowCell('load', n.load, n.load != null ? `${n.load} × (${n.cores} núcleos)` : '');
+  nowCell('temp', n.temp, n.temp != null ? `${Math.round(n.temp)} °C` : 'sin sensor');
+  const parts = n.partitions || [];
+  const maxDisk = parts.length ? Math.max(...parts.map(p => p.percent)) : null;
+  const maxIno = parts.filter(p => p.inodes != null).map(p => p.inodes);
+  nowCell('disk', maxDisk, maxDisk != null ? `máx. ${Math.round(maxDisk)} %` : '');
+  nowCell('inodes', maxIno.length ? Math.max(...maxIno) : null, maxIno.length ? `máx. ${Math.round(Math.max(...maxIno))} %` : 'no informa');
+  document.querySelectorAll('#t-disks tr[data-mount]').forEach(tr => {
+    const p = parts.find(x => x.mount === tr.dataset.mount);
+    const mode = tr.querySelector('[data-f="mode"]').value;
+    const w = mode === 'custom' ? Number(tr.querySelector('[data-f="warn"]').value) || 0 : rowVal('disk', 'warn');
+    const c = mode === 'custom' ? Number(tr.querySelector('[data-f="crit"]').value) || 0 : rowVal('disk', 'crit');
+    tr.querySelector('.d-use').innerHTML = p ? `<span class="pill ${mode === 'off' ? 'mute' : lvl(p.percent, w, c)}">${Math.round(p.percent)} %</span> <span class="small muted">${escapeHtml(p.used_h)} de ${escapeHtml(p.total_h)}</span>` : '<span class="muted small">no montada</span>';
+    tr.querySelector('.d-ino').innerHTML = p && p.inodes != null ? `<span class="pill ${mode === 'off' ? 'mute' : lvl(p.inodes, rowVal('inodes', 'warn'), rowVal('inodes', 'crit'))}">${Math.round(p.inodes)} %</span>` : '<span class="muted small">—</span>';
+  });
+}
+function fillThr(t) {
+  THR = JSON.parse(JSON.stringify(t));
+  document.querySelectorAll('[data-thr]').forEach(tr => {
+    const r = t[tr.dataset.thr] || {};
+    tr.querySelectorAll('[data-f]').forEach(el => { if (el.type === 'checkbox') el.checked = !!r.on; else el.value = r[el.dataset.f] ?? 0; });
+  });
+  $('t-level').value = t.email_level || 'warn';
+  const mounts = [...new Set([...(NOW.partitions || []).map(p => p.mount), ...Object.keys(t.disks || {})])];
+  const tb = $('t-disks').tBodies[0];
+  if (!mounts.length) { tb.innerHTML = '<tr><td colspan="6" class="muted center">No se encontraron particiones</td></tr>'; return; }
+  tb.innerHTML = mounts.map(m => {
+    const d = (t.disks || {})[m] || {mode: 'default'};
+    return `<tr data-mount="${escapeHtml(m)}"><td class="mono">${escapeHtml(m)}</td><td class="d-use"></td><td class="d-ino"></td>
+      <td><select class="input" data-f="mode"><option value="default">Usar el general</option><option value="custom">Propio</option><option value="off">No vigilar</option></select></td>
+      <td><span class="nt-num"><input class="input" type="number" data-f="warn" min="0" max="100" step="any" value="${d.warn ?? ''}"> <small>%</small></span></td>
+      <td><span class="nt-num"><input class="input" type="number" data-f="crit" min="0" max="100" step="any" value="${d.crit ?? ''}"> <small>%</small></span></td></tr>`;
+  }).join('');
+  tb.querySelectorAll('tr[data-mount]').forEach(tr => {
+    const sel = tr.querySelector('[data-f="mode"]');
+    sel.value = ((t.disks || {})[tr.dataset.mount] || {}).mode || 'default';
+    const sync = () => {
+      const custom = sel.value === 'custom';
+      tr.querySelectorAll('input').forEach(i => { i.disabled = !custom; if (!custom) i.placeholder = sel.value === 'off' ? '—' : String(i.dataset.f === 'warn' ? rowVal('disk', 'warn') : rowVal('disk', 'crit')); });
+      if (custom && !tr.querySelector('[data-f="warn"]').value) { tr.querySelector('[data-f="warn"]').value = rowVal('disk', 'warn'); tr.querySelector('[data-f="crit"]').value = rowVal('disk', 'crit'); }
+      updateNow();
+    };
+    sel.addEventListener('change', sync);
+    sync();
+  });
+  updateNow();
+}
+function thrBody() {
+  const t = {email_level: $('t-level').value, disks: {}};
+  document.querySelectorAll('[data-thr]').forEach(tr => {
+    const r = {};
+    tr.querySelectorAll('[data-f]').forEach(el => { r[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value; });
+    t[tr.dataset.thr] = r;
+  });
+  document.querySelectorAll('#t-disks tr[data-mount]').forEach(tr => {
+    const mode = tr.querySelector('[data-f="mode"]').value;
+    if (mode !== 'default') t.disks[tr.dataset.mount] = {mode, warn: tr.querySelector('[data-f="warn"]').value, crit: tr.querySelector('[data-f="crit"]').value};
+  });
+  return t;
+}
+function resetThr() {
+  fillThr(THR_DEFAULTS);
+  ui.toast('Valores por defecto cargados: pulsa Guardar para aplicarlos', 'info');
+}
+document.getElementById('thresholds').addEventListener('input', updateNow);
+document.getElementById('thresholds').addEventListener('change', updateNow);
+
 function fill(c) {
   CFG = c;
   $('n-enabled').checked = c.enabled; $('n-host').value = c.smtp.host; $('n-port').value = c.smtp.port;
@@ -80,6 +209,7 @@ function fill(c) {
   $('n-pass-help').textContent = c.smtp.has_password ? 'Hay una contraseña guardada. Vacío = sin cambios.' : 'Sin contraseña guardada.';
   $('n-to').value = c.to.join(', '); $('n-repeat').value = String(c.repeat_minutes || 0);
   $('n-hour').value = String(c.summary_hour ?? 7);
+  fillThr(c.thresholds || THR_DEFAULTS);
   document.querySelectorAll('[data-ev]').forEach(el => { el.checked = !!c.events[el.dataset.ev]; });
 }
 function fillHistory(h) {
@@ -91,7 +221,8 @@ function fillHistory(h) {
 }
 async function load() {
   const d = await (await fetch(API + 'config')).json();
-  if (!CFG) fill(d.config);
+  NOW = d.now || NOW;
+  if (!CFG) fill(d.config); else updateNow();
   fillHistory(d.history);
 }
 $('n-security').addEventListener('change', e => {
@@ -102,7 +233,7 @@ async function saveCfg() {
   const events = {};
   document.querySelectorAll('[data-ev]').forEach(el => { events[el.dataset.ev] = el.checked; });
   const body = {enabled: $('n-enabled').checked, to: $('n-to').value, repeat_minutes: $('n-repeat').value,
-    summary_hour: $('n-hour').value, events,
+    summary_hour: $('n-hour').value, thresholds: thrBody(), events,
     smtp: {host: $('n-host').value.trim(), port: $('n-port').value, security: $('n-security').value, verify: $('n-verify').checked,
            from: $('n-from').value.trim(), user: $('n-user').value.trim(), password: $('n-pass').value}};
   const d = await postJSON(API + 'config', body);
