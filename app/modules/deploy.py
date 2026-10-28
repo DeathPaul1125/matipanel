@@ -294,6 +294,12 @@ def _opts(d, cfg):
         if d["database"] not in D.DATABASES:
             return None, "Base de datos inválida"
         out["database"] = d["database"]
+    if d.get("db_name"):  # solo al crear: MariaDB/PostgreSQL lo aplican al inicializar su volumen
+        n = str(d["db_name"]).strip()
+        if not D.valid_db_name(n):
+            return None, ("Nombre de la base inválido: minúsculas, números y _, empezando por una letra "
+                          "(hasta 32), y que no sea un nombre del sistema (mysql, postgres…)")
+        out["db_name"] = n
     if "mem_mb" in d:
         m = _num(d["mem_mb"] or 0, int)
         if m is None or not (m == 0 or 64 <= m <= 262144):
@@ -344,12 +350,21 @@ def create(name):
         return _err("La aplicación ya fue creada", 409)
     d = _data()
     fields = {k: d[k] for k in ("branch", "php", "hostname", "auto_deploy", "worker", "scheduler", "database", "redis",
-                                 "kind", "docroot", "env_path", "persist", "migrate_cmd") if k in d}
+                                 "kind", "docroot", "env_path", "persist", "migrate_cmd", "db_name") if k in d}
     opts, error = _opts(fields, cfg)
     if error:
         return _err(error)
+    ext, ext_pw = None, ""
+    if opts.get("database", cfg.get("database")) == "none":
+        ext, ext_pw, error = D.validate_ext_db(d.get("ext_db"))
+        if error:
+            return _err(error)
+        if ext:
+            opts["ext_db"] = ext
+    else:
+        opts.pop("ext_db", None)
     try:
-        D.finish_create(name, opts)
+        D.finish_create(name, opts, ext_pw)
     except (OSError, KeyError) as e:
         return _err(f"No se pudo crear la aplicación: {e}", 500)
     dep = None

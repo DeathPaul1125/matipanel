@@ -2,7 +2,7 @@
 
 Dedicado a Matías Aceituno, la inspiración de este proyecto. 💙
 """
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
 from flask import Flask, request, abort, send_from_directory
 from flask_login import LoginManager, current_user

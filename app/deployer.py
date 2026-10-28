@@ -515,6 +515,7 @@ def render_compose(cfg, appdir, slots=None):
     def base(image, role):
         svc = {"image": image, "restart": "unless-stopped", "env_file": env_file,
                "volumes": list(app_vols), "stop_grace_period": "30s",
+               "extra_hosts": ["host.docker.internal:host-gateway"],  # bases de datos de este mismo servidor
                "labels": {"matipanel.app": name, "matipanel.role": role}}
         if php_kind:
             svc["environment"] = {"APACHE_DOCUMENT_ROOT": webroot}
@@ -616,25 +617,82 @@ def new_password(n=32):
 
 
 DB_ALIAS_RE = re.compile(r"[A-Z]*DB_(HOST|PORT|NAME|DATABASE|USER|USERNAME|PASS|PASSWORD)")
+DB_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,31}")
+DB_RESERVED = {"mysql", "information_schema", "performance_schema", "sys", "postgres", "template0", "template1", "root"}
+EXT_ENGINES = {"mysql": "MySQL / MariaDB", "pgsql": "PostgreSQL"}
+EXT_HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
+EXT_IDENT_RE = re.compile(r"[A-Za-z0-9_.@$-]{1,64}")
 
 
-def service_env(cfg, sec, current=""):
+def valid_db_name(n):
+    """Nombre de la base del panel (también su usuario): minúsculas, números y _, sin nombres del sistema."""
+    return isinstance(n, str) and bool(DB_NAME_RE.fullmatch(n)) and n not in DB_RESERVED
+
+
+def validate_ext_db(d):
+    """Base externa (o del propio servidor vía host.docker.internal). → (dict sin contraseña, contraseña, error)"""
+    if not isinstance(d, dict) or not str(d.get("host", "")).strip():
+        return None, "", ""  # sin base externa
+    engine, host = d.get("engine", "mysql"), str(d.get("host", "")).strip()
+    name, user, pw = str(d.get("name", "")).strip(), str(d.get("user", "")).strip(), str(d.get("password") or "")
+    try:
+        port = int(d.get("port") or (3306 if engine == "mysql" else 5432))
+    except (TypeError, ValueError):
+        port = 0
+    if engine not in EXT_ENGINES:
+        return None, "", "Motor de la base externa inválido"
+    if not EXT_HOST_RE.fullmatch(host):
+        return None, "", "Servidor de la base inválido (IP o nombre; para este mismo servidor: host.docker.internal)"
+    if not 1 <= port <= 65535:
+        return None, "", "Puerto de la base inválido"
+    if not EXT_IDENT_RE.fullmatch(name) or not EXT_IDENT_RE.fullmatch(user):
+        return None, "", "Nombre de la base o usuario inválidos (letras, números y _ . @ $ -)"
+    if len(pw) > 256 or any(c in pw for c in "\r\n\0"):
+        return None, "", "Contraseña de la base inválida"
+    return {"engine": engine, "host": host, "port": port, "name": name, "user": user}, pw, ""
+
+
+def _alias_env(vals, current):
+    """Rellena las claves *DB_HOST, *DB_NAME… que ya tenga el .env (cada framework PHP usa las suyas)."""
+    keys = [k for k, _ in parse_env(current)[0] if DB_ALIAS_RE.fullmatch(k)]
+    upd = {k: vals[DB_ALIAS_RE.fullmatch(k).group(1)] for k in keys}
+    return upd or {f"DB_{k}": vals[k] for k in ("HOST", "PORT", "DATABASE", "USERNAME", "PASSWORD")}
+
+
+def _ext_env(cfg, sec, current):
+    """Variables de la base externa elegida al crear la app (None si no hay)."""
+    e = cfg.get("ext_db") or {}
+    if cfg.get("database") != "none" or not isinstance(e, dict) or not e.get("host"):
+        return None
+    pw = sec.get("ext_db_password", "")
+    vals = {"HOST": e["host"], "PORT": str(e["port"]), "NAME": e["name"], "DATABASE": e["name"], "USER": e["user"],
+            "USERNAME": e["user"], "PASS": pw, "PASSWORD": pw}
+    if is_php(cfg):
+        return _alias_env(vals, current)
+    return {"DB_CONNECTION": e["engine"], "DB_HOST": e["host"], "DB_PORT": str(e["port"]), "DB_DATABASE": e["name"],
+            "DB_USERNAME": e["user"], "DB_PASSWORD": pw}
+
+
+def service_env(cfg, sec, current="", ext=False):
     """Variables que el panel inyecta en el .env según los servicios activos.
 
     En proyectos PHP cada framework usa sus nombres (Quetzal: DB_NAME/DB_USER/DB_PASS y LDB_* para
-    la consola): se rellenan todas las claves *DB_HOST, *DB_NAME… que ya tenga el .env."""
-    if is_php(cfg) and cfg.get("database") in ("mariadb", "postgres"):
-        vals = {"HOST": "db", "PORT": "3306" if cfg["database"] == "mariadb" else "5432",
-                "NAME": db_name(cfg), "DATABASE": db_name(cfg), "USER": db_name(cfg), "USERNAME": db_name(cfg),
-                "PASS": sec.get("db_password", ""), "PASSWORD": sec.get("db_password", "")}
-        keys = [k for k, _ in parse_env(current)[0] if DB_ALIAS_RE.fullmatch(k)]
-        upd = {k: vals[DB_ALIAS_RE.fullmatch(k).group(1)] for k in keys}
-        if not upd:
-            upd = {f"DB_{k}": vals[k] for k in ("HOST", "PORT", "DATABASE", "USERNAME", "PASSWORD")}
+    la consola): se rellenan todas las claves *DB_HOST, *DB_NAME… que ya tenga el .env.
+    ext=True agrega la base externa elegida al crear (solo al generar el .env y en el primer despliegue:
+    después manda lo que el usuario edite en el .env)."""
+    ext_upd = _ext_env(cfg, sec, current) if ext else None
+    if is_php(cfg) and (cfg.get("database") in ("mariadb", "postgres") or ext_upd):
+        if ext_upd:
+            upd = ext_upd
+        else:
+            upd = _alias_env({"HOST": "db", "PORT": "3306" if cfg["database"] == "mariadb" else "5432",
+                              "NAME": db_name(cfg), "DATABASE": db_name(cfg), "USER": db_name(cfg),
+                              "USERNAME": db_name(cfg), "PASS": sec.get("db_password", ""),
+                              "PASSWORD": sec.get("db_password", "")}, current)
         if cfg.get("redis"):
             upd.update(REDIS_HOST="redis", REDIS_PORT="6379")
         return upd
-    upd = {}
+    upd = dict(ext_upd or {})
     if cfg.get("database") == "mariadb":
         upd.update(DB_CONNECTION="mysql", DB_HOST="db", DB_PORT="3306")
     elif cfg.get("database") == "postgres":
@@ -662,15 +720,15 @@ def fill_db_placeholders(cfg, sec, text):
 
 def default_env(cfg, sec):
     if is_php(cfg):  # se completa en el primer despliegue con el .env.example del repositorio, si trae
-        return env_set("# .env de la aplicación (se monta en el contenedor como archivo)\n", service_env(cfg, sec))
+        return env_set("# .env de la aplicación (se monta en el contenedor como archivo)\n", service_env(cfg, sec, ext=True))
     url = f"http://{cfg['hostname']}" if cfg.get("hostname") else f"http://localhost:{cfg['port']}"
-    redis, db = cfg.get("redis"), cfg.get("database") in ("mariadb", "postgres")
+    redis, db = cfg.get("redis"), cfg.get("database") in ("mariadb", "postgres") or bool(_ext_env(cfg, sec, ""))
     pairs = [("APP_NAME", cfg["name"]), ("APP_ENV", "production"), ("APP_KEY", new_app_key()),
              ("APP_DEBUG", "false"), ("APP_URL", url), ("LOG_CHANNEL", "stderr"), ("LOG_LEVEL", "info"),
              ("SESSION_DRIVER", "redis" if redis else "file"),
              ("CACHE_STORE", "redis" if redis else "file"), ("CACHE_DRIVER", "redis" if redis else "file"),
              ("QUEUE_CONNECTION", "redis" if redis else "database" if db else "sync")]
-    return env_set(serialize_env(pairs), service_env(cfg, sec))
+    return env_set(serialize_env(pairs), service_env(cfg, sec, ext=True))
 
 
 def db_env(cfg, sec):
@@ -1479,7 +1537,7 @@ def _seed_env(name, cfg, log):
         return
     current = dict(parse_env(read_env(name))[0])
     merged = env_set(serialize_env([(k, v) for k, v in pairs if k not in current]), current)
-    write_env(name, env_set(merged, service_env(cfg, load_secrets(name), merged)))
+    write_env(name, env_set(merged, service_env(cfg, load_secrets(name), merged, ext=True)))
     log.write(f"El .env se creó a partir de {env_path}.example (revísalo en la pestaña Entorno)\n")
 
 
@@ -1797,13 +1855,17 @@ def create_draft(name, repo):
         return cfg
 
 
-def finish_create(name, opts):
+def finish_create(name, opts, ext_password=""):
     """Paso final del asistente: guarda opciones, genera .env, db.env y compose."""
     with _lock:
         cfg = load_config(name)
         if not cfg or not cfg.get("draft"):
             raise KeyError(name)
         cfg.update(opts)
+        if ext_password and cfg.get("ext_db"):
+            sec = load_secrets(name)
+            sec["ext_db_password"] = ext_password
+            save_secrets(name, sec)
         cfg["draft"] = False
         cfg.setdefault("db_name", "app" if is_php(cfg) else "laravel")
         sec = load_secrets(name)

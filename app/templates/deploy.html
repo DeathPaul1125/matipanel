@@ -115,8 +115,23 @@
         <input class="input mono" id="wz-host" placeholder="miapp.apps.empresa.local" autocomplete="off">
         <span class="dlg-help">Necesita un registro DNS que apunte a este servidor (por ejemplo el comodín <span class="mono">*.apps.empresa.local</span>). El puerto propio se asigna solo. Si Apache ya usa el puerto 80, él reenvía este nombre a la app.</span></label>
       <label class="form-row"><span>Base de datos</span>
-        <select class="input" id="wz-db"><option value="none">Ninguna (uso una externa)</option><option value="mariadb">MariaDB 11</option><option value="postgres">PostgreSQL 16</option></select>
-        <span class="dlg-help">Se crea en un contenedor propio y sus credenciales se agregan al .env (DB_*).</span></label>
+        <select class="input" id="wz-db"><option value="none">Ninguna o externa (otro servidor, o la de este servidor)</option><option value="mariadb">MariaDB 11 (contenedor propio)</option><option value="postgres">PostgreSQL 16 (contenedor propio)</option></select>
+        <span class="dlg-help" id="wz-db-help">Se crea en un contenedor propio y sus credenciales se agregan al .env (DB_*).</span></label>
+      <label class="form-row" id="wz-dbname-row" hidden><span>Nombre de la base de datos</span>
+        <input class="input mono" id="wz-dbname" autocomplete="off" spellcheck="false" maxlength="32">
+        <span class="dlg-help">También es el usuario de la base. Minúsculas, números y _, empezando por una letra. La contraseña se genera sola. No se puede cambiar después.</span></label>
+      <div id="wz-ext" class="dp-ext" hidden>
+        <div class="small muted">Si la app usa una base que ya existe, completa sus datos y se escriben en el .env. Déjalo vacío si no usa base de datos o la configurarás después.</div>
+        <div class="dp-form2">
+          <label class="form-row"><span>Motor</span><select class="input" id="wz-ext-engine"><option value="mysql">MySQL / MariaDB</option><option value="pgsql">PostgreSQL</option></select></label>
+          <label class="form-row"><span>Servidor</span><input class="input mono" id="wz-ext-host" placeholder="192.100.10.70 o host.docker.internal" autocomplete="off"></label>
+          <label class="form-row"><span>Puerto</span><input class="input mono" id="wz-ext-port" type="number" min="1" max="65535" placeholder="3306"></label>
+          <label class="form-row"><span>Base de datos</span><input class="input mono" id="wz-ext-name" autocomplete="off"></label>
+          <label class="form-row"><span>Usuario</span><input class="input mono" id="wz-ext-user" autocomplete="off"></label>
+          <label class="form-row"><span>Contraseña</span><input class="input" id="wz-ext-pass" type="password" autocomplete="new-password"></label>
+        </div>
+        <div class="dlg-help">Para una base instalada en <b>este mismo servidor</b> usa <span class="mono">host.docker.internal</span>: dentro del contenedor, <span class="mono">localhost</span> es el propio contenedor. La base debe aceptar conexiones desde la red de Docker (bind-address y permisos del usuario desde 172.%).</div>
+      </div>
       <div class="dp-checks">
         <label class="dlg-check"><input type="checkbox" id="wz-redis"> Redis (caché, sesiones y colas)</label>
         <label class="dlg-check" data-kind="laravel"><input type="checkbox" id="wz-worker"> Worker de colas (queue:work)</label>
@@ -543,6 +558,20 @@ async function wizTest() {
   }
   return true;
 }
+// Base de datos: nombre (contenedor propio) o datos de una base externa
+function wzDbUI() {
+  const db = $('#wz-db').value, php = $('#wz-kind').value === 'php';
+  $('#wz-dbname-row').hidden = db === 'none';
+  $('#wz-ext').hidden = db !== 'none';
+  $('#wz-db-help').hidden = db === 'none';
+  $('#wz-dbname').placeholder = php ? 'app' : 'laravel';
+  $('#wz-ext-port').placeholder = $('#wz-ext-engine').value === 'pgsql' ? '5432' : '3306';
+}
+$('#wz-db').addEventListener('change', wzDbUI);
+$('#wz-ext-engine').addEventListener('change', wzDbUI);
+$('#wz-kind').addEventListener('change', wzDbUI);
+wzDbUI();
+
 async function wizNext() {
   const btn = $('#wz-next');
   btn.disabled = true;
@@ -562,7 +591,11 @@ async function wizNext() {
     } else {
       const d = await postJSON(appApi('create', wz.name), {
         branch: $('#wz-branch').value.trim(), php: $('#wz-php').value, hostname: $('#wz-host').value.trim(),
-        database: $('#wz-db').value, redis: $('#wz-redis').checked, worker: $('#wz-worker').checked,
+        database: $('#wz-db').value, db_name: $('#wz-db').value !== 'none' ? $('#wz-dbname').value.trim() : '',
+        ext_db: $('#wz-db').value === 'none' ? {engine: $('#wz-ext-engine').value, host: $('#wz-ext-host').value.trim(),
+          port: $('#wz-ext-port').value, name: $('#wz-ext-name').value.trim(), user: $('#wz-ext-user').value.trim(),
+          password: $('#wz-ext-pass').value} : null,
+        redis: $('#wz-redis').checked, worker: $('#wz-worker').checked,
         scheduler: $('#wz-scheduler').checked, auto_deploy: $('#wz-auto').checked, deploy_now: $('#wz-now').checked,
         ...phpFields('wz'),
       });
@@ -631,7 +664,9 @@ function renderHead() {
 
 function renderSummary() {
   const d = INFO, c = d.config;
-  const services = [c.database === 'mariadb' ? 'MariaDB 11' : c.database === 'postgres' ? 'PostgreSQL 16' : null,
+  const dbn = c.db_name || 'laravel';
+  const services = [c.database === 'mariadb' ? `MariaDB 11 (base ${dbn})` : c.database === 'postgres' ? `PostgreSQL 16 (base ${dbn})`
+    : c.ext_db && c.ext_db.host ? `Base externa ${c.ext_db.name} en ${c.ext_db.host}:${c.ext_db.port}` : null,
     c.redis ? 'Redis' : null, c.worker ? 'Worker de colas' : null, c.scheduler ? 'Programador' : null].filter(Boolean);
   const rows = [
     ['Direcciones', urlsOf(d).length ? linkList(urlsOf(d)) : '—'],

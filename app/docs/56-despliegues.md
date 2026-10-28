@@ -88,7 +88,11 @@ En el [Firewall](20-firewall.md) del panel agrega reglas para esos puertos, limi
    - **Rama:** la que se despliega (se sugieren las del repositorio).
    - **Versión de PHP:** 8.2, 8.3 o 8.4.
    - **Nombre interno (opcional):** por ejemplo `portal-rrhh.apps.empresa.local`.
-   - **Base de datos:** ninguna, **MariaDB 11** o **PostgreSQL 16**. Se crea en un contenedor propio con usuario y contraseña generados, y las variables `DB_*` se agregan solas al `.env`.
+   - **Base de datos:**
+     - **MariaDB 11** o **PostgreSQL 16 (contenedor propio)**: se crea una base solo para la app. En **Nombre de la base de datos** eliges cómo se llama (minúsculas, números y `_`, por ejemplo `erp_mayoreo`); ese nombre también es el usuario, y la contraseña se genera sola. Si lo dejas vacío se llama `laravel` (Laravel) o `app` (PHP). **No se puede cambiar después**: la base se crea con ese nombre en el primer despliegue.
+     - **Ninguna o externa**: la app no usa base o usa una que ya existe en otro servidor o **en este mismo servidor**. Completa **Motor** (MySQL/MariaDB o PostgreSQL), **Servidor**, **Puerto**, **Base de datos**, **Usuario** y **Contraseña**, y se escriben en el `.env`. Déjalo vacío si la configurarás después en **Variables de entorno**.
+
+     En ambos casos las variables `DB_*` del `.env` se completan solas.
    - **Redis**, **Worker de colas** (`queue:work`) y **Programador de tareas** (`schedule:work`).
    - **Desplegar solo con cada push a la rama** (activado por defecto).
    - **Desplegar al terminar**.
@@ -192,6 +196,14 @@ MAIL_PORT=25
 
 > **Consejo:** Si la aplicación genera URLs con `https` o con el puerto equivocado, revisa `APP_URL` y que Laravel confíe en el proxy (en Laravel 11: `->withMiddleware(fn ($m) => $m->trustProxies(at: '*'))` en `bootstrap/app.php`).
 
+### Usar una base de datos de este mismo servidor
+
+Si la base está instalada en el servidor (por ejemplo, la MariaDB de [Bases de datos](24-bases-de-datos.md)), en **Servidor** escribe `host.docker.internal`: dentro del contenedor, `localhost` es el propio contenedor, no el servidor. Además:
+
+1. La base debe escuchar en la red de Docker: en MariaDB, `bind-address = 0.0.0.0` (o `172.17.0.1`) en su configuración, y reinicia el servicio.
+2. El usuario debe poder conectarse desde los contenedores: créalo con host `172.%` (por ejemplo, `'erp'@'172.%'`) en **Bases de datos → Usuarios**.
+3. Si el firewall está activo, permite el puerto 3306 (o 5432) desde `172.16.0.0/12`, nunca desde Internet.
+
 ## Logs, Artisan y estado
 
 - **Resumen:** direcciones de la aplicación (con el puerto propio sobre la IP o nombre con que abriste el panel, y el nombre interno si lo hay), commit en línea, imagen, slot activo y el estado de cada contenedor. Los botones **Reiniciar**, **Detener** e **Iniciar** actúan sobre los contenedores. **Detener** apaga también la base de datos y Redis.
@@ -227,7 +239,7 @@ Al crear la aplicación (o en **Configuración**), elige **Tipo de proyecto → 
 
 - **Composer:** si hay `composer.json` en la raíz o en una carpeta de primer nivel (por ejemplo `app/`), se ejecuta `composer install` ahí al construir la imagen.
 - **Primer `.env`:** en el primer despliegue, si el repositorio trae `<ruta del .env>.example`, el panel lo usa como base. Revisa la pestaña **Entorno**: cambia las claves de ejemplo (salts, tokens) y desactiva el modo debug.
-- **Base de datos:** el panel rellena todas las variables que terminan en `DB_HOST`, `DB_PORT`, `DB_NAME`/`DB_DATABASE`, `DB_USER`/`DB_USERNAME` y `DB_PASS`/`DB_PASSWORD`, con cualquier prefijo. En Quetzal llena tanto `DB_*` (web) como `LDB_*` (consola, que usa `migrate.php`). La base y el usuario se llaman `app`.
+- **Base de datos:** el panel rellena todas las variables que terminan en `DB_HOST`, `DB_PORT`, `DB_NAME`/`DB_DATABASE`, `DB_USER`/`DB_USERNAME` y `DB_PASS`/`DB_PASSWORD`, con cualquier prefijo. En Quetzal llena tanto `DB_*` (web) como `LDB_*` (consola, que usa `migrate.php`). La base y el usuario se llaman como elijas al crear la app (`app` si lo dejas vacío). Con una **base externa** se rellenan las mismas variables con sus datos en el primer despliegue; después manda lo que edites en el `.env`.
 - No hay pestaña Artisan, ni worker ni programador.
 
 > **Importante:** Si tu framework tiene un instalador web (`install.php`), protégelo o elimínalo del repositorio de producción: en el contenedor sigue existiendo.

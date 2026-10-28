@@ -2,6 +2,13 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.14.0] - 2026-10-28
+
+### Añadido
+- 🗄️ **Elegir la base de datos al crear una app** — con MariaDB o PostgreSQL propia, el **nombre de la base** (también su usuario) se elige en el asistente; o, con **base externa**, motor, servidor, puerto, base, usuario y contraseña se escriben solos en el `.env` (en proyectos PHP también en sus propias variables, como `DB_NAME`/`DB_USER`/`DB_PASS`). La contraseña externa se guarda aparte, no en la configuración.
+- Los contenedores de las apps ven al servidor como `host.docker.internal`, para usar una base de datos instalada en el mismo servidor.
+- El Resumen de la app muestra el nombre de la base o los datos de la base externa.
+
 ## [0.13.0] - 2026-10-28
 
 ### Añadido
