@@ -4,7 +4,7 @@
 
 Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.12.1-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.13.0-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -86,7 +86,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Logs** | journalctl, archivos de `/var/log` y vista en vivo |
 | **Notificaciones** | Correos con diseño (HTML) y vista previa; **umbrales configurables** (CPU, RAM, swap, carga, disco por partición, inodos, temperatura) con tiempo sostenido: problemas del servidor y contenedores, reinicios, certificados por vencer, actualizaciones, accesos (IP nueva, SSH, 2FA, bloqueos), cambios delicados en el panel, despliegues, respaldos, monitor y **resumen diario** |
 | **Auditoría** | Quién hizo qué, cuándo y desde dónde; filtros y exportación CSV |
-| **Terminal** | Shell real en el navegador con tu usuario (nunca root) |
+| **Terminal** | Shell real en el navegador con tu usuario (nunca root), o **dentro de cualquier contenedor de Docker** (como el usuario de la imagen o root del contenedor) |
 | **Seguridad** | 2FA TOTP (Google Authenticator, Aegis…) con códigos de recuperación |
 | **Apariencia** | Estilo (Clásico o Moderno), tema, color de acento, barra lateral, tamaño, densidad, bordes, tipografía y secciones del dashboard |
 | **Ayuda** | Guía de usuario completa con índice, buscador y botón **?** en cada pantalla |

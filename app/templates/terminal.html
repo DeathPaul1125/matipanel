@@ -9,7 +9,7 @@
 <div class="tw" id="tw">
   <div class="tw-title">
     <span class="led sm mute" id="tw-led"></span>
-    <span class="tw-name">{{ current_user.username }}@{{ request.host.split(':')[0] }}: Terminal MatiPanel</span>
+    <span class="tw-name" id="tw-name">{{ current_user.username }}@{{ request.host.split(':')[0] }}: Terminal MatiPanel</span>
     <div class="tw-ctrls">
       <button onclick="fontSize(-1)" title="Reducir letra">−</button>
       <button onclick="fontSize(1)" title="Aumentar letra">+</button>
@@ -36,6 +36,11 @@
       <button onclick="term && term.clear()">Limpiar pantalla</button>
       <button onclick="reconnect()">Reiniciar sesión</button>
     </div></details>
+    <label class="tw-target" title="Dónde abrir la terminal">
+      <span>Dónde</span>
+      <select id="tw-target"><option value="">Este servidor ({{ current_user.username }})</option></select>
+    </label>
+    <label class="tw-root" id="tw-root-wrap" hidden title="Entrar como root del contenedor (no del servidor)"><input type="checkbox" id="tw-root"> como root</label>
     <span class="tw-status" id="tw-status">desconectado</span>
   </nav>
   <div class="tw-body"><div id="terminal"></div></div>
@@ -47,6 +52,45 @@
 <script src="{{ url_for('static', filename='vendor/xterm-addon-fit.js') }}"></script>
 <script>
 let term = null, ws = null, fitAddon = null;
+const HOST_LABEL = {{ (current_user.username ~ '@' ~ request.host.split(':')[0] ~ ': Terminal MatiPanel')|tojson }};
+const QS = new URLSearchParams(location.search);
+let TARGET = QS.get('container') || '', AS_ROOT = QS.get('user') === 'root';
+
+// Contenedores en marcha, agrupados por proyecto (apps de Despliegues y stacks)
+async function loadTargets() {
+  let d = {containers: []};
+  try { d = await (await fetch({{ url_for('terminal.containers')|tojson }})).json(); } catch (e) {}
+  const sel = document.getElementById('tw-target');
+  const groups = {};
+  (d.containers || []).forEach(c => (groups[c.project || 'Sin proyecto'] ||= []).push(c));
+  sel.insertAdjacentHTML('beforeend', Object.entries(groups).map(([g, cs]) =>
+    `<optgroup label="${escapeHtml('Contenedores · ' + g)}">` +
+    cs.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('') + '</optgroup>').join(''));
+  if (TARGET && ![...sel.options].some(o => o.value === TARGET)) {
+    ui.toast(`El contenedor «${TARGET}» no está en marcha: se abre la terminal del servidor`, 'warning', 5000);
+    TARGET = '';
+  }
+  sel.value = TARGET;
+  document.getElementById('tw-root').checked = AS_ROOT;
+  syncTarget();
+}
+function syncTarget() {
+  document.getElementById('tw-root-wrap').hidden = !TARGET;
+  document.getElementById('tw-name').textContent = TARGET
+    ? `${AS_ROOT ? 'root' : 'usuario de la imagen'} en el contenedor ${TARGET}`
+    : HOST_LABEL;
+  const url = new URL(location.href);
+  if (TARGET) url.searchParams.set('container', TARGET); else url.searchParams.delete('container');
+  if (TARGET && AS_ROOT) url.searchParams.set('user', 'root'); else url.searchParams.delete('user');
+  history.replaceState(null, '', url);
+}
+function changeTarget() {
+  TARGET = document.getElementById('tw-target').value;
+  AS_ROOT = document.getElementById('tw-root').checked;
+  syncTarget();
+  if (term) term.reset();
+  if (ws) { ws.addEventListener('close', () => connect(), {once: true}); ws.close(); } else connect();
+}
 const DEFAULT_SIZE = 14;
 
 // Paleta tipo Tango (la de Linux Lite / xfce4-terminal)
@@ -104,7 +148,9 @@ async function connect() {
   await ensureTerm();
   setStatus('conectando…', 'warn');
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(proto + '//' + location.host + '/terminal/ws');
+  ws = new WebSocket(proto + '//' + location.host + (TARGET
+    ? '/terminal/ws/container?name=' + encodeURIComponent(TARGET) + (AS_ROOT ? '&user=root' : '')
+    : '/terminal/ws'));
   ws.onopen = () => { setStatus('conectado', ''); sendResize(); term.focus(); };
   ws.onmessage = e => {
     try {
@@ -159,6 +205,8 @@ function toggleFull() {
 }
 
 window.addEventListener('beforeunload', disconnect);
-connect();
+document.getElementById('tw-target').addEventListener('change', changeTarget);
+document.getElementById('tw-root').addEventListener('change', changeTarget);
+loadTargets().then(connect);
 </script>
 {% endblock %}

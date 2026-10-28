@@ -169,7 +169,7 @@
       <div class="card-head"><h3>Contenedores</h3><button class="btn btn-sm" onclick="loadContainers()">Refrescar</button></div>
       <div class="table-wrap">
         <table class="lx" id="ct-table">
-          <thead><tr><th>Servicio</th><th>Estado</th><th>Detalle</th></tr></thead>
+          <thead><tr><th>Servicio</th><th>Estado</th><th>Detalle</th><th></th></tr></thead>
           <tbody><tr><td colspan="3" class="muted center">Cargando…</td></tr></tbody>
         </table>
       </div>
@@ -656,7 +656,8 @@ async function loadContainers() {
     const cls = c.state === 'running' ? (c.health && c.health !== 'healthy' ? 'warn' : 'ok') : c.state === 'restarting' ? 'warn' : 'mute';
     return `<tr><td class="mono">${escapeHtml(c.service)}</td>
       <td><span class="pill ${cls}">${escapeHtml(c.state)}${c.health ? ' · ' + escapeHtml(c.health) : ''}</span></td>
-      <td class="small muted">${escapeHtml(c.status)}</td></tr>`;
+      <td class="small muted">${escapeHtml(c.status)}</td>
+      <td>${c.state === 'running' && c.name ? `<a class="btn btn-sm" title="Abrir una terminal dentro del contenedor" href="${escapeHtml({{ url_for('terminal.index')|tojson }} + '?container=' + encodeURIComponent(c.name))}">Consola</a>` : ''}</td></tr>`;
   }).join('');
 }
 

@@ -49,7 +49,7 @@ La cabecera de cada grupo tiene un LED: verde si todos sus contenedores están e
 | **Imagen** | Imagen desde la que se creó. |
 | **Estado** | `running` (verde), `paused` (ámbar) u otro estado (gris), con el detalle de Docker, por ejemplo `Up 3 hours`. |
 | **Puertos** | Puertos publicados, por ejemplo `0.0.0.0:8080->80/tcp`. |
-| **Acciones** | Botones para iniciar, detener, reiniciar y ver logs. |
+| **Acciones** | Botones para iniciar, detener, reiniciar, ver logs y, si está en marcha, **consola**: abre una [terminal dentro del contenedor](29-terminal.md#abrir-una-terminal-dentro-de-un-contenedor). |
 
 ### Ponerles nombre
 

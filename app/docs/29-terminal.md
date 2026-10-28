@@ -34,6 +34,22 @@ sudo apt update
 
 > **Importante:** Trabaja como `root` solo el tiempo necesario. Un comando equivocado como `root` puede dañar el sistema sin aviso.
 
+## Abrir una terminal dentro de un contenedor
+
+En la barra de menús de la ventana, a la derecha, está **Dónde**. Por defecto dice **Este servidor (tu usuario)**. Ahí aparecen también todos los **contenedores de Docker en marcha**, agrupados por proyecto (cada app de [Despliegues](56-despliegues.md) y cada [stack](59-stacks.md)). Elige uno y la terminal se reconecta **dentro de ese contenedor**, como si hicieras `docker exec -it … bash`.
+
+- Entras con el **usuario de la imagen**: en las apps de Despliegues es `www-data`, el mismo que usa Laravel, y empiezas en `/var/www/html`. Ahí puedes ejecutar `php artisan tinker`, `php artisan migrate:status`, revisar `storage/logs`, etc.
+- Marca **como root** para entrar como root **del contenedor** (no del servidor): sirve para instalar algo de prueba o revisar permisos. La terminal se reconecta al cambiarlo.
+- El título de la ventana dice dónde estás, por ejemplo «usuario de la imagen en el contenedor matipanel-erpmayoreo-app_blue-1», y el prompt muestra el usuario y el contenedor.
+- Para volver al servidor, elige **Este servidor** en **Dónde**. Si escribes `exit`, la sesión se cierra.
+- Se usa `bash` si el contenedor lo tiene; si no, `sh` (por ejemplo, en imágenes Alpine).
+
+También puedes abrirla directamente con el botón **consola** de cada contenedor en [Docker](25-docker.md), o **Consola** en la tabla **Contenedores** del Resumen de cada app de Despliegues. La dirección de la página (`/terminal/?container=…`) se puede guardar como marcador.
+
+> **Importante:** Lo que cambies dentro de un contenedor **se pierde en el próximo despliegue o reinicio**: cada despliegue crea contenedores nuevos desde la imagen. Solo se conservan los volúmenes (en las apps, `storage` o las carpetas persistentes, y la base de datos). Los cambios de código van en el repositorio y el `.env` en **Despliegues → Variables de entorno**.
+
+> **Nota:** Abrir una consola de contenedor requiere permiso de **Terminal** y de **Docker** en [Permisos del panel](35-permisos.md); los usuarios de solo lectura no pueden. Cada apertura queda en la [Auditoría](32-auditoria.md) con el contenedor y si fue como root.
+
 ## Leer el banner y el prompt
 
 Al abrir la sesión verás un banner con:

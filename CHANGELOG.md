@@ -2,6 +2,14 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.13.0] - 2026-10-28
+
+### Añadido
+- 🐳 **Terminal dentro de los contenedores** — en la Terminal, el selector **Dónde** lista los contenedores en marcha agrupados por proyecto; elige uno y la consola se abre dentro (`docker exec`), con el usuario de la imagen (`www-data` en las apps) o **como root** del contenedor. Botón **consola** en Docker y **Consola** en los contenedores de cada app de Despliegues. Requiere permiso de Terminal y de Docker y queda en la Auditoría.
+
+### Cambiado
+- La terminal se cierra en el navegador cuando el programa termina (`exit`), en vez de quedar abierta sin responder.
+
 ## [0.12.1] - 2026-10-28
 
 ### Corregido
