@@ -115,7 +115,7 @@ Pulsa **Desplegar ahora** en la ficha de la aplicación (o **Desplegar** en la l
 ### Qué pasa en un despliegue
 
 1. **Código:** la primera vez se clona el repositorio; después se descarga solo el último commit de la rama y se descartan los cambios locales.
-2. **Imagen:** si el repositorio trae un `Dockerfile` en la raíz, se usa ese. Si no, el panel genera uno para Laravel basado en `serversideup/php` (PHP-FPM + Nginx): `composer install --no-dev --optimize-autoloader` y, si hay `package.json`, `npm ci` (o `npm install`) y `npm run build` en una etapa con Node 22.
+2. **Imagen:** si el repositorio trae un `Dockerfile` en la raíz, se usa ese. Si no, el panel genera uno para Laravel basado en `serversideup/php` (PHP-FPM + Nginx): `composer install --no-dev --optimize-autoloader` y, si hay `package.json`, `npm ci` (o `npm install`) y `npm run build` en una etapa con Node 22. Si `package-lock.json` no coincide con `package.json`, `npm ci` falla; entonces se usa `npm install` y el log lo avisa con `*** MatiPanel: package-lock.json no coincide…`.
 3. **Servicios:** se levantan la base de datos y Redis (si los usas) y se espera a que estén sanos.
 4. **Migraciones:** `php artisan migrate --force` en un contenedor temporal con la imagen nueva. Si fallan, el despliegue se detiene y **la versión anterior sigue en línea**.
 5. **Arranque:** la versión nueva arranca en el slot libre y el panel espera hasta 90 segundos a que responda con un código HTTP menor que 500.
@@ -269,6 +269,7 @@ Abre el **Log** del despliegue y busca la última línea que empieza con `==>`: 
 | `couldn't find remote ref` | La rama configurada no existe. Corrígela en **Configuración**. |
 | `docker build` falló en `composer install` | Falta una extensión de PHP (agrégala en **Extensiones de PHP adicionales**), `composer.lock` no corresponde a la versión de PHP, o un paquete privado necesita credenciales. |
 | `docker build` falló en `npm run build` | Error de Vite/Mix. Prueba `npm ci && npm run build` en tu equipo con Node 22. |
+| El log dice `package-lock.json no coincide con package.json` | Agregaste o cambiaste una dependencia sin actualizar el lock. El despliegue sigue con `npm install`, pero corrígelo: en tu equipo ejecuta `npm install`, haz commit de `package-lock.json` y súbelo. Así cada despliegue instala exactamente las mismas versiones. |
 | `Las migraciones falló` | Lee el error SQL en el log. La versión anterior sigue en línea; corrige la migración y vuelve a desplegar. Revisa también las variables `DB_*`. |
 | `La aplicación no respondió en 90 s` | El log muestra las últimas líneas del contenedor. Lo habitual: `APP_KEY` vacía, error de PHP al arrancar, o un Dockerfile propio que escucha en otro puerto. |
 | `nginx -t falló` | Otro sitio de Nginx tiene un error, o el puerto público choca con otro servicio. Revisa en [Servidor web](21-servidor-web.md). |

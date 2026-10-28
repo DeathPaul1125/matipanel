@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.12.1] - 2026-10-28
+
+### Corregido
+- Despliegues de Laravel: si `package-lock.json` no coincide con `package.json`, la imagen ya no falla en `npm ci`: usa `npm install` y deja un aviso claro en el log para corregir el lock en el repositorio.
+
 ## [0.12.0] - 2026-10-27
 
 ### Añadido

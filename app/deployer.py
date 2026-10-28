@@ -366,7 +366,12 @@ def render_dockerfile(php, node=False, npm_lock=False, php_ext=()):
             "FROM node:22-alpine AS assets",
             "WORKDIR /app",
             "COPY package.json package-lock.json* ./",
-            "RUN " + ("npm ci" if npm_lock else "npm install") + " --no-audit --no-fund",
+            # npm ci exige que package-lock.json coincida con package.json; si no (descuido común), npm install
+            # resuelve igual y el aviso queda en el registro del despliegue para corregir el lock en el repositorio
+            ("RUN npm ci --no-audit --no-fund \\\n"
+             " || { echo '*** MatiPanel: package-lock.json no coincide con package.json; "
+             "se usa npm install. Corrigelo en el repositorio: npm install y sube el package-lock.json ***'; "
+             "npm install --no-audit --no-fund; }") if npm_lock else "RUN npm install --no-audit --no-fund",
             "COPY . .",
             "COPY --from=base /var/www/html/vendor ./vendor",
             "RUN npm run build",
@@ -1954,6 +1959,7 @@ if __name__ == "__main__":
     assert "composer install --no-dev" in df and "--optimize-autoloader" in df and ".env" not in df
     df = render_dockerfile("8.4", node=True, npm_lock=True, php_ext=["intl", "gd", "bad;rm"])
     assert "FROM node:22-alpine AS assets" in df and "RUN npm ci" in df and "npm run build" in df
+    assert "|| { echo '*** MatiPanel: package-lock.json no coincide" in df and "npm install --no-audit --no-fund; }" in df
     assert df.rstrip().endswith("/var/www/html/public") and "install-php-extensions intl gd\n" in df and "bad" not in df
     assert "npm install" in render_dockerfile("8.2", node=True)
     try:
