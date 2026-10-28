@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.15.0] - 2026-10-28
+
+### Añadido
+- 🐘 **PHP del contenedor** — en Configuración de cada app: versión, extensiones extra, ajustes de `php.ini` (memoria, subida máxima, tiempo máximo y zona horaria, aplicables sin compilar) y paquetes del sistema (apt) dentro de la imagen; botón para ver la versión, las extensiones cargadas y el `php.ini` efectivo del contenedor en marcha.
+- 🔍 **Extensiones detectadas desde composer** — las extensiones que piden `composer.json` y `composer.lock` (por ejemplo `ext-gd` de phpspreadsheet) se instalan solas en la imagen generada; el log dice cuáles.
+
 ## [0.14.0] - 2026-10-28
 
 ### Añadido

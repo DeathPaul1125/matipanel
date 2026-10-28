@@ -306,8 +306,22 @@
       </div>
       <label class="form-row"><span>Nombre interno (opcional)</span><input class="input mono" id="cf-host" placeholder="miapp.apps.empresa.local" autocomplete="off">
         <span class="dlg-help">Se atiende en el puerto 80. Si Apache ya lo usa, el panel crea un sitio en Apache que reenvía este nombre al puerto de la app. Vacío = solo por puerto.</span></label>
-      <label class="form-row"><span>Extensiones de PHP adicionales</span><input class="input mono" id="cf-ext" placeholder="intl gd bcmath" autocomplete="off">
-        <span class="dlg-help">Solo con el Dockerfile generado; se instalan con install-php-extensions.</span></label>
+      <div class="dp-php">
+        <h4>PHP del contenedor</h4>
+        <label class="form-row"><span>Extensiones de PHP adicionales</span><input class="input mono" id="cf-ext" placeholder="intl gd bcmath" autocomplete="off">
+          <span class="dlg-help">Las que piden <span class="mono">composer.json</span>/<span class="mono">composer.lock</span> (<span class="mono">ext-gd</span>, <span class="mono">ext-intl</span>…) se instalan solas; aquí van las que tu código usa sin declararlas. Requiere desplegar de nuevo.</span></label>
+        <div class="dp-form2">
+          <label class="form-row"><span>Memoria (memory_limit)</span><input class="input mono" id="cf-ini-memory_limit" placeholder="por defecto 256M" autocomplete="off"></label>
+          <label class="form-row"><span>Subida máxima (upload y post)</span><input class="input mono" id="cf-ini-upload" placeholder="por defecto 100M" autocomplete="off"></label>
+          <label class="form-row"><span>Tiempo máximo (segundos)</span><input class="input mono" id="cf-ini-max_execution_time" placeholder="por defecto 99" autocomplete="off"></label>
+          <label class="form-row"><span>Zona horaria</span><input class="input mono" id="cf-ini-timezone" placeholder="UTC" list="cf-tz" autocomplete="off">
+            <datalist id="cf-tz"><option value="America/Guatemala"><option value="America/Mexico_City"><option value="America/El_Salvador"><option value="America/Bogota"><option value="UTC"></datalist></label>
+        </div>
+        <span class="dlg-help">Vacío = el valor de la imagen. Se aplica con «Aplicar ahora», sin compilar de nuevo.</span>
+        <label class="form-row dp-mt"><span>Paquetes del sistema (apt)</span><input class="input mono" id="cf-apt" placeholder="snmp iputils-ping ghostscript" autocomplete="off">
+          <span class="dlg-help">Programas de Debian que tu app necesita dentro del contenedor (por ejemplo <span class="mono">snmp</span> para consultar impresoras). Requiere desplegar de nuevo.</span></label>
+        <div class="dp-phpnow" id="php-now"><button type="button" class="btn btn-sm" onclick="loadPhp()">Ver el PHP del contenedor en marcha</button></div>
+      </div>
       <label class="dlg-check"><input type="checkbox" id="cf-auto"> Desplegar solo con cada push (sondeo cada 60 s y webhook)</label>
       <label class="dlg-check"><input type="checkbox" id="cf-migrate"> Ejecutar las migraciones en cada despliegue
         (<span class="mono" data-kind="laravel">php artisan migrate --force</span><span data-kind="php" hidden>el comando de arriba</span>)</label>
@@ -620,6 +634,19 @@ if (draftParam) getJSON(api('apps')).then(d => {
 // ── Detalle ──
 let INFO = null, infoTimer = null, configFilled = false;
 
+async function loadPhp() {
+  const box = $('#php-now');
+  box.innerHTML = '<span class="muted small">Consultando el contenedor…</span>';
+  const d = await getJSON(appApi('php'));
+  if (!d.ok) { box.innerHTML = `<span class="small muted">${escapeHtml(d.error || 'Error')}</span> <button type="button" class="btn btn-sm" onclick="loadPhp()">Reintentar</button>`; return; }
+  const ini = d.ini || {};
+  box.innerHTML = `<div class="small"><b>PHP ${escapeHtml(d.version)}</b> en <span class="mono">${escapeHtml(d.container)}</span> ·
+      memoria ${escapeHtml(ini.memory_limit || '—')} · subida ${escapeHtml(ini.upload_max_filesize || '—')} · POST ${escapeHtml(ini.post_max_size || '—')}
+      · tiempo ${escapeHtml(ini.max_execution_time || '—')} s · zona ${escapeHtml(ini['date.timezone'] || 'UTC')}</div>
+    <div class="dp-exts">${d.extensions.map(e => `<span class="pill mute">${escapeHtml(e)}</span>`).join(' ')}</div>
+    <button type="button" class="btn btn-sm" onclick="loadPhp()">Actualizar</button>`;
+}
+
 function showTab(tab) {
   $$('#dp-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   $$('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== tab);
@@ -931,6 +958,8 @@ function fillConfig() {
   $('#cf-repo').value = c.repo; $('#cf-branch').value = c.branch; $('#cf-php').value = c.php;
   $('#cf-port').value = c.port; $('#cf-cport').value = c.container_port || 8080; $('#cf-host').value = c.hostname || '';
   $('#cf-ext').value = (c.php_ext || []).join(' ');
+  $('#cf-apt').value = (c.apt_pkgs || []).join(' ');
+  ['memory_limit', 'upload', 'max_execution_time', 'timezone'].forEach(k => { $('#cf-ini-' + k).value = (c.php_ini || {})[k] || ''; });
   $('#cf-auto').checked = !!c.auto_deploy; $('#cf-migrate').checked = c.migrate !== false;
   $('#cf-worker').checked = !!c.worker; $('#cf-scheduler').checked = !!c.scheduler; $('#cf-redis').checked = !!c.redis;
   $('#cf-db').value = c.database; $('#cf-mem').value = c.mem_mb || ''; $('#cf-cpus').value = c.cpus || '';
@@ -950,6 +979,8 @@ async function saveConfig() {
     repo: $('#cf-repo').value.trim(), branch: $('#cf-branch').value.trim(), php: $('#cf-php').value,
     port: $('#cf-port').value, container_port: $('#cf-cport').value, hostname: $('#cf-host').value.trim(),
     php_ext: $('#cf-ext').value.trim(), auto_deploy: $('#cf-auto').checked, migrate: $('#cf-migrate').checked,
+    apt_pkgs: $('#cf-apt').value.trim(),
+    php_ini: Object.fromEntries(['memory_limit', 'upload', 'max_execution_time', 'timezone'].map(k => [k, $('#cf-ini-' + k).value.trim()])),
     worker: $('#cf-worker').checked, scheduler: $('#cf-scheduler').checked, redis: $('#cf-redis').checked,
     database: $('#cf-db').value, mem_mb: $('#cf-mem').value || 0, cpus: $('#cf-cpus').value || 0,
     ...phpFields('cf'),

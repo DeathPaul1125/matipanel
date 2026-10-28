@@ -1309,6 +1309,10 @@ table.dbx-create .center-cell { text-align: center; }
 .dp-steps span.active { border-bottom-color: var(--accent); color: var(--text); }
 .dp-form2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
 .dp-ext { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 14px; }
+.dp-php { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px 12px; margin: 4px 0 14px; }
+.dp-php h4 { margin: 2px 0 10px; }
+.dp-phpnow { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.dp-exts { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
 .dp-ext > .small { margin-bottom: 8px; }
 .dp-checks { display: flex; flex-direction: column; gap: 2px; }
 .dp-checks .dlg-check { margin-bottom: 6px; }

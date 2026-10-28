@@ -333,6 +333,23 @@ def _opts(d, cfg):
         if m and not D.valid_migrate_cmd(m):
             return None, "Comando de migraciones inválido: «php script.php [argumentos]» (ej.: php migrate.php)"
         out["migrate_cmd"] = m
+    if "php_ini" in d:
+        ini = d["php_ini"] if isinstance(d["php_ini"], dict) else {}
+        clean = {}
+        labels = {"memory_limit": "Memoria (ej.: 256M, -1 sin límite)", "upload": "Tamaño máximo de subida (ej.: 64M)",
+                  "max_execution_time": "Tiempo máximo en segundos (0 a 9999)", "timezone": "Zona horaria (ej.: America/Guatemala)"}
+        for key, (_, rx) in D.PHP_INI.items():
+            v = str(ini.get(key) or "").strip()
+            if v and not rx.fullmatch(v):
+                return None, f"Valor de PHP inválido: {labels[key]}"
+            clean[key] = v
+        out["php_ini"] = clean
+    if "apt_pkgs" in d:
+        raw = d["apt_pkgs"]
+        pkgs = raw.replace(",", " ").split() if isinstance(raw, str) else raw if isinstance(raw, list) else None
+        if pkgs is None or len(pkgs) > 20 or not all(isinstance(p, str) and D.APT_PKG_RE.fullmatch(p) for p in pkgs):
+            return None, "Paquetes del sistema inválidos (nombres de paquetes de Debian separados por espacios, hasta 20)"
+        out["apt_pkgs"] = pkgs
     if "php_ext" in d:
         raw = d["php_ext"]
         exts = raw.replace(",", " ").split() if isinstance(raw, str) else raw if isinstance(raw, list) else None
@@ -598,15 +615,39 @@ def config(name):
             return _err("No se guardó: " + out[-1500:], 409)
     D.update_config(name, lambda c: c.update(opts))
     svc_keys = ("database", "redis", "worker", "scheduler", "mem_mb", "cpus", "container_port",
-                "docroot", "env_path", "persist")
+                "docroot", "env_path", "persist", "php_ini")
     changed = any(new.get(k) != cfg.get(k) for k in svc_keys)
     if changed:
         try:
             D.apply_service_changes(name)
         except (OSError, ValueError) as e:
             return _err(f"Guardado, pero no se pudo regenerar compose: {e}", 500)
-    rebuild = any(new.get(k) != cfg.get(k) for k in ("repo", "branch", "php", "php_ext", "kind"))
+    rebuild = any(new.get(k) != cfg.get(k) for k in ("repo", "branch", "php", "php_ext", "kind", "apt_pkgs"))
     return jsonify({"ok": True, "needs_apply": changed and bool(new.get("active_slot")), "needs_deploy": rebuild})
+
+
+@deploy_bp.route("/api/apps/<name>/php")
+@login_required
+def php_status(name):
+    """Versión, extensiones cargadas y php.ini efectivo del contenedor en marcha."""
+    cfg = _cfg(name)
+    if not cfg.get("active_slot"):
+        return _err("La aplicación aún no está en marcha", 409)
+    code, out, _ = D._run(["docker", "ps", "--filter", f"label=matipanel.app={name}", "--filter", "label=matipanel.role=app",
+                           "--format", "{{.Names}}"], 20)
+    names = [n for n in out.split() if n.startswith(D.project_name(name) + "-app_")] if code == 0 else []
+    if not names:
+        return _err("No hay un contenedor de la aplicación en marcha", 409)
+    script = ('echo PHP_VERSION, "\\n", implode(",", get_loaded_extensions()), "\\n"; '
+              'foreach (["memory_limit","upload_max_filesize","post_max_size","max_execution_time","date.timezone",'
+              '"opcache.enable"] as $k) echo $k, "=", ini_get($k), "\\n";')
+    code, out, err = D._run(["docker", "exec", names[0], "php", "-r", script], 30)
+    if code != 0:
+        return _err((err or out).strip()[-300:] or "php no respondió dentro del contenedor", 502)
+    lines = out.strip().splitlines()
+    ini = dict(ln.split("=", 1) for ln in lines[2:] if "=" in ln)
+    return jsonify({"ok": True, "container": names[0], "version": lines[0] if lines else "",
+                    "extensions": sorted((lines[1] if len(lines) > 1 else "").split(","), key=str.lower), "ini": ini})
 
 
 @deploy_bp.route("/api/apps/<name>/apply", methods=["POST"])

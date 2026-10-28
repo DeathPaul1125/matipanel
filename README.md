@@ -4,7 +4,7 @@
 
 Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.14.0-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.15.0-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -71,7 +71,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Correo** | Postfix y Dovecot: configuración, cola, alias, SSL, registro y correo de prueba |
 | **DNS** | BIND 9: zonas primarias, inversas y secundarias, registros, SOA, reenviadores y pruebas con `dig` |
 | **Compartidos** | Samba (recursos, usuarios, sesiones) y NFS (exports) |
-| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno |
+| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno; base de datos propia o externa y **PHP del contenedor** (versión, extensiones detectadas desde composer, php.ini y paquetes del sistema) |
 | **Stacks** | Proyectos de Docker Compose propios (Portainer, Uptime Kuma, wikis…) con plantillas, validación y avisos de configuraciones peligrosas |
 | **Docker** | Contenedores agrupados por proyecto con nombres propios, imágenes, volúmenes y logs |
 | **Explorador BD** | Estilo phpMyAdmin para las bases del servidor y las de cada app desplegada, con **diagrama entidad-relación** exportable |

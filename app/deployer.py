@@ -332,7 +332,73 @@ bootstrap/cache/*.php
 """
 
 
-def render_dockerfile(php, node=False, npm_lock=False, php_ext=()):
+# ── PHP del contenedor: extensiones que pide composer, php.ini y paquetes del sistema ──
+
+# Ya vienen en serversideup/php (compiladas en PHP o agregadas por la imagen): no hace falta instalarlas
+BUILTIN_EXTS = {"core", "ctype", "curl", "date", "dom", "fileinfo", "filter", "hash", "iconv", "json", "libxml", "mbstring",
+                "mysqlnd", "openssl", "pcre", "pdo", "pdo_sqlite", "phar", "posix", "random", "readline", "reflection",
+                "session", "simplexml", "sodium", "spl", "sqlite3", "standard", "tokenizer", "xml", "xmlreader",
+                "xmlwriter", "zlib", "opcache", "zend-opcache", "zend_opcache", "pcntl", "pdo_mysql", "pdo_pgsql", "redis", "zip"}
+APT_PKG_RE = re.compile(r"[a-z0-9][a-z0-9+.-]{1,62}")
+# Ajustes de php.ini → variables de entorno de serversideup/php (se aplican al arrancar el contenedor)
+PHP_INI = {
+    "memory_limit": ("PHP_MEMORY_LIMIT", re.compile(r"-1|\d{1,5}[KMG]?")),
+    "upload": ("PHP_UPLOAD_MAX_FILE_SIZE", re.compile(r"\d{1,5}[KMG]?")),
+    "max_execution_time": ("PHP_MAX_EXECUTION_TIME", re.compile(r"\d{1,4}")),
+    "timezone": ("PHP_DATE_TIMEZONE", re.compile(r"UTC|[A-Z][A-Za-z_]+(/[A-Za-z0-9_+-]+){1,2}")),
+}
+
+
+def composer_extensions(cdir):
+    """Extensiones que piden composer.json y composer.lock (paquetes de producción) y que la imagen no trae.
+    → lista ordenada, p. ej. ["gd", "intl"]"""
+    found = set()
+    for fname, key in (("composer.json", None), ("composer.lock", "packages")):
+        text = read_text(cdir / fname, ENV_MAX * 32)
+        try:
+            data = json.loads(text) if text else {}
+        except ValueError:
+            continue
+        reqs = [data.get("require") or {}] if key is None else [p.get("require") or {} for p in data.get(key) or []
+                                                                 if isinstance(p, dict)]
+        for req in reqs:
+            for k in req if isinstance(req, dict) else []:
+                if isinstance(k, str) and k.lower().startswith("ext-"):
+                    ext = k[4:].lower().replace("-", "_")
+                    if PHP_EXT_RE.fullmatch(ext) and ext not in BUILTIN_EXTS:
+                        found.add(ext)
+    return sorted(found)
+
+
+def php_ini_env(cfg):
+    """{VARIABLE: valor} de los ajustes de php.ini válidos de la app (vacío = los de la imagen)."""
+    ini = cfg.get("php_ini") if isinstance(cfg.get("php_ini"), dict) else {}
+    out = {}
+    for key, (var, rx) in PHP_INI.items():
+        v = str(ini.get(key) or "").strip()
+        if v and rx.fullmatch(v):
+            out[var] = v
+            if key == "upload":
+                out["PHP_POST_MAX_SIZE"] = v  # el POST debe admitir el archivo completo
+    return out
+
+
+def _root_steps(exts, apt):
+    """Pasos como root: paquetes del sistema e extensiones (todo validado: nada llega crudo al shell)."""
+    exts = [e for e in exts if PHP_EXT_RE.fullmatch(e)]
+    apt = [p for p in apt if APT_PKG_RE.fullmatch(p)]
+    if not exts and not apt:
+        return []
+    steps = ["USER root"]
+    if apt:
+        steps.append("RUN apt-get update && apt-get install -y --no-install-recommends " + " ".join(apt)
+                     + " && rm -rf /var/lib/apt/lists/*")
+    if exts:
+        steps.append("RUN install-php-extensions " + " ".join(exts))
+    return steps + ["USER www-data"]
+
+
+def render_dockerfile(php, node=False, npm_lock=False, php_ext=(), apt=()):
     """Dockerfile de producción para Laravel sobre serversideup/php (Nginx + PHP-FPM en :8080, www-data).
 
     El .env NO entra en la imagen: se pasa al contenedor con env_file. Al arrancar, las
@@ -340,16 +406,13 @@ def render_dockerfile(php, node=False, npm_lock=False, php_ext=()):
     las migraciones se desactivan aquí porque el panel las ejecuta antes de cambiar de versión."""
     if php not in PHP_VERSIONS:
         raise ValueError("versión de PHP no soportada")
-    exts = [e for e in php_ext if PHP_EXT_RE.fullmatch(e)]
     lines = [
         "# Generado por MatiPanel. Para personalizarlo, agrega un Dockerfile a la raíz del repositorio.",
         f"FROM serversideup/php:{php}-fpm-nginx AS base",
         "ENV AUTORUN_ENABLED=true \\",
         "    AUTORUN_LARAVEL_MIGRATION=false \\",
         "    PHP_OPCACHE_ENABLE=1",
-    ]
-    if exts:
-        lines += ["USER root", "RUN install-php-extensions " + " ".join(exts), "USER www-data"]
+    ] + _root_steps(php_ext, apt)
     lines += [
         "WORKDIR /var/www/html",
         "COPY --chown=www-data:www-data composer.json composer.lock* ./",
@@ -405,7 +468,7 @@ def find_composer_dir(src):
     return None
 
 
-def render_dockerfile_php(php, php_ext=(), composer_dir=None):
+def render_dockerfile_php(php, php_ext=(), composer_dir=None, apt=()):
     """Dockerfile para PHP genérico sobre serversideup/php con Apache (respeta .htaccess, :8080, www-data).
 
     La carpeta pública se fija con APACHE_DOCUMENT_ROOT en compose (cambiarla no obliga a recompilar)."""
@@ -413,14 +476,11 @@ def render_dockerfile_php(php, php_ext=(), composer_dir=None):
         raise ValueError("versión de PHP no soportada")
     if composer_dir is not None and composer_dir != "" and not valid_rel_path(composer_dir):
         raise ValueError("carpeta de composer inválida")
-    exts = [e for e in php_ext if PHP_EXT_RE.fullmatch(e)]
     lines = [
         "# Generado por MatiPanel. Para personalizarlo, agrega un Dockerfile a la raíz del repositorio.",
         f"FROM serversideup/php:{php}-fpm-apache",
         "ENV PHP_OPCACHE_ENABLE=1",
-    ]
-    if exts:
-        lines += ["USER root", "RUN install-php-extensions " + " ".join(exts), "USER www-data"]
+    ] + _root_steps(php_ext, apt)
     lines += ["WORKDIR /var/www/html", "COPY --chown=www-data:www-data . ."]
     if composer_dir is not None:
         lines.append(("RUN cd " + composer_dir + " && " if composer_dir else "RUN ")
@@ -519,6 +579,8 @@ def render_compose(cfg, appdir, slots=None):
                "labels": {"matipanel.app": name, "matipanel.role": role}}
         if php_kind:
             svc["environment"] = {"APACHE_DOCUMENT_ROOT": webroot}
+        if php_ini_env(cfg):
+            svc["environment"] = {**svc.get("environment", {}), **php_ini_env(cfg)}
         if deps:
             svc["depends_on"] = dict(deps)
         if limits:
@@ -1450,6 +1512,19 @@ def _fetch(name, cfg, log):
             "message": (parts[2] if len(parts) > 2 else "").strip()[:300]}
 
 
+def _log_exts(log, cfg, detected):
+    """Une las extensiones que pide composer con las configuradas a mano y lo deja en el log."""
+    manual = [e for e in cfg.get("php_ext") or [] if PHP_EXT_RE.fullmatch(e)]
+    exts = sorted(set(detected) | set(manual))
+    if exts:
+        log.write("Extensiones de PHP a instalar: " + ", ".join(exts)
+                  + (f" (pedidas por composer: {', '.join(detected)})" if detected else "") + "\n")
+    apt = [p for p in cfg.get("apt_pkgs") or [] if APT_PKG_RE.fullmatch(p)]
+    if apt:
+        log.write("Paquetes del sistema a instalar: " + ", ".join(apt) + "\n")
+    return exts
+
+
 def _build(name, cfg, image, sha, log):
     d = app_dir(name)
     src = d / "src"
@@ -1465,7 +1540,8 @@ def _build(name, cfg, image, sha, log):
                  + (" (sin composer.json: sin composer install)" if cdir is None
                     else f" (composer install en {cdir or 'la raíz'})"))
         dockerfile = d / "Dockerfile"
-        write_file(dockerfile, render_dockerfile_php(cfg["php"], cfg.get("php_ext") or [], cdir))
+        exts = _log_exts(log, cfg, composer_extensions(src / cdir) if cdir is not None else [])
+        write_file(dockerfile, render_dockerfile_php(cfg["php"], exts, cdir, cfg.get("apt_pkgs") or []))
         if lstat_kind(src / ".dockerignore") is None:
             fd = os.open(src / ".dockerignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_BINARY, 0o644)
             with os.fdopen(fd, "wb") as f:
@@ -1478,7 +1554,8 @@ def _build(name, cfg, image, sha, log):
         log.step(f"Generando Dockerfile para Laravel (PHP {cfg['php']}"
                  + (", con compilación de assets (npm)" if node else ", sin package.json: sin npm") + ")")
         dockerfile = d / "Dockerfile"
-        write_file(dockerfile, render_dockerfile(cfg["php"], node, lock, cfg.get("php_ext") or []))
+        exts = _log_exts(log, cfg, composer_extensions(src))
+        write_file(dockerfile, render_dockerfile(cfg["php"], node, lock, exts, cfg.get("apt_pkgs") or []))
         if lstat_kind(src / ".dockerignore") is None:
             fd = os.open(src / ".dockerignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_BINARY, 0o644)
             with os.fdopen(fd, "wb") as f:
@@ -2022,6 +2099,12 @@ if __name__ == "__main__":
     df = render_dockerfile("8.4", node=True, npm_lock=True, php_ext=["intl", "gd", "bad;rm"])
     assert "FROM node:22-alpine AS assets" in df and "RUN npm ci" in df and "npm run build" in df
     assert "|| { echo '*** MatiPanel: package-lock.json no coincide" in df and "npm install --no-audit --no-fund; }" in df
+    df2 = render_dockerfile("8.4", php_ext=["gd", "x;y"], apt=["snmp", "iputils-ping", "a b", "-rf"])
+    assert "RUN apt-get update && apt-get install -y --no-install-recommends snmp iputils-ping && rm -rf" in df2
+    assert "RUN install-php-extensions gd\n" in df2 and "x;y" not in df2 and "a b" not in df2 and " -rf " not in df2.split("rm -rf")[0]
+    assert php_ini_env({"php_ini": {"memory_limit": "512M", "upload": "64M", "timezone": "America/Guatemala",
+                                    "max_execution_time": "120; rm"}}) == {
+        "PHP_MEMORY_LIMIT": "512M", "PHP_UPLOAD_MAX_FILE_SIZE": "64M", "PHP_POST_MAX_SIZE": "64M", "PHP_DATE_TIMEZONE": "America/Guatemala"}
     assert df.rstrip().endswith("/var/www/html/public") and "install-php-extensions intl gd\n" in df and "bad" not in df
     assert "npm install" in render_dockerfile("8.2", node=True)
     try:

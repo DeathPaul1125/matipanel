@@ -213,16 +213,26 @@ Si la base está instalada en el servidor (por ejemplo, la MariaDB de [Bases de 
 
 ## Configuración
 
-En **Configuración** puedes cambiar el repositorio, la rama, la versión de PHP, el puerto público, el nombre interno, las extensiones de PHP adicionales, los servicios y los límites de recursos.
+En **Configuración** puedes cambiar el repositorio, la rama, el puerto público, el nombre interno, **el PHP del contenedor** (versión, extensiones, `php.ini` y paquetes del sistema), los servicios y los límites de recursos.
 
 | Cambio | Cuándo se aplica |
 |---|---|
 | Puerto público o nombre interno | Al guardar (se reescribe Nginx; si `nginx -t` falla, no se guarda). |
-| Servicios, memoria, CPUs, puerto interno | Al pulsar **Aplicar ahora** (recrea contenedores sin compilar). |
-| Repositorio, rama, PHP, extensiones | En el próximo despliegue. |
+| Servicios, memoria, CPUs, puerto interno, ajustes de `php.ini` | Al pulsar **Aplicar ahora** (recrea contenedores sin compilar). |
+| Repositorio, rama, versión de PHP, extensiones, paquetes del sistema | En el próximo despliegue (se compila una imagen nueva). |
 
 - **Memoria máxima (MB)** y **CPUs máximas** limitan la app, el worker y el programador (0 = sin límite).
-- **Extensiones de PHP adicionales** (por ejemplo `intl gd bcmath`) se instalan en la imagen generada. La imagen ya trae las más comunes (`pdo_mysql`, `pdo_pgsql`, `redis`, `zip`, `opcache`, `pcntl`…).
+### PHP del contenedor
+
+La tarjeta **PHP del contenedor** de **Configuración** gestiona lo que hay dentro de la imagen de la app (solo con el Dockerfile que genera el panel):
+
+- **Versión de PHP**: 8.2, 8.3 u 8.4 (arriba, junto a la rama).
+- **Extensiones**: las que piden `composer.json` y `composer.lock` se instalan **solas**. Por ejemplo, `phpoffice/phpspreadsheet` (que usa `maatwebsite/excel`) pide `ext-gd`, y el panel la agrega sin que hagas nada. El log del despliegue dice cuáles instaló: «Extensiones de PHP a instalar: gd, intl (pedidas por composer…)». En **Extensiones de PHP adicionales** van solo las que tu código usa sin declararlas en composer (por ejemplo `exif` o `snmp`). La imagen ya trae `pdo_mysql`, `pdo_pgsql`, `redis`, `zip`, `opcache`, `pcntl`, `mbstring`, `xml`, `curl` y las básicas de PHP.
+- **Ajustes de php.ini**: **Memoria** (`memory_limit`, por ejemplo `512M`; `-1` sin límite), **Subida máxima** (fija `upload_max_filesize` y `post_max_size`, por ejemplo `64M`), **Tiempo máximo** en segundos (`max_execution_time`) y **Zona horaria** (`date.timezone`, por ejemplo `America/Guatemala`). Vacío = el valor de la imagen (256M, 100M, 99 s, UTC). Se aplican con **Aplicar ahora**, sin compilar.
+- **Paquetes del sistema (apt)**: programas de Debian que tu app necesita dentro del contenedor, separados por espacios. Por ejemplo `snmp` (consultar impresoras por SNMP), `iputils-ping`, `ghostscript` (PDF) o `poppler-utils`. Se instalan al compilar la imagen.
+- **Ver el PHP del contenedor en marcha** muestra lo que realmente tiene la app ahora: versión exacta, cada extensión cargada y los valores efectivos de `php.ini`. Úsalo para confirmar que un cambio se aplicó.
+
+Si tu repositorio trae su propio `Dockerfile`, estas opciones no se usan: el Dockerfile manda.
 - **Clave de despliegue:** **Probar acceso** y **Regenerar clave** (después tendrás que reemplazarla en GitHub).
 - **Webhook:** URL y secreto; **Regenerar** invalida el anterior.
 
@@ -282,6 +292,7 @@ Abre el **Log** del despliegue y busca la última línea que empieza con `==>`: 
 | `couldn't find remote ref` | La rama configurada no existe. Corrígela en **Configuración**. |
 | `docker build` falló en `composer install` | Falta una extensión de PHP (agrégala en **Extensiones de PHP adicionales**), `composer.lock` no corresponde a la versión de PHP, o un paquete privado necesita credenciales. |
 | `docker build` falló en `npm run build` | Error de Vite/Mix. Prueba `npm ci && npm run build` en tu equipo con Node 22. |
+| `composer install` dice `requires ext-xxx -> it is missing from your system` | Con las versiones nuevas del panel las extensiones pedidas por composer se instalan solas. Si la extensión no aparece en `composer.json`/`composer.lock`, agrégala en **Configuración → PHP del contenedor → Extensiones de PHP adicionales** y despliega. |
 | El log dice `package-lock.json no coincide con package.json` | Agregaste o cambiaste una dependencia sin actualizar el lock. El despliegue sigue con `npm install`, pero corrígelo: en tu equipo ejecuta `npm install`, haz commit de `package-lock.json` y súbelo. Así cada despliegue instala exactamente las mismas versiones. |
 | `Las migraciones falló` | Lee el error SQL en el log. La versión anterior sigue en línea; corrige la migración y vuelve a desplegar. Revisa también las variables `DB_*`. |
 | `La aplicación no respondió en 90 s` | El log muestra las últimas líneas del contenedor. Lo habitual: `APP_KEY` vacía, error de PHP al arrancar, o un Dockerfile propio que escucha en otro puerto. |
