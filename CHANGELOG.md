@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.15.1] - 2026-10-28
+
+### Corregido
+- Artisan: `migrate`, `db:seed`, `migrate --seed` y similares ya no se cancelan en producción («Command cancelled»); el panel les agrega `--force` (los destructivos siguen pidiendo confirmación en el panel) y muestra el comando tal como se ejecutó.
+
 ## [0.15.0] - 2026-10-28
 
 ### Añadido

@@ -170,6 +170,20 @@ def is_dangerous_artisan(cmd):
     return cmd.split()[0] in ARTISAN_DANGER if cmd else False
 
 
+# En producción Laravel pregunta «¿Seguro?» antes de estos comandos y, sin terminal para responder, los
+# cancela («Command cancelled»). Se les agrega --force: la confirmación la pide el panel (los destructivos
+# exigen escribir el nombre de la app). Solo los que aceptan --force (migrate:status, por ejemplo, no).
+ARTISAN_FORCE = {"migrate", "migrate:fresh", "migrate:refresh", "migrate:reset", "migrate:rollback", "db:seed", "db:wipe",
+                 "key:generate"}
+
+
+def with_force(cmd):
+    parts = cmd.split()
+    if parts and parts[0] in ARTISAN_FORCE and "--force" not in parts:
+        parts.append("--force")
+    return " ".join(parts)
+
+
 # ── .env ────────────────────────────────────────────────────────────────────
 
 SAFE_VAL_RE = re.compile(r"[A-Za-z0-9_./:@,+\-]*")
@@ -2096,6 +2110,8 @@ if __name__ == "__main__":
     df = render_dockerfile("8.3")
     assert "FROM serversideup/php:8.3-fpm-nginx AS base" in df and "node" not in df and "AUTORUN_LARAVEL_MIGRATION=false" in df
     assert "composer install --no-dev" in df and "--optimize-autoloader" in df and ".env" not in df
+    assert with_force("migrate --seed") == "migrate --seed --force" and with_force("db:seed --class=X") == "db:seed --class=X --force"
+    assert with_force("migrate:status") == "migrate:status" and with_force("db:seed --force") == "db:seed --force"
     df = render_dockerfile("8.4", node=True, npm_lock=True, php_ext=["intl", "gd", "bad;rm"])
     assert "FROM node:22-alpine AS assets" in df and "RUN npm ci" in df and "npm run build" in df
     assert "|| { echo '*** MatiPanel: package-lock.json no coincide" in df and "npm install --no-audit --no-fund; }" in df

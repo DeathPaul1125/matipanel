@@ -947,7 +947,7 @@ async function runArtisan() {
   btn.disabled = true;
   const d = await postJSON(appApi('artisan'), { command: cmd, confirm });
   btn.disabled = false;
-  out.textContent = '$ php artisan ' + cmd + '\n' + (d.output !== undefined ? d.output : '') + (d.ok ? '' : '\n' + (d.error || 'Error'));
+  out.textContent = '$ php artisan ' + (d.command || cmd) + '\n' + (d.output !== undefined ? d.output : '') + (d.ok ? '' : '\n' + (d.error || 'Error'));
 }
 
 // Configuración

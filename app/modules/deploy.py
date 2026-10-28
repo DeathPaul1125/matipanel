@@ -590,12 +590,13 @@ def artisan(name):
         return _err("Comando destructivo: confírmalo", 409, needs_confirm=True)
     if not cfg.get("active_slot"):
         return _err("La aplicación aún no está desplegada", 409)
+    cmd = D.with_force(cmd)  # en producción Laravel pediría confirmar y, sin terminal, cancelaría
     try:
         argv = D.compose(name, "exec", "-T", "app_" + cfg["active_slot"], "php", "artisan", *cmd.split())
     except D.Fail as e:
         return _err(str(e), 503)
     code, out = D._run_capped(argv, 256 * 1024, 300)
-    return jsonify({"ok": code == 0, "code": code, "output": D.redactor_for(name)(out),
+    return jsonify({"ok": code == 0, "code": code, "output": D.redactor_for(name)(out), "command": cmd,
                     "error": "" if code == 0 else f"Terminó con código {code}"})
 
 
