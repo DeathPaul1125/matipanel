@@ -100,6 +100,8 @@ En el [Firewall](20-firewall.md) del panel agrega reglas para esos puertos, limi
 
 Si cierras el asistente a la mitad, la aplicación queda como **Borrador** en la lista; pulsa **Continuar** para terminarla o **Eliminar** para descartarla.
 
+> **¿El proyecto ya está en producción en la carpeta de Apache (`/var/www/...`)?** Sigue la guía [Migrar proyectos existentes a Despliegues](60-migrar-proyectos.md): subirlo a GitHub, conservar la `APP_KEY`, usar o copiar la base y los archivos subidos, y cambiar el tráfico sin cortes.
+
 ### Agregar la clave de despliegue en GitHub
 
 La clave de despliegue le da al panel acceso de **solo lectura** a un único repositorio.
@@ -330,6 +332,7 @@ Sí. Sus contenedores se llaman `matipanel-<app>-…`. Gestiónalas desde este m
 
 ## Ver también
 
+- [Migrar proyectos existentes a Despliegues](60-migrar-proyectos.md)
 - [Docker](25-docker.md)
 - [DNS](51-dns.md)
 - [Servidor web](21-servidor-web.md)

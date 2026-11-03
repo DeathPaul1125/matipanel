@@ -4,7 +4,7 @@
 
 Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.15.1-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.15.2-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -26,7 +26,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
   </tr>
   <tr>
     <td><img src="docs/screenshots/firewall.png" alt="Firewall"><br><sub><b>Firewall:</b> instala y gestiona UFW, con accesos rápidos para servicios comunes.</sub></td>
-    <td><img src="docs/screenshots/ayuda.png" alt="Ayuda integrada"><br><sub><b>Ayuda:</b> 40 capítulos con índice, buscador (Ctrl+K) y ayuda contextual.</sub></td>
+    <td><img src="docs/screenshots/ayuda.png" alt="Ayuda integrada"><br><sub><b>Ayuda:</b> 41 capítulos con índice, buscador (Ctrl+K) y ayuda contextual.</sub></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/apariencia.png" alt="Apariencia"><br><sub><b>Apariencia:</b> estilo de la interfaz, color de acento, barra lateral, tamaño, densidad y secciones del dashboard, por usuario.</sub></td>
@@ -71,7 +71,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Correo** | Postfix y Dovecot: configuración, cola, alias, SSL, registro y correo de prueba |
 | **DNS** | BIND 9: zonas primarias, inversas y secundarias, registros, SOA, reenviadores y pruebas con `dig` |
 | **Compartidos** | Samba (recursos, usuarios, sesiones) y NFS (exports) |
-| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno; base de datos propia o externa y **PHP del contenedor** (versión, extensiones detectadas desde composer, php.ini y paquetes del sistema) |
+| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno; base de datos propia o externa y **PHP del contenedor** (versión, extensiones detectadas desde composer, php.ini y paquetes del sistema). Guía para [migrar proyectos que ya están en Apache](app/docs/60-migrar-proyectos.md) |
 | **Stacks** | Proyectos de Docker Compose propios (Portainer, Uptime Kuma, wikis…) con plantillas, validación y avisos de configuraciones peligrosas |
 | **Docker** | Contenedores agrupados por proyecto con nombres propios, imágenes, volúmenes y logs |
 | **Explorador BD** | Estilo phpMyAdmin para las bases del servidor y las de cada app desplegada, con **diagrama entidad-relación** exportable |
@@ -199,7 +199,7 @@ Environment="MATIPANEL_FILE_WRITE=0"   # administrador de archivos en solo lectu
 
 ## Documentación
 
-La guía de usuario completa (40 capítulos) está en [`app/docs/`](app/docs/) y dentro del panel en **Menú → Cuenta → Ayuda**, o con el botón **?** de cada pantalla. Empieza por la [Introducción](app/docs/01-introduccion.md) y la guía de [Instalación](app/docs/02-instalacion.md).
+La guía de usuario completa (41 capítulos) está en [`app/docs/`](app/docs/) y dentro del panel en **Menú → Cuenta → Ayuda**, o con el botón **?** de cada pantalla. Empieza por la [Introducción](app/docs/01-introduccion.md) y la guía de [Instalación](app/docs/02-instalacion.md).
 
 ## Desarrollo
 

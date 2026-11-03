@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.15.2] - 2026-11-02
+
+### Documentación
+- 📦 **Migrar proyectos existentes a Despliegues** — nueva guía en la Ayuda para pasar proyectos Laravel que están en la carpeta de Apache (con la base en el mismo servidor) a Despliegues con git: inventario, subir el código a GitHub, usar la base del servidor o una propia (con importación del volcado), copiar la `APP_KEY` y los archivos subidos, probar en paralelo, cambiar el tráfico, volver atrás, PHP 8.1 o anterior, Laravel Mix y proyectos PHP.
+
 ## [0.15.1] - 2026-10-28
 
 ### Corregido
