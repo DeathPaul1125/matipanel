@@ -6,6 +6,8 @@ La migración se hace **sin apagar el sitio actual**: el proyecto viejo sigue at
 
 > **Consejo:** Migra **un proyecto a la vez**, empezando por el menos crítico. Cuando el primero funcione, los demás son repetir los mismos pasos.
 
+> **Atajo:** después de subir el código a GitHub y crear la app, la pestaña **Importar** de la app hace sola los pasos del `.env`, la base y los archivos. Ver [Atajo: la pestaña Importar](#atajo-la-pestana-importar).
+
 ## Antes de empezar
 
 ### Qué cambia
@@ -45,6 +47,23 @@ Antes de tocar nada, anota estos datos de cada proyecto. Los necesitarás en los
 | **Redis** | `QUEUE_CONNECTION`, `CACHE_DRIVER`/`CACHE_STORE` y `SESSION_DRIVER` del `.env`. | Activar Redis en el panel si el proyecto lo usaba. |
 | **Archivos subidos** | `sudo du -sh storage/app` y busca carpetas de subidas en `public/` (`public/uploads`, `public/images/productos`…). | Copiarlos al volumen de la app ([Paso 7](#paso-7-copiar-los-archivos-subidos)). |
 | **Assets** | En `package.json`, la sección `scripts`: ¿tiene `build` (Vite) o `production`/`prod` (Laravel Mix)? | El panel ejecuta `npm run build`; ver [Paso 1](#proyectos-con-laravel-mix). |
+
+## Atajo: la pestaña Importar
+
+Los pasos 4, 6 y 7 (el `.env`, la base y los archivos subidos) los hace el panel por ti en la pestaña **Importar** de la app, y además revisa lo que suele olvidarse. La carpeta y la base viejas **no se modifican**.
+
+1. Crea la app (Paso 3) **sin** marcar **Desplegar al terminar**.
+2. Abre la app → pestaña **Importar**. En **Carpeta del proyecto** escribe la ruta (se sugieren las carpetas de `/var/www` y `/srv` que tienen `artisan`) y pulsa **Analizar**.
+3. Revisa **Qué se puede importar**:
+   - **1 · Copiar el .env:** copia las variables del `.env` viejo, **con la misma `APP_KEY`**. No copia las que maneja el panel: `APP_ENV`, `APP_DEBUG`, `LOG_CHANNEL`, `APP_URL`, las `DB_*` si la app tiene base propia o externa, y las de sesión, caché y colas si la app usa el Redis del panel. Si la app no tiene base en el panel (opción A), copia las `DB_*` y cambia `127.0.0.1`/`localhost` por `host.docker.internal`. Las referencias `${APP_NAME}` se reemplazan por su valor. En **Ver qué variables se copian** está el detalle (sin mostrar los valores).
+   - **2 · Copiar la base de datos:** `mysqldump` de la base que dice el `.env` viejo (`DB_DATABASE`) hacia la base del contenedor de la app. **Reemplaza** sus tablas; la base vieja no se toca. Corrige sola la collation `utf8mb4_0900_ai_ci` de MySQL 8. Solo con MariaDB/MySQL en este servidor y la app con **MariaDB 11**; para PostgreSQL sigue el [Paso 6](#paso-6-importar-los-datos-solo-opcion-b).
+   - **3 · Copiar los archivos subidos:** copia `storage/app` al volumen `storage` de la app, con dueño `www-data`.
+4. Revisa **Revisar antes de cambiar el tráfico**: el panel avisa si la carpeta tiene **cambios sin subir a git**, **subidas en `public/`** que se perderían, **Laravel Mix** sin script `build`, la versión de PHP que pide `composer.json`, y qué **cron**, **Supervisor** y **sitio de Apache** del proyecto habrá que desactivar en el [Paso 9](#paso-9-cambiar-el-trafico-al-proyecto-nuevo).
+5. Deja marcado solo **1 · Copiar el .env** y pulsa **Importar**. El panel ofrece desplegar enseguida.
+6. Cuando el despliegue termine, vuelve a **Importar**, pulsa **Analizar**, marca **2** y **3** y pulsa **Importar** (la base pide escribir el nombre de la app para confirmar). La salida se ve en vivo.
+7. En **Artisan** ejecuta `migrate:status` (y `migrate` si hay pendientes) y sigue con el [Paso 8](#paso-8-probar-sin-tocar-el-sitio-viejo).
+
+Para volver a copiar la base y los archivos justo antes del cambio (opción B, Paso 9), repite el punto 6.
 
 ## Paso 1 · Subir el código a GitHub
 
@@ -419,6 +438,7 @@ Haz commit y push.
 
 ## Paso 10 · Después de migrar
 
+- **Activa HTTPS** si la app se usa desde Internet o quieres cifrarla en la red: **Configuración → HTTPS** ([HTTPS en Despliegues](56-despliegues.md#https)).
 - **Activa los respaldos:** en [Respaldos de apps](57-respaldos-apps.md) asigna un servidor de respaldo a la app y pulsa **Respaldar ahora** para tener el primero. Con la opción A, sigue respaldando la base del servidor por tu cuenta.
 - **Desde ahora, los cambios se hacen en GitHub.** El flujo es: cambias el código en tu equipo, haces `git push` y la app se despliega sola, sin cortes. Si algo sale mal, **Revertir** vuelve a la versión anterior en segundos. **No edites archivos dentro del contenedor**: se pierden en el próximo despliegue.
 - **Guarda la carpeta vieja unos días.** No la borres de inmediato: renómbrala para que nadie la use por error y bórrala cuando estés seguro.

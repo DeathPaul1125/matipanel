@@ -26,7 +26,8 @@ import psutil
 from . import notify
 
 STATE_PATH = Path(os.environ.get("MATIPANEL_NOTIFY_STATE", str(notify.CONFIG_PATH.with_name("notify_state.json"))))
-CERT_GLOBS = ("/etc/letsencrypt/live/*/cert.pem", "/etc/matipanel/cert.pem")
+CERT_GLOBS = ("/etc/letsencrypt/live/*/cert.pem", "/etc/matipanel/cert.pem",
+              "/var/lib/matipanel/apps/*/tls/fullchain.pem")  # HTTPS autofirmado o propio de las apps
 CERT_WARN_DAYS = 14
 ACCEPTED_RE = re.compile(r"Accepted (\S+) for (\S+) from (\S+) port")
 METHODS = {"publickey": "clave pública", "password": "contraseña", "keyboard-interactive/pam": "contraseña (PAM)"}
@@ -151,8 +152,9 @@ def cert_expiries():
             expires = None
         if expires:
             panel = path.startswith("/etc/matipanel/")
-            out.append({"name": "Panel MatiPanel (autofirmado)" if panel else Path(path).parent.name,
-                        "path": path, "expires": expires, "panel": panel})
+            app = Path(path).parent.parent.name if path.startswith("/var/lib/matipanel/apps/") else ""
+            name = "Panel MatiPanel (autofirmado)" if panel else f"App «{app}» (HTTPS)" if app else Path(path).parent.name
+            out.append({"name": name, "path": path, "expires": expires, "panel": panel, "app": app})
     return out
 
 
@@ -173,10 +175,13 @@ def check_certs(now=None, force=False):
                    else f"El certificado de {c['name']} vence en {max(0, int(days))} día{'s' if int(days) != 1 else ''}")
         body = ("Es el certificado del propio panel. Para generar otro, bórralo de /etc/matipanel/ y vuelve a ejecutar "
                 "el instalador." if c["panel"] else
+                "Es el certificado HTTPS de una app de Despliegues. Ábrela → Configuración → HTTPS: con «Autofirmado» "
+                "pulsa «Aplicar HTTPS» para generar otro; con «Certificado propio» pega el nuevo." if c.get("app") else
                 "Let's Encrypt lo renueva solo 30 días antes de vencer, así que la renovación está fallando: revisa que el "
                 "dominio apunte a este servidor y que el puerto 80 esté abierto, y pulsa «Renovar» en SSL.")
         sent += bool(notify.event("cert_expiry", subject, body, key=f"cert:{c['path']}", cooldown=24 * 3600,
-                                  level="err" if days <= 3 else "warn", link="/ssl/",
+                                  level="err" if days <= 3 else "warn",
+                                  link=f"/despliegues/app/{c['app']}#config" if c.get("app") else "/ssl/",
                                   sections=[{"rows": [("Certificado", c["name"]), ("Archivo", c["path"]),
                                                       ("Vence", when, "err" if days <= 3 else "warn")]}]))
     return sent

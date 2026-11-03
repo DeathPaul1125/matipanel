@@ -38,6 +38,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 BASE_DIR = Path(os.environ.get("MATIPANEL_APPS", "/var/lib/matipanel/apps"))
@@ -626,32 +627,56 @@ def render_compose(cfg, appdir, slots=None):
     return f"# Generado por MatiPanel para «{name}». No lo edites: se reescribe en cada despliegue.\n{text}\n"
 
 
-def render_nginx(cfg, upstream_port):
+def render_nginx(cfg, upstream_port, tls=None, via_apache=False):
+    """Sitio de Nginx de la app: su puerto propio y, si tiene nombre, los puertos 80 y 443.
+
+    tls=(certificado, clave) con HTTPS activo (ver tls_files). via_apache: el nombre lo atiende Apache
+    (dueño del 80/443), que reenvía al puerto propio; Nginx toma de él (127.0.0.1) el esquema y el puerto
+    originales, para que la app genere enlaces https://nombre/ y no http://nombre:8081/."""
     name, port = cfg["name"], int(cfg["port"])
-    var = "$mp_conn_" + name.replace("-", "_")
-    loc = (f"    client_max_body_size 100m;\n\n"
-           f"    location / {{\n"
-           f"        proxy_pass http://127.0.0.1:{int(upstream_port)};\n"
-           f"        proxy_http_version 1.1;\n"
-           f"        proxy_set_header Host $http_host;\n"
-           f"        proxy_set_header X-Real-IP $remote_addr;\n"
-           f"        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
-           f"        proxy_set_header X-Forwarded-Proto $scheme;\n"
-           f"        proxy_set_header X-Forwarded-Host $host;\n"
-           f"        proxy_set_header X-Forwarded-Port $server_port;\n"
-           f"        proxy_set_header Upgrade $http_upgrade;\n"
-           f"        proxy_set_header Connection {var};\n"
-           f"        proxy_read_timeout 300s;\n"
-           f"        proxy_send_timeout 300s;\n"
-           f"    }}\n")
-    out = (f"# Generado por MatiPanel (Despliegues) para «{name}». No lo edites: se reescribe en cada despliegue.\n"
-           f"map $http_upgrade {var} {{\n    default upgrade;\n    ''      close;\n}}\n\n"
-           f"server {{\n    listen {port};\n    server_name _;\n{loc}}}\n")
     host = cfg.get("hostname") or ""
-    if host:
-        if not valid_hostname(host):
-            raise ValueError("hostname inválido")
-        out += f"\nserver {{\n    listen 80;\n    server_name {host};\n{loc}}}\n"
+    if host and not valid_hostname(host):
+        raise ValueError("hostname inválido")
+    sfx = name.replace("-", "_")
+    var = "$mp_conn_" + sfx
+    redirect = bool(tls and host and cfg.get("tls_redirect", True))
+
+    def loc(proto="$scheme", fport="$server_port", guard=""):
+        return (f"    client_max_body_size 100m;\n\n"
+                f"    location / {{\n{guard}"
+                f"        proxy_pass http://127.0.0.1:{int(upstream_port)};\n"
+                f"        proxy_http_version 1.1;\n"
+                f"        proxy_set_header Host $http_host;\n"
+                f"        proxy_set_header X-Real-IP $remote_addr;\n"
+                f"        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+                f"        proxy_set_header X-Forwarded-Proto {proto};\n"
+                f"        proxy_set_header X-Forwarded-Host $host;\n"
+                f"        proxy_set_header X-Forwarded-Port {fport};\n"
+                f"        proxy_set_header Upgrade $http_upgrade;\n"
+                f"        proxy_set_header Connection {var};\n"
+                f"        proxy_read_timeout 300s;\n"
+                f"        proxy_send_timeout 300s;\n"
+                f"    }}\n")
+
+    # Puerto propio: con HTTPS y redirección, las visitas directas van a https://nombre (las que reenvía
+    # Apache desde 127.0.0.1 no, o sería un bucle).
+    guard = (f"        if ($remote_addr != \"127.0.0.1\") {{\n"
+             f"            return 301 https://{host}$request_uri;\n"
+             f"        }}\n") if redirect else ""
+    out = (f"# Generado por MatiPanel (Despliegues) para «{name}». No lo edites: se reescribe en cada despliegue.\n"
+           f"map $http_upgrade {var} {{\n    default upgrade;\n    ''      close;\n}}\n"
+           f"map $remote_addr $mp_proto_{sfx} {{\n    default $scheme;\n    127.0.0.1 $http_x_forwarded_proto;\n}}\n"
+           f"map $remote_addr $mp_port_{sfx} {{\n    default $server_port;\n    127.0.0.1 $http_x_forwarded_port;\n}}\n\n"
+           f"server {{\n    listen {port};\n    server_name _;\n{loc(f'$mp_proto_{sfx}', f'$mp_port_{sfx}', guard)}}}\n")
+    if host and not via_apache:
+        acme = (f"    location ^~ /.well-known/acme-challenge/ {{\n"
+                f"        root {ACME_DIR};\n        default_type text/plain;\n    }}\n")
+        body = ("    location / {\n        return 301 https://$host$request_uri;\n    }\n" if redirect else loc())
+        out += f"\nserver {{\n    listen 80;\n    server_name {host};\n{acme}{body}}}\n"
+        if tls:
+            out += (f"\nserver {{\n    listen 443 ssl;\n    server_name {host};\n"
+                    f"    ssl_certificate {tls[0]};\n    ssl_certificate_key {tls[1]};\n"
+                    f"    ssl_protocols TLSv1.2 TLSv1.3;\n{loc()}}}\n")
     return out
 
 
@@ -1179,36 +1204,61 @@ def apache_paths(name):
     return APACHE_DIR / "sites-available" / fname, APACHE_DIR / "sites-enabled" / fname
 
 
-def render_apache_proxy(cfg):
+def render_apache_proxy(cfg, tls=None):
     """VirtualHost de Apache para el nombre interno: reenvía al puerto propio de la app (que atiende
-    Nginx). Así conviven el Apache del servidor en el 80 y las apps desplegadas."""
+    Nginx). Así conviven el Apache del servidor en el 80 y las apps desplegadas. Con tls=(cert, clave)
+    agrega el 443; le dice a Nginx el esquema y el puerto originales (X-Forwarded-Proto/Port)."""
     host, port = cfg.get("hostname") or "", int(cfg["port"])
     if not valid_hostname(host):
         raise ValueError("hostname inválido")
-    return (f"# Generado por MatiPanel (Despliegues) para «{cfg['name']}»: Apache tiene el puerto 80, así que\n"
-            f"# reenvía el nombre interno al puerto {port} de la app. No lo edites: se reescribe en cada despliegue.\n"
-            f"<VirtualHost *:80>\n"
-            f"    ServerName {host}\n"
-            f"    ProxyPreserveHost On\n"
-            f"    ProxyRequests Off\n"
-            f"    ProxyPass / http://127.0.0.1:{port}/ upgrade=websocket\n"
-            f"    ProxyPassReverse / http://127.0.0.1:{port}/\n"
-            f"    ProxyTimeout 300\n"
-            f"</VirtualHost>\n")
+    redirect = bool(tls and cfg.get("tls_redirect", True))
+
+    def proxy(scheme, fport):
+        return (f"    ProxyPreserveHost On\n"
+                f"    ProxyRequests Off\n"
+                f"    RequestHeader set X-Forwarded-Proto \"{scheme}\"\n"
+                f"    RequestHeader set X-Forwarded-Port \"{fport}\"\n"
+                f"    ProxyPass / http://127.0.0.1:{port}/ upgrade=websocket\n"
+                f"    ProxyPassReverse / http://127.0.0.1:{port}/\n"
+                f"    ProxyTimeout 300\n")
+
+    acme = (f"    Alias /.well-known/acme-challenge/ {ACME_DIR}/.well-known/acme-challenge/\n"
+            f"    <Directory {ACME_DIR}/.well-known/acme-challenge/>\n"
+            f"        Require all granted\n"
+            f"    </Directory>\n"
+            f"    ProxyPass /.well-known/acme-challenge/ !\n")
+    http_body = (f"    RedirectMatch 301 \"^/(?!\\.well-known/acme-challenge/)(.*)$\" \"https://{host}/$1\"\n"
+                 if redirect else proxy("http", 80))
+    out = (f"# Generado por MatiPanel (Despliegues) para «{cfg['name']}»: Apache tiene el puerto 80, así que\n"
+           f"# reenvía el nombre interno al puerto {port} de la app. No lo edites: se reescribe en cada despliegue.\n"
+           f"<VirtualHost *:80>\n"
+           f"    ServerName {host}\n"
+           f"{acme}{http_body}"
+           f"</VirtualHost>\n")
+    if tls:
+        out += (f"\n<VirtualHost *:443>\n"
+                f"    ServerName {host}\n"
+                f"    SSLEngine on\n"
+                f"    SSLCertificateFile {tls[0]}\n"
+                f"    SSLCertificateKeyFile {tls[1]}\n"
+                f"{proxy('https', 443)}"
+                f"</VirtualHost>\n")
+    return out
 
 
-def apply_apache_host(name, cfg):
-    """Escribe y activa el sitio de Apache (proxy y proxy_http se activan si hace falta). → (ok, mensaje)."""
+def apply_apache_host(name, cfg, tls=None):
+    """Escribe y activa el sitio de Apache (proxy, proxy_http, headers y, con HTTPS, ssl se activan si
+    hace falta). → (ok, mensaje)."""
     avail, link = apache_paths(name)
     if lstat_kind(avail.parent) != "dir" or lstat_kind(link.parent) != "dir":
         return False, "Apache ocupa el puerto 80 pero no tiene /etc/apache2/sites-available (¿no es Debian/Ubuntu?)"
     if lstat_kind(avail) not in (None, "file") or lstat_kind(link) not in (None, "link"):
         return False, f"{avail} o {link} no son lo que el panel espera; revísalos a mano"
-    text = render_apache_proxy(cfg)
+    text = render_apache_proxy(cfg, tls)
     old = read_text(avail) if lstat_kind(avail) == "file" else None
     if old == text and lstat_kind(link) == "link":
         return True, "Apache ya reenvía el nombre interno"
-    code, o, e = _run(["a2enmod", "-q", "proxy", "proxy_http"], timeout=60)
+    code, o, e = _run(["a2enmod", "-q", "proxy", "proxy_http", "headers", *(["ssl"] if tls else [])], timeout=60)
     if code != 0:
         return False, "No se pudieron activar los módulos proxy de Apache: " + (o + e).strip()[-500:]
     write_file(avail, text, 0o644)
@@ -1260,16 +1310,24 @@ def apply_nginx(name, cfg, upstream_port):
     if lstat_kind(link) not in (None, "link"):
         return False, f"{link} es un archivo real y no un enlace; revísalo a mano"
     notes = []
+    tls = tls_files(name, cfg)
+    via_apache = False
     if cfg.get("hostname"):
-        # El nombre interno se atiende en el puerto 80. Si lo tiene Apache, Apache lo reenvía al puerto de
-        # la app; si lo tiene otro programa, no hay forma (el reload de Nginx fallaría sin avisar).
+        # El nombre interno se atiende en el puerto 80 (y 443 con HTTPS). Si lo tiene Apache, Apache lo
+        # reenvía al puerto de la app; si lo tiene otro programa, no hay forma (el reload fallaría sin avisar).
         others = port_users(80) - {"nginx"}
-        if others and others <= {"apache2", "httpd"}:
-            ok, msg = apply_apache_host(name, cfg)  # antes de tocar Nginx: si falla, nada cambió
+        apache = {"apache2", "httpd"}
+        front = apache if others and others <= apache else {"nginx"}
+        busy443 = (port_users(443) - front) if tls else set()
+        if busy443:
+            return False, (f"HTTPS: el puerto 443 lo usa {', '.join(sorted(busy443))}. Libéralo o desactiva HTTPS "
+                           f"en Configuración (la app seguirá por HTTP).")
+        if others and others <= apache:
+            ok, msg = apply_apache_host(name, cfg, tls)  # antes de tocar Nginx: si falla, nada cambió
             if not ok:
                 return False, msg
             notes.append(msg)
-            cfg = {**cfg, "hostname": ""}  # Nginx solo atiende el puerto propio
+            via_apache = True  # Nginx solo atiende el puerto propio
         elif others:
             return False, (f"El puerto 80 lo usa {', '.join(sorted(others))}, y el nombre interno necesita que lo "
                            f"atienda Nginx o Apache. Quita el nombre interno en Configuración (la app seguirá en "
@@ -1279,7 +1337,7 @@ def apply_nginx(name, cfg, upstream_port):
     else:
         remove_apache_host(name)
     old = read_text(avail) if kind == "file" else None
-    write_file(avail, render_nginx(cfg, upstream_port), 0o644)
+    write_file(avail, render_nginx(cfg, upstream_port, tls, via_apache), 0o644)
     made_link = False
     if lstat_kind(link) is None:
         os.symlink(str(avail), str(link))
@@ -1309,7 +1367,173 @@ def apply_nginx(name, cfg, upstream_port):
         _, jlog, _ = _run(["journalctl", "-u", "nginx", "-n", "8", "--no-pager"], timeout=15)
         return False, (f"Nginx no abrió el puerto {cfg['port']}; se dejó la configuración anterior. "
                        f"¿Está activo Nginx y libre ese puerto?\n" + jlog.strip())
+    if tls and not via_apache and not _wait_listening(443):
+        notes.append("Aviso: Nginx no abrió el puerto 443; revisa «journalctl -u nginx».")
     return True, "\n".join([*notes, (out + err).strip()]).strip()
+
+
+# ── HTTPS de las apps ───────────────────────────────────────────────────────
+
+ACME_DIR = Path("/var/lib/matipanel-acme")  # webroot de Let's Encrypt (Nginx/Apache lo leen como www-data)
+LE_LIVE = Path("/etc/letsencrypt/live")
+TLS_MODES = {"": "Sin HTTPS", "letsencrypt": "Let's Encrypt", "self": "Autofirmado", "custom": "Certificado propio"}
+CERT_MAX = 64 * 1024
+# certbot guarda este hook en la renovación: recarga quien atienda el 443 (el otro falla en silencio)
+RELOAD_HOOK = "systemctl reload nginx 2>/dev/null; systemctl reload apache2 2>/dev/null; true"
+
+
+def tls_dir(name):
+    return app_dir(name) / "tls"
+
+
+def tls_files(name, cfg):
+    """(certificado, clave) si la app tiene HTTPS activo y los archivos existen; si no, None."""
+    mode = cfg.get("tls") or ""
+    if mode not in TLS_MODES or not mode or not cfg.get("hostname"):
+        return None
+    d = LE_LIVE / f"matipanel-{name}" if mode == "letsencrypt" else tls_dir(name)
+    cert, key = d / "fullchain.pem", d / "privkey.pem"
+    return (str(cert), str(key)) if os.path.isfile(cert) and os.path.isfile(key) else None
+
+
+def parse_cert_text(text):
+    """Salida de `openssl x509 -noout -subject -issuer -enddate -ext subjectAltName` → dict."""
+    info = {"subject": "", "issuer": "", "not_after": "", "days_left": None, "names": []}
+    for line in text.splitlines():
+        k, sep, v = line.strip().partition("=")
+        if sep and k in ("subject", "issuer"):
+            info[k] = v.strip()
+        elif sep and k == "notAfter":
+            info["not_after"] = v.strip()
+            try:
+                exp = datetime.strptime(" ".join(v.split()), "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+                info["days_left"] = (exp - datetime.now(timezone.utc)).days
+            except ValueError:
+                pass
+        info["names"] += re.findall(r"DNS:([^,\s]+)", line)
+    return info
+
+
+def cert_info(path):
+    if not os.path.isfile(path):
+        return None
+    code, out, _ = _run(["openssl", "x509", "-noout", "-subject", "-issuer", "-enddate", "-ext", "subjectAltName",
+                         "-in", str(path)], 20)
+    return parse_cert_text(out) if code == 0 else None
+
+
+def make_self_signed(name, host):
+    d = tls_dir(name)
+    d.mkdir(mode=0o700, exist_ok=True)
+    code, o, e = _run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "825", "-subj", f"/CN={host}",
+                       "-addext", f"subjectAltName=DNS:{host}", "-keyout", str(d / "privkey.pem"),
+                       "-out", str(d / "fullchain.pem")], 60)
+    if code != 0:
+        return "openssl no pudo crear el certificado: " + (o + e).strip()[-300:]
+    os.chmod(d / "privkey.pem", 0o600)
+    return ""
+
+
+def save_custom_cert(name, host, cert, key):
+    """Valida (PEM, clave sin contraseña que corresponde, nombre y vigencia) y guarda. → error o ''."""
+    cert, key = str(cert or "").strip() + "\n", str(key or "").strip() + "\n"
+    if len(cert) > CERT_MAX or len(key) > CERT_MAX or "-----BEGIN CERTIFICATE-----" not in cert \
+            or "PRIVATE KEY-----" not in key:
+        return "Pega el certificado (-----BEGIN CERTIFICATE-----, con los intermedios debajo) y su clave privada"
+    d = tls_dir(name)
+    d.mkdir(mode=0o700, exist_ok=True)
+    tc, tk = d / "new-fullchain.pem", d / "new-privkey.pem"
+    try:
+        write_file(tc, cert)
+        write_file(tk, key)
+        c1, pub1, _ = _run(["openssl", "x509", "-noout", "-pubkey", "-in", str(tc)], 20)
+        if c1 != 0:
+            return "El certificado no es válido (formato PEM)"
+        c2, pub2, _ = _run(["openssl", "pkey", "-pubout", "-passin", "pass:", "-in", str(tk)], 20)
+        if c2 != 0:
+            return ("La clave privada no es válida o tiene contraseña (quítasela con "
+                    "«openssl pkey -in clave.key -out sin-clave.key»)")
+        if pub1.strip() != pub2.strip():
+            return "La clave privada no corresponde al certificado"
+        _, chk, _ = _run(["openssl", "x509", "-noout", "-checkhost", host, "-in", str(tc)], 20)
+        if "does match" not in chk:
+            return f"El certificado no es para {host} (revisa su nombre o usa uno comodín *.dominio)"
+        if _run(["openssl", "x509", "-noout", "-checkend", "0", "-in", str(tc)], 20)[0] != 0:
+            return "El certificado está vencido"
+        os.replace(tc, d / "fullchain.pem")
+        os.replace(tk, d / "privkey.pem")
+        return ""
+    finally:
+        for f in (tc, tk):
+            if lstat_kind(f) == "file":
+                os.unlink(f)
+
+
+def obtain_le(name, host, email):
+    """certbot certonly --webroot (el sitio HTTP de la app ya sirve /.well-known/acme-challenge/)."""
+    ACME_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(ACME_DIR, 0o755)
+    cmd = ["certbot", "certonly", "--webroot", "-w", str(ACME_DIR), "-d", host, "--cert-name", f"matipanel-{name}",
+           "--non-interactive", "--agree-tos", "--keep-until-expiring", "--deploy-hook", RELOAD_HOOK]
+    cmd += [f"--email={email}"] if email else ["--register-unsafely-without-email"]
+    code, o, e = _run(cmd, 300)
+    out = (o + e).strip()
+    if code != 0:
+        return False, ("Let's Encrypt no pudo validar el dominio. Revisa que " + host + " apunte a la IP pública "
+                       "de este servidor y que los puertos 80 y 443 estén abiertos desde Internet (en Oracle Cloud: "
+                       "la Security List y el iptables del servidor).\n\n" + out[-2500:])
+    return True, out[-1500:]
+
+
+def remove_le(name):
+    if shutil.which("certbot") and (LE_LIVE / f"matipanel-{name}").exists():
+        _run(["certbot", "delete", "--cert-name", f"matipanel-{name}", "--non-interactive"], 120)
+
+
+def set_tls(name, mode, email="", redirect=True, cert="", key=""):
+    """Activa, cambia o quita el HTTPS de una app ya desplegada. → (ok, mensaje)."""
+    cfg = load_config(name)
+    host = cfg.get("hostname") or ""
+    if mode not in TLS_MODES:
+        return False, "Modo de HTTPS inválido"
+    if mode and not host:
+        return False, "HTTPS necesita un nombre (por ejemplo miapp.empresa.com): escríbelo en «Nombre interno» y guarda."
+    if not cfg.get("active_slot"):
+        return False, "Despliega la aplicación primero"
+    upstream = slot_port(cfg, cfg["active_slot"])
+    log = []
+    if mode == "self":
+        info = cert_info(tls_dir(name) / "fullchain.pem")
+        if not info or host not in info["names"] or (info["days_left"] or 0) < 30:
+            err = make_self_signed(name, host)
+            if err:
+                return False, err
+    elif mode == "custom":
+        if cert or key:
+            err = save_custom_cert(name, host, cert, key)
+            if err:
+                return False, err
+        elif not tls_files(name, {**cfg, "tls": "custom"}):
+            return False, "Pega el certificado y su clave privada"
+    elif mode == "letsencrypt":
+        if not shutil.which("certbot"):
+            return False, "certbot no está instalado"
+        # Primero el sitio HTTP con la ruta de validación; recién con el certificado se activa el 443.
+        ok, msg = apply_nginx(name, {**cfg, "tls": ""}, upstream)
+        if not ok:
+            return False, msg
+        ok, out = obtain_le(name, host, email)
+        if not ok:
+            return False, out
+        log.append(out)
+    new = {**cfg, "tls": mode, "tls_redirect": bool(redirect), "tls_email": email}
+    ok, msg = apply_nginx(name, new, upstream)
+    if not ok:
+        return False, msg
+    update_config(name, lambda c: c.update(tls=mode, tls_redirect=bool(redirect), tls_email=email))
+    if cfg.get("tls") == "letsencrypt" and mode != "letsencrypt":
+        remove_le(name)  # si no, su renovación fallaría cada día
+    return True, "\n".join([*log, msg]).strip()
 
 
 def remove_nginx(name):
@@ -2012,6 +2236,8 @@ def delete_app(name, volumes=False):
         remove_apache_host(name)
     except OSError as e:
         warnings.append(f"Nginx: {e}")
+    if cfg.get("tls") == "letsencrypt":
+        remove_le(name)
     with _lock:
         shutil.rmtree(d)
     return warnings
@@ -2156,6 +2382,16 @@ if __name__ == "__main__":
     assert ng.count("proxy_pass http://127.0.0.1:20003;") == 2 and "client_max_body_size 100m;" in ng
     assert "map $http_upgrade $mp_conn_mi_app" in ng and "proxy_set_header Connection $mp_conn_mi_app;" in ng
     assert "listen 80;" not in render_nginx({"name": "x1", "port": 8083, "hostname": ""}, 20000)
+    assert "acme-challenge" in ng and "listen 443" not in ng and "return 301" not in ng
+    hc = {"name": "mi-app", "port": 8082, "hostname": "mi.empresa.com", "tls": "self"}
+    ngt = render_nginx(hc, 20003, ("/c/full.pem", "/c/key.pem"))
+    assert "listen 443 ssl;" in ngt and "ssl_certificate /c/full.pem;" in ngt and "ssl_certificate_key /c/key.pem;" in ngt
+    assert "return 301 https://mi.empresa.com$request_uri;" in ngt and "return 301 https://$host$request_uri;" in ngt
+    assert ngt.count("proxy_pass http://127.0.0.1:20003;") == 2  # puerto propio + 443 (el 80 solo redirige)
+    assert "return 301" not in render_nginx({**hc, "tls_redirect": False}, 20003, ("/c/f", "/c/k"))
+    nga = render_nginx(hc, 20003, ("/c/f", "/c/k"), via_apache=True)
+    assert "listen 80;" not in nga and "listen 443" not in nga and "X-Forwarded-Proto $mp_proto_mi_app;" in nga
+    assert "127.0.0.1 $http_x_forwarded_proto;" in nga and 'if ($remote_addr != "127.0.0.1")' in nga
     try:
         render_nginx({"name": "x1", "port": 8083, "hostname": "a.b; include /etc/passwd"}, 20000)
         raise AssertionError
@@ -2204,6 +2440,15 @@ if __name__ == "__main__":
     assert dict(parse_env(db_env(pc, sec))[0])["MARIADB_DATABASE"] == "app"
     ap = render_apache_proxy({"name": "quetzal", "hostname": "quetzal.local", "port": 8081})
     assert "ServerName quetzal.local\n" in ap and "ProxyPass / http://127.0.0.1:8081/ upgrade=websocket" in ap
+    assert 'X-Forwarded-Proto "http"' in ap and "*:443" not in ap and "ProxyPass /.well-known/acme-challenge/ !" in ap
+    apt = render_apache_proxy({"name": "quetzal", "hostname": "quetzal.local", "port": 8081, "tls": "self"}, ("/c/f", "/c/k"))
+    assert "<VirtualHost *:443>" in apt and "SSLCertificateFile /c/f\n" in apt and 'X-Forwarded-Proto "https"' in apt
+    assert 'RedirectMatch 301 "^/(?!\\.well-known/acme-challenge/)(.*)$" "https://quetzal.local/$1"' in apt
+    assert apt.split("<VirtualHost *:443>")[0].count("ProxyPass / ") == 0  # el 80 solo redirige
+    ci = parse_cert_text("subject=CN = a.b\nissuer=CN = R11\nnotAfter=Jan  5 10:00:00 2099 GMT\n"
+                         "X509v3 Subject Alternative Name: \n    DNS:a.b, DNS:www.a.b\n")
+    assert ci["names"] == ["a.b", "www.a.b"] and ci["issuer"] == "CN = R11" and ci["days_left"] > 1000
+    assert tls_files("x", {"tls": "self", "hostname": ""}) is None and tls_files("x", {"tls": "", "hostname": "a.b"}) is None
     try:
         render_apache_proxy({"name": "x", "hostname": "a.b\nInclude /etc/shadow", "port": 8081})
         raise AssertionError("hostname con salto de línea aceptado")

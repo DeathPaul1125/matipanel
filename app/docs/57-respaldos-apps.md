@@ -106,6 +106,52 @@ La app se detiene mientras se restaura y vuelve a arrancar al terminar; la base 
 
 **Eliminar** borra un respaldo del servidor remoto.
 
+## Configuración del panel
+
+La tarjeta **Configuración del panel** respalda la configuración de **este MatiPanel** en uno de los servidores de respaldo, para no tener que volver a configurarlo a mano si el servidor se pierde o para llevarla a otro servidor.
+
+### Qué incluye y qué no
+
+| Incluye | No incluye |
+|---|---|
+| Usuarios con **2FA** (`2fa.json`) y la clave de las sesiones | Las **apps** de Despliegues: tienen sus propios respaldos (arriba) |
+| **Permisos** por rol (`roles.json`) | Historiales: gráficos del dashboard (`metrics.db`), historial del monitor (`monitor.db`) y **auditoría** (`audit.db`). Pueden pesar cientos de MB y son de este servidor |
+| **Notificaciones**: correo SMTP, eventos y **umbrales** (`notify.json`) | El estado de avisos ya enviados, actualizaciones e historial de versiones |
+| **Apariencia** de cada usuario (`prefs.json`) | Capturas de tráfico, cachés y logs |
+| **Monitor** de servicios (`monitor.json`) y Tráfico (`traffic.json`) | Los **volúmenes** y carpetas de datos de los stacks (por ejemplo `html/`): respáldalos con [Respaldos](16-respaldos.md) |
+| **Multiservidor**: servidores y tokens (`remote_servers.json`, `remote_tokens.json`) | Lo que no es del panel: usuarios del sistema, firewall, sitios de Apache/Nginx, bases de datos del servidor, correo, DNS |
+| **Respaldos** de carpetas (`backups.json`) y nombres de contenedores (`docker_names.json`) | |
+| Servidores de respaldo y programaciones de esta pantalla (`appbackup.json`) | |
+| **Stacks**: `compose.yaml`, `.env` y `stack.json` de cada uno | |
+| **Certificado HTTPS** del panel (`/etc/matipanel/cert.pem` y `key.pem`) | |
+
+> **Importante:** El respaldo contiene **secretos**: las semillas del 2FA, la contraseña SMTP, las contraseñas de los servidores Windows de respaldo, los tokens de multiservidor y la clave privada del certificado. Por eso el respaldo programado viene **desactivado**: actívalo sabiendo que el servidor de respaldos debe estar tan protegido como este.
+
+Cada respaldo es una carpeta `<carpeta>/_panel/<nombre-del-servidor>/<AAAAMMDD-HHMMSS>/` con `panel.tar.gz` y `manifest.json` (versión del panel, lista de archivos y huella SHA-256). Ocupa unos pocos KB.
+
+### Respaldar
+
+1. Elige el **Servidor** de respaldo, la **Programación** (cada 6 horas, diario o semanal), la hora y cuántos **Conservar**.
+2. Marca **Respaldo programado activo** y pulsa **Guardar**.
+3. Pulsa **Respaldar ahora** para tener el primero. Si un respaldo programado falla, se reintenta a la hora y llega el aviso **Respaldo fallido** de [Notificaciones](33-notificaciones.md).
+
+### Restaurar
+
+La tabla **Respaldos de configuración en el servidor** muestra los de **todos** los paneles que respaldan en el servidor elegido (columna **Panel**); el de esta máquina dice **este panel**.
+
+1. Pulsa **Restaurar…** en el respaldo que quieras.
+2. Escribe el nombre del servidor del respaldo (columna **Panel**) para confirmar.
+3. El panel comprueba la huella del archivo, escribe la configuración y **se reinicia solo**. La página se recarga; vuelve a iniciar sesión.
+
+Al restaurar:
+
+- Solo se escriben los archivos de la lista de arriba, aunque el archivo traiga otros. Nada se escribe a través de enlaces simbólicos.
+- Los **servidores de respaldo que ya tienes en este panel se conservan**, y también su **clave SSH**: con ellos se acaba de leer el respaldo, así que funcionan. Los del respaldo que no estén se agregan. Si un servidor del respaldo es el mismo que uno de aquí (misma IP, puerto y carpeta), las apps que lo usaban pasan al de aquí.
+- Los servidores **Linux** del respaldo que se agreguen usan la clave SSH de **este** panel: agrégala en cada uno (comandos de **Preparar el servidor de respaldos**). Los **Windows** traen su usuario y contraseña y funcionan al momento.
+- Los stacks del respaldo se escriben; los que solo existen en este panel no se tocan. Arráncalos desde [Stacks](59-stacks.md).
+- Los usuarios entran con el **2FA del respaldo**: con la app de autenticación que ya tenían configurada para el panel anterior.
+- El navegador verá el **certificado del respaldo**: si ya lo habías aceptado en el servidor anterior y entras con la misma IP o nombre, no vuelve a preguntar.
+
 ## Recuperación ante desastres
 
 Si este servidor se pierde (falla de disco, reinstalación, robo), las apps se recrean en un servidor nuevo a partir de sus respaldos: configuración, base de datos, archivos y código.
@@ -113,6 +159,7 @@ Si este servidor se pierde (falla de disco, reinstalación, robo), las apps se r
 ### Antes de que pase (hazlo ya)
 
 - **Guarda fuera de este servidor** los datos del servidor de respaldos: IP, usuario y carpeta (Linux) o recurso, dominio, usuario y **contraseña** de la cuenta (Windows). Sin ellos no podrás conectar el panel nuevo.
+- **Activa el respaldo de la [configuración del panel](#configuracion-del-panel)** y guarda fuera del servidor el nombre de esta máquina (aparece en la tarjeta).
 - **Respalda de nuevo cada app** después de actualizar a la versión 0.8.0 (**Respaldar ahora** o espera al respaldo programado). Desde esa versión el respaldo incluye la **clave de despliegue** de GitHub; con respaldos anteriores habrá que registrar una clave nueva en GitHub.
 - **Ensáyalo** de vez en cuando en un servidor de prueba: la recuperación no toca el servidor de respaldos, solo lee de él.
 
@@ -125,10 +172,11 @@ Si este servidor se pierde (falla de disco, reinstalación, robo), las apps se r
    - **Linux:** el panel nuevo tiene **otra clave SSH**. En el servidor de respaldos agrega la nueva: de los comandos de **Preparar el servidor de respaldos** basta con la línea `echo 'restrict ssh-ed25519 …' >> …/authorized_keys` (el usuario y la carpeta ya existen). Puedes borrar la línea de la clave vieja.
    - **Windows:** la misma cuenta del dominio y su contraseña.
    Pulsa **Probar**: debe decir **Correcta**.
-5. En **Recuperación ante desastres**, elige el servidor y pulsa **Buscar apps en el servidor**. Aparecen todas las apps que tienen respaldos, cuántos y la fecha del último.
-6. En cada app pulsa **Recuperar…**, elige el respaldo (por defecto el más reciente), escribe el nombre de la app y pulsa **Recuperar**. Se recupera una app a la vez.
-7. Sigue el registro. Cuando diga **Datos recuperados**, abre **sigue el avance en Despliegues**: la app se está compilando desde GitHub. Al terminar queda en línea.
-8. Comprueba que la app abre y tiene sus datos. Si la IP cambió, actualiza el DNS o el archivo `hosts` de los equipos que usan el nombre interno, y la URL del webhook en GitHub (**Settings → Webhooks**).
+5. **(Opcional, recomendado)** En **Configuración del panel**, elige ese servidor, busca en la tabla el respaldo del servidor perdido (columna **Panel**) y pulsa **Restaurar…**. Recuperas usuarios con 2FA, permisos, notificaciones, monitor, stacks y los demás servidores de respaldo ([Configuración del panel](#configuracion-del-panel)). El panel se reinicia; vuelve a entrar y sigue con el paso siguiente.
+6. En **Recuperación ante desastres**, elige el servidor y pulsa **Buscar apps en el servidor**. Aparecen todas las apps que tienen respaldos, cuántos y la fecha del último.
+7. En cada app pulsa **Recuperar…**, elige el respaldo (por defecto el más reciente), escribe el nombre de la app y pulsa **Recuperar**. Se recupera una app a la vez.
+8. Sigue el registro. Cuando diga **Datos recuperados**, abre **sigue el avance en Despliegues**: la app se está compilando desde GitHub. Al terminar queda en línea.
+9. Comprueba que la app abre y tiene sus datos. Si la IP cambió, actualiza el DNS o el archivo `hosts` de los equipos que usan el nombre interno, y la URL del webhook en GitHub (**Settings → Webhooks**).
 
 ### Qué hace «Recuperar»
 
@@ -148,7 +196,7 @@ Si el respaldo es de una versión anterior a la 0.8.0 y el repositorio es privad
 
 ### Qué no recupera
 
-Esto recupera las **apps desplegadas**. La configuración del propio servidor y del panel se vuelve a hacer a mano: usuarios del sistema y su 2FA, firewall, notificaciones por correo, monitor de servicios, permisos del panel, stacks de Docker Compose, bases de datos del servidor (fuera de las apps) y respaldos de carpetas. Para esas carpetas usa [Respaldos](16-respaldos.md).
+Esto recupera las **apps desplegadas**, y la [configuración del panel](#configuracion-del-panel) si la respaldaste. Lo que es del servidor y no del panel se vuelve a hacer a mano: usuarios del sistema, firewall, sitios de Apache/Nginx, bases de datos del servidor (fuera de las apps), los datos de los stacks y las carpetas que respaldabas con [Respaldos](16-respaldos.md) (sus trabajos sí vuelven con la configuración del panel; los archivos están en su propio destino).
 
 ## Preguntas frecuentes
 

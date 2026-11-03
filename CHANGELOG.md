@@ -2,6 +2,19 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.16.0] - 2026-11-02
+
+### Añadido
+- 📥 **Importar un proyecto que ya está en el servidor** — nueva pestaña **Importar** en cada app de Despliegues: analiza la carpeta de Apache (`/var/www/…`) y copia el `.env` con la misma `APP_KEY` (sin pisar lo que maneja el panel; con la base del servidor cambia `localhost` por `host.docker.internal`), la base de MariaDB/MySQL del servidor al contenedor de la app (con progreso en vivo y corrección de la collation de MySQL 8) y `storage/app` al volumen. Avisa de cambios sin subir a git, subidas en `public/` que se perderían, Laravel Mix sin `build`, y del cron, Supervisor y sitio de Apache que habrá que desactivar.
+- 🔒 **HTTPS por app** — tarjeta **HTTPS** en Configuración: **Let's Encrypt** (instala certbot, valida por el puerto 80 y se renueva solo), **autofirmado** para la red interna o **certificado propio** (CA del Active Directory, comprado o comodín; se valida clave, nombre y vigencia). Redirección de HTTP a HTTPS opcional (también del puerto propio). Funciona con Nginx o con Apache en el 80/443. Los certificados de las apps se vigilan en Notificaciones.
+- 🗂️ **Respaldo de la configuración del panel** — en Respaldos de apps: usuarios con 2FA, permisos, notificaciones y umbrales, apariencia, monitor, multiservidor, respaldos, stacks y certificado HTTPS a los mismos servidores de respaldo (SSH o Windows), programado o al momento; restauración verificada con SHA-256 que conserva los servidores de respaldo actuales y reinicia el panel, también en un servidor nuevo para la recuperación ante desastres.
+
+### Mejorado
+- 🧰 **Instalador más listo** — recuerda el puerto en `/etc/default/matipanel` (las actualizaciones ya no necesitan `MATIPANEL_PORT`; en instalaciones anteriores lo toma de la unidad systemd) y muestra cuál usará y de dónde salió; si el puerto lo ocupa otro programa se detiene antes de instalar, dice cuál es y sugiere uno libre; avisa si el usuario no tiene contraseña de Linux (VPS con clave SSH) y ofrece ponérsela; y si se instala desde `/tmp` sugiere moverlo a `/opt/matipanel-src`. La guía de instalación usa ahora `/opt/matipanel-src`.
+
+### Corregido
+- Con el nombre interno atendido por **Apache**, la app recibe el esquema y el puerto originales (`X-Forwarded-Proto`/`X-Forwarded-Port`) y ya no genera enlaces con el puerto propio (`http://nombre:8081/…`).
+
 ## [0.15.2] - 2026-11-02
 
 ### Documentación

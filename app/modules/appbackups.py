@@ -54,8 +54,11 @@ def overview():
         apps.append({"name": name, "database": app.get("database", "none"), "deployed": bool(app.get("active_slot")),
                      "volumes": [v.split("_", 1)[1] for v in B.app_volumes(app)], "dest": dest["id"] if dest else "",
                      "settings": B.app_settings(cfg, name), "state": cfg["state"].get(name) or {}, "busy": busy})
+    pdest = B.panel_dest(cfg)
+    panel = {"host": B.panel_host(), "settings": {**B.panel_settings(cfg), "dest": pdest["id"] if pdest else ""},
+             "state": cfg["state"].get(B.PANEL) or {}, "busy": B.status(B.PANEL)[0]}
     return jsonify({"dests": [B.public_dest(d) for d in cfg["dests"]], "configured": B.configured(cfg),
-                    "pubkey": B.public_key(), "fingerprints": B.fingerprints(), "apps": apps})
+                    "pubkey": B.public_key(), "fingerprints": B.fingerprints(), "apps": apps, "panel": panel})
 
 
 def _posted_dest():
@@ -260,6 +263,84 @@ def delete(name, stamp):
         return _err("Ese servidor de respaldos no existe", 404)
     try:
         B.delete_remote(dest, name, stamp)
+    except B.Fail as e:
+        return _err(str(e), 502)
+    return jsonify({"ok": True})
+
+
+# ── Configuración del propio panel ──────────────────────────────────────────
+
+@appbackup_bp.route("/api/panel/settings", methods=["POST"])
+@login_required
+def panel_settings():
+    s, err = B.validate_app(request.get_json(silent=True) or {}, [d["id"] for d in B.load()["dests"]])
+    if err:
+        return _err(err)
+    B.update(lambda c: c.__setitem__("panel", s))
+    return jsonify({"ok": True})
+
+
+@appbackup_bp.route("/api/panel/backup", methods=["POST"])
+@login_required
+def panel_backup():
+    if not B.ready(B.panel_dest(B.load())):
+        return _err("Configura primero un servidor de respaldos")
+    if B._run_lock.locked():
+        return _err("Ya hay un respaldo o una restauración en curso; espera a que termine", 409)
+    B.run_async(B.panel_backup, "manual")
+    return jsonify({"ok": True})
+
+
+@appbackup_bp.route("/api/panel/status")
+@login_required
+def panel_status():
+    busy, log = B.status(B.PANEL)
+    return jsonify({"ok": True, "busy": busy, "log": log, "state": B.load()["state"].get(B.PANEL) or {}})
+
+
+def _panel_req_dest(dest_id):
+    return B.find_dest(B.load(), str(dest_id or "")) if dest_id else B.panel_dest(B.load())
+
+
+@appbackup_bp.route("/api/panel/list")
+@login_required
+def panel_list():
+    dest = _panel_req_dest(request.args.get("dest"))
+    if not B.ready(dest):
+        return _err("Configura primero un servidor de respaldos")
+    try:
+        return jsonify({"ok": True, "backups": B.list_panel(dest), "dest": dest["id"], "host": B.panel_host()})
+    except B.Fail as e:
+        return _err(str(e), 502)
+
+
+@appbackup_bp.route("/api/panel/restore", methods=["POST"])
+@login_required
+def panel_restore():
+    d = request.get_json(silent=True) or {}
+    host, stamp = str(d.get("host", "")), str(d.get("stamp", ""))
+    if not B.HOST_DIR_RE.fullmatch(host) or not B.STAMP_RE.fullmatch(stamp):
+        return _err("Elige el respaldo")
+    if d.get("confirm") != host:
+        return _err("Escribe el nombre del servidor del respaldo para confirmar")
+    dest = _panel_req_dest(d.get("dest"))
+    if not B.ready(dest):
+        return _err("Ese servidor de respaldos no existe", 404)
+    if B._run_lock.locked():
+        return _err("Ya hay un respaldo o una restauración en curso; espera a que termine", 409)
+    B.run_async(B.panel_restore, dest["id"], host, stamp)
+    return jsonify({"ok": True})
+
+
+@appbackup_bp.route("/api/panel/delete", methods=["POST"])
+@login_required
+def panel_delete():
+    d = request.get_json(silent=True) or {}
+    dest = _panel_req_dest(d.get("dest"))
+    if not B.ready(dest):
+        return _err("Ese servidor de respaldos no existe", 404)
+    try:
+        B.delete_panel(dest, str(d.get("host", "")), str(d.get("stamp", "")))
     except B.Fail as e:
         return _err(str(e), 502)
     return jsonify({"ok": True})

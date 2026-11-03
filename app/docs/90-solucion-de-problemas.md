@@ -13,9 +13,17 @@ El navegador muestra `ERR_CONNECTION_REFUSED` o se queda esperando.
 
 1. Comprueba que el servicio esté activo: `systemctl status matipanel --no-pager`. Debe decir **active (running)**.
 2. Si dice **activating (auto-restart)** o **failed**, mira el error con `journalctl -u matipanel -n 60 --no-pager` (ver las secciones siguientes).
-3. Revisa que estés usando **https://** (no http) y el puerto correcto (por defecto **8443**).
+3. Revisa que estés usando **https://** (no http) y el puerto correcto (por defecto **8443**). El puerto configurado está en `/etc/default/matipanel`: `cat /etc/default/matipanel`.
 4. Si hay firewall activo, permite el puerto: `ufw allow 8443/tcp`.
 5. Comprueba que el servicio esté escuchando: `ss -ltnp | grep 8443`.
+
+## Entro a otra aplicación en lugar de MatiPanel
+
+El puerto lo usa otro programa del servidor. Las versiones recientes del instalador lo detectan y se detienen antes de instalar; si instalaste con una anterior, mira quién escucha con `ss -ltnp | grep 8443` y reinstala en otro puerto: `MATIPANEL_PORT=9443 bash scripts/install.sh TU_USUARIO`. El puerto queda guardado para las actualizaciones. Ver [Usar otro puerto](02-instalacion.md#usar-otro-puerto).
+
+## No puedo entrar en un VPS donde uso clave SSH
+
+El panel pide la contraseña de Linux, y en los VPS de la nube el usuario suele no tener (se entra con clave). Ponle una con `sudo passwd TU_USUARIO`: el acceso por SSH con clave sigue igual. El instalador avisa de esto al terminar. Ver [Usuario sin contraseña](02-instalacion.md#usuario-sin-contrasena-vps-con-clave-ssh).
 
 ## El servicio no arranca: "No module named 'packaging'"
 

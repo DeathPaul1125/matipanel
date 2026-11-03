@@ -87,6 +87,10 @@ def load():
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
+    return _normalize(data)
+
+
+def _normalize(data):
     data = data if isinstance(data, dict) else {}
     dests = [d for d in data.get("dests") or [] if isinstance(d, dict) and d.get("type") in TYPES
              and ID_RE.fullmatch(str(d.get("id", "")))] if isinstance(data.get("dests"), list) else []
@@ -96,6 +100,7 @@ def load():
                   "user": old.get("user", ""), "path": old.get("path", "")}]
     return {"dests": dests,
             "apps": data.get("apps") if isinstance(data.get("apps"), dict) else {},
+            "panel": data.get("panel") if isinstance(data.get("panel"), dict) else {},
             "state": data.get("state") if isinstance(data.get("state"), dict) else {}}
 
 
@@ -992,6 +997,335 @@ def recover(name, stamp, dest_id):
         _run_lock.release()
 
 
+# ── Configuración del propio panel ───────────────────────────────────────
+#
+# <destino>/_panel/<host>/<AAAAMMDD-HHMMSS>/ con panel.tar.gz y manifest.json. Los nombres de app no
+# empiezan con «_», así que no se confunde con una app (remote_apps lo ignora).
+# Solo lo que es configuración, con nombres fijos (lista blanca): nada de apps/ (lo cubren sus propios
+# respaldos), ni historiales (metrics.db, monitor.db, audit.db: pueden pesar cientos de MB y son de
+# este servidor), ni capturas, estados, cachés o logs. Lo mismo vale al restaurar: un archivo que no
+# esté en la lista no se escribe, venga lo que venga en el tar.
+
+PANEL = "_panel"
+PANEL_DIR = Path(os.environ.get("MATIPANEL_DATA_DIR", "/var/lib/matipanel"))
+PANEL_ETC = Path(os.environ.get("MATIPANEL_ETC_DIR", "/etc/matipanel"))
+PANEL_FILES = ("2fa.json", "prefs.json", "roles.json", "notify.json", "monitor.json", "traffic.json",
+               "remote_servers.json", "remote_tokens.json", "backups.json", "docker_names.json", "appbackup.json",
+               ".matipanel_secret")
+PANEL_ETC_FILES = ("cert.pem", "key.pem")
+STACK_FILES = ("compose.yaml", ".env", "stack.json")
+STACK_RE = re.compile(r"[a-z][a-z0-9-]{1,30}")
+HOST_DIR_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,62}")
+PANEL_FILE_MAX = 16 * 1024 * 1024
+PANEL_ARCHIVE_MAX = 64 * 1024 * 1024
+DEFAULT_PANEL = {"enabled": False, "schedule": "daily", "time": "01:30", "keep": 14, "dest": ""}
+
+
+def panel_host():
+    import socket
+    h = socket.gethostname().split(".")[0]
+    return h if HOST_DIR_RE.fullmatch(h) else "panel"
+
+
+def panel_settings(cfg):
+    s = dict(DEFAULT_PANEL)
+    s.update({k: v for k, v in (cfg.get("panel") or {}).items() if k in DEFAULT_PANEL})
+    return s
+
+
+def panel_dest(cfg, dest_id=None):
+    if dest_id:
+        return find_dest(cfg, dest_id)
+    return find_dest(cfg, panel_settings(cfg)["dest"]) or (cfg["dests"][0] if cfg["dests"] else None)
+
+
+def panel_member(arcname):
+    """Nombre dentro de panel.tar.gz → (carpeta raíz, ruta relativa), o None si no es configuración conocida."""
+    parts = arcname.split("/")
+    if len(parts) == 2 and parts[0] == "etc" and parts[1] in PANEL_ETC_FILES:
+        return PANEL_ETC, parts[1]
+    if len(parts) == 2 and parts[0] == "data" and parts[1] in PANEL_FILES:
+        return PANEL_DIR, parts[1]
+    if len(parts) == 4 and parts[:2] == ["data", "stacks"] and STACK_RE.fullmatch(parts[2]) and parts[3] in STACK_FILES:
+        return PANEL_DIR, "/".join(parts[1:])
+    return None
+
+
+def panel_sources():
+    """[(nombre en el tar, ruta)] de los archivos de configuración que existen (sin seguir enlaces)."""
+    out = [(f"data/{f}", PANEL_DIR / f) for f in PANEL_FILES] + [(f"etc/{f}", PANEL_ETC / f) for f in PANEL_ETC_FILES]
+    stacks = PANEL_DIR / "stacks"
+    if D.lstat_kind(stacks) == "dir":
+        for n in sorted(os.listdir(stacks)):
+            if STACK_RE.fullmatch(n) and D.lstat_kind(stacks / n) == "dir":
+                out += [(f"data/stacks/{n}/{f}", stacks / n / f) for f in STACK_FILES]
+    return [(a, p) for a, p in out if D.lstat_kind(p) == "file" and os.path.getsize(p) <= PANEL_FILE_MAX]
+
+
+def build_panel_archive():
+    """panel.tar.gz en memoria. → (bytes, [nombres])"""
+    buf, names = io.BytesIO(), []
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for arc, path in panel_sources():
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "rb") as f:
+                data = f.read(PANEL_FILE_MAX + 1)
+            if len(data) > PANEL_FILE_MAX:
+                continue
+            ti = tarfile.TarInfo(arc)
+            ti.size, ti.mode, ti.mtime = len(data), 0o600, int(time.time())
+            tf.addfile(ti, io.BytesIO(data))
+            names.append(arc)
+    return buf.getvalue(), names
+
+
+def read_panel_archive(data):
+    """Archivos de panel.tar.gz leídos en memoria: solo archivos normales de la lista blanca. → {nombre: bytes}"""
+    out = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+            for mem in tf:
+                if mem.isreg() and panel_member(mem.name) and mem.size <= PANEL_FILE_MAX and mem.name not in out:
+                    out[mem.name] = tf.extractfile(mem).read()
+    except (tarfile.TarError, OSError, EOFError, zlib.error) as e:
+        raise Fail(f"panel.tar.gz dañado: {e}")
+    return out
+
+
+def _safe_write(root, rel, data, mode=0o600):
+    """Escribe root/rel sin seguir enlaces simbólicos en ninguna parte del camino (crea carpetas 0700)."""
+    cur = Path(root)
+    for part in [None] + rel.split("/")[:-1]:
+        cur = cur / part if part else cur
+        kind = D.lstat_kind(cur)
+        if kind is None:
+            os.makedirs(cur, mode=0o700, exist_ok=True) if part is None else os.mkdir(cur, 0o700)
+        elif kind != "dir":
+            raise Fail(f"{cur} no es una carpeta; no se restaura {rel}")
+    target = cur / rel.split("/")[-1]
+    if D.lstat_kind(target) not in (None, "file"):
+        raise Fail(f"{target} no es un archivo normal; no se restaura")
+    tmp = target.with_name(target.name + ".mp-restore")
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.replace(tmp, target)
+    os.chmod(target, mode)
+
+
+def _dest_key(d):
+    return (d["type"], d["host"].lower(), int(d["port"]), d.get("share", ""), d.get("path", ""))
+
+
+def merge_backup_config(cur, old):
+    """appbackup.json al restaurar. Los servidores que tiene ESTE panel mandan: con ellos y con su clave SSH
+    actual se acaba de leer el respaldo, así que funcionan (la clave del respaldo no se restaura). Los del
+    respaldo que no están aquí se agregan; si son el mismo servidor con otro id, las apps pasan al de aquí.
+    Programaciones de apps y del panel vienen del respaldo; el estado de los últimos respaldos, de aquí."""
+    old = _normalize(old)
+    dests, remap = [dict(d) for d in cur["dests"]], {}
+    for d in old["dests"]:
+        same = next((x for x in dests if x["id"] == d["id"] or _dest_key(x) == _dest_key(d)), None) \
+            if d.get("host") else None
+        if same:
+            remap[d["id"]] = same["id"]
+            continue
+        v, err = validate_dest(d, d)
+        if not err:
+            dests.append(v)
+    ids = [d["id"] for d in dests]
+    apps = dict(cur["apps"])
+    for name, s in old["apps"].items():
+        if isinstance(s, dict) and D.valid_name(name):
+            v, err = validate_app({**s, "dest": remap.get(s.get("dest"), s.get("dest"))}, ids)
+            if not err:
+                apps[name] = v
+    panel, err = validate_app({**DEFAULT_PANEL, **old["panel"], "dest": remap.get(old["panel"].get("dest"), old["panel"].get("dest"))}, ids)
+    return {"dests": dests, "apps": apps, "panel": panel if not err else cur["panel"], "state": cur["state"]}
+
+
+def panel_backup(trigger="manual"):
+    """Respalda la configuración del panel. → dict con el resultado. Lanza Fail."""
+    cfg_all = load()
+    dest = panel_dest(cfg_all)
+    if not ready(dest):
+        raise Fail("Configura primero un servidor de respaldos")
+    if not _run_lock.acquire(blocking=False):
+        raise Fail("Ya hay un respaldo o una restauración en curso; espera a que termine")
+    with _lock:
+        _logs[PANEL] = deque(maxlen=300)
+        _status[PANEL] = {"busy": "respaldo", "step": "Preparando"}
+    t0, host = time.time(), panel_host()
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    host_path = f"{base(dest)}/{PANEL}/{host}"
+    work = f"{host_path}/{stamp}.partial"
+    stack, linked, tmp = ExitStack(), False, None
+    try:
+        _step(PANEL, f"Respaldo de la configuración del panel ({host}, {trigger}) hacia «{dest['name']}»: {describe(dest)}")
+        data, names = build_panel_archive()
+        _log(PANEL, f"{len(names)} archivos: " + ", ".join(names))
+        fd, tmp = tempfile.mkstemp(prefix="mp-panel-")  # 0600: lleva secretos
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        stack.enter_context(connected(dest))
+        linked = True
+        rsh(dest, f"mkdir -p -- {q(host_path)} && rm -rf -- {q(host_path)}/*.partial && mkdir -- {q(work)}")
+        _step(PANEL, "Enviando panel.tar.gz")
+        size, sha = push(dest, ["cat", tmp], f"{work}/panel.tar.gz")
+        from . import __version__
+        manifest = {"panel": host, "created": stamp, "trigger": trigger, "version": __version__, "items": names,
+                    "files": {"panel.tar.gz": {"size": size, "sha256": sha}}}
+        with open(tmp, "wb") as f:
+            f.write(json.dumps(manifest, indent=2).encode())
+        push(dest, ["cat", tmp], f"{work}/manifest.json")
+        rsh(dest, f"mv -- {q(work)} {q(host_path + '/' + stamp)}")
+        removed = [b["name"] for b in list_panel(dest) if b["host"] == host][panel_settings(cfg_all)["keep"]:]
+        if removed:
+            rsh(dest, "rm -rf -- " + " ".join(q(f"{host_path}/{s}") for s in removed), timeout=300)
+        stack.close()
+        _step(PANEL, f"Listo: {stamp} ({_human(size)}, {round(time.time() - t0)} s)" +
+              (f"; se borraron {len(removed)} respaldos antiguos" if removed else ""))
+        update(lambda c: c["state"].__setitem__(PANEL, {"last_t": time.time(), "last_ok": True, "last_error": "",
+                                                        "last_name": stamp, "last_size": size, "trigger": trigger,
+                                                        "dest_name": dest["name"]}))
+        return {"ok": True, "name": stamp, "size": size, "files": len(names)}
+    except Exception as e:
+        msg = str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}"
+        _log(PANEL, "ERROR: " + msg)
+        if linked:
+            try:
+                rsh(dest, f"rm -rf -- {q(work)}", timeout=60)
+            except Fail:
+                pass
+        update(lambda c: c["state"].__setitem__(PANEL, {**(c["state"].get(PANEL) or {}), "last_t": time.time(),
+                                                        "last_ok": False, "last_error": msg[:500], "trigger": trigger,
+                                                        "dest_name": dest["name"]}))
+        _notify_panel(dest, msg)
+        raise Fail(msg)
+    finally:
+        try:
+            stack.close()
+        except Exception:
+            pass
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        with _lock:
+            _status.pop(PANEL, None)
+        _run_lock.release()
+
+
+def _notify_panel(dest, text):
+    try:
+        from . import notify
+        notify.event("backup_fail", "Falló el respaldo de la configuración del panel", "Se reintentará en una hora.",
+                     key="backup_fail:_panel", cooldown=6 * 3600, pre=text, link="/respaldos-apps/",
+                     sections=[{"rows": [("Servidor", f"{dest['name']} · {describe(dest)}")]}])
+    except Exception:
+        pass
+
+
+def list_panel(dest):
+    """Respaldos del panel de todos los servidores (host) que respaldan en `dest`, del más nuevo al más viejo."""
+    with connected(dest):
+        out = rsh(dest, f"cd -- {q(base(dest) + '/' + PANEL)} 2>/dev/null || exit 0; for d in */*/; do d=${{d%/}}; "
+                        f"case $d in *.partial|'*/*') continue;; esac; printf '%s\\t' \"$d\"; du -sk -- \"$d\" | cut -f1; done",
+                  timeout=60)
+    items = []
+    for line in out.splitlines():
+        path, _, kb = line.partition("\t")
+        host, _, stamp = path.partition("/")
+        if HOST_DIR_RE.fullmatch(host) and STAMP_RE.fullmatch(stamp) and kb.strip().isdigit():
+            items.append({"host": host, "name": stamp, "size": int(kb) * 1024,
+                          "t": datetime.strptime(stamp, "%Y%m%d-%H%M%S").timestamp()})
+    return sorted(items, key=lambda x: (x["name"], x["host"]), reverse=True)
+
+
+def _panel_path(dest, host, stamp):
+    if not HOST_DIR_RE.fullmatch(host or "") or not STAMP_RE.fullmatch(stamp or ""):
+        raise Fail("Respaldo inválido")
+    return f"{base(dest)}/{PANEL}/{host}/{stamp}"
+
+
+def delete_panel(dest, host, stamp):
+    path = _panel_path(dest, host, stamp)
+    with connected(dest):
+        rsh(dest, f"rm -rf -- {q(path)}", timeout=120)
+
+
+def _restart_panel(delay=3):
+    """Reinicia el servicio para que todo lo restaurado se lea de nuevo (systemd lo hace aunque muramos)."""
+    if os.environ.get("MATIPANEL_NO_RESTART") == "1":
+        return
+    threading.Timer(delay, lambda: D._run(["systemctl", "--no-block", "restart", "matipanel.service"], timeout=30)).start()
+
+
+def panel_restore(dest_id, host, stamp):
+    """Restaura la configuración del panel desde un respaldo (de este servidor o de otro) y reinicia el panel."""
+    dest = find_dest(load(), dest_id)
+    if not ready(dest):
+        raise Fail("Ese servidor de respaldos no existe")
+    rdir = _panel_path(dest, host, stamp)
+    if not _run_lock.acquire(blocking=False):
+        raise Fail("Ya hay un respaldo o una restauración en curso; espera a que termine")
+    with _lock:
+        _logs[PANEL] = deque(maxlen=300)
+        _status[PANEL] = {"busy": "restauración", "step": "Preparando"}
+    try:
+        _step(PANEL, f"Restaurando la configuración del panel desde {host}/{stamp} de «{dest['name']}»")
+        with connected(dest):
+            try:
+                m = json.loads(_read_remote(dest, f"{rdir}/manifest.json", 1024 * 1024))
+            except ValueError:
+                raise Fail("El respaldo no tiene un manifest.json válido")
+            data = _read_remote(dest, f"{rdir}/panel.tar.gz", PANEL_ARCHIVE_MAX)
+        want = ((m.get("files") or {}).get("panel.tar.gz") or {}).get("sha256")
+        if not want or hashlib.sha256(data).hexdigest() != want:
+            raise Fail("panel.tar.gz no coincide con su huella del manifest.json (archivo dañado o incompleto)")
+        files = read_panel_archive(data)
+        if not files:
+            raise Fail("El respaldo no contiene archivos de configuración")
+        _step(PANEL, f"Escribiendo {len(files)} archivos")
+        for arc, content in sorted(files.items()):
+            root, rel = panel_member(arc)
+            if arc == "data/appbackup.json":
+                try:
+                    old = json.loads(content.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    _log(PANEL, "appbackup.json del respaldo ilegible: se conserva el actual")
+                    continue
+                with _lock:
+                    save(merge_backup_config(load(), old))
+                _log(PANEL, "Servidores de respaldo y programaciones combinados (los de este panel se conservan)")
+                continue
+            _safe_write(root, rel, content, 0o644 if arc == "etc/cert.pem" else 0o600)
+            _log(PANEL, f"  {arc}")
+        if "data/backups.json" in files:
+            try:  # el cron de los respaldos de carpetas se genera desde backups.json
+                from .modules import backups as BK
+                BK.write_cron(BK.load_jobs())
+            except Exception as e:
+                _log(PANEL, f"AVISO: no se pudo regenerar el cron de Respaldos: {e}")
+        _step(PANEL, f"Configuración restaurada (versión del respaldo: {m.get('version', '?')}). "
+                     "El panel se reinicia en unos segundos: vuelve a cargar la página.")
+        _restart_panel()
+        return {"ok": True, "files": len(files)}
+    except Exception as e:
+        msg = str(e) if isinstance(e, Fail) else f"{type(e).__name__}: {e}"
+        _log(PANEL, "ERROR: " + msg)
+        raise Fail(msg)
+    finally:
+        with _lock:
+            _status.pop(PANEL, None)
+        _run_lock.release()
+
+
 # ── Programador ──────────────────────────────────────────────────────────
 
 def due(settings, state, now):
@@ -1030,6 +1364,11 @@ def _scheduler():
                         except Fail:
                             pass
                         cfg = load()
+                if due(panel_settings(cfg), cfg["state"].get(PANEL) or {}, now):
+                    try:
+                        panel_backup("programado")
+                    except Fail:
+                        pass
         except Exception:
             pass
         time.sleep(60)
@@ -1124,4 +1463,21 @@ if __name__ == "__main__":
     for k, v in (("name", "otra"), ("branch", "x;y"), ("repo", "file:///etc"), ("db_name", "a'b"), ("persist", ["../x"]),
                  ("php", "5.6"), ("port", "8081"), ("hostname", "-x"), ("migrate_cmd", "sh -c x"), ("php_ext", ["a b"])):
         assert check_app_config({**good, k: v}, "app1"), k
+    # Configuración del panel: lista blanca de nombres dentro del tar
+    assert panel_member("data/2fa.json") == (PANEL_DIR, "2fa.json") and panel_member("etc/key.pem") == (PANEL_ETC, "key.pem")
+    assert panel_member("data/stacks/web/.env") == (PANEL_DIR, "stacks/web/.env")
+    for bad in ("data/metrics.db", "data/apps/x/env", "data/../etc/shadow", "/etc/passwd", "etc/../../root/x",
+                "data/stacks/../x/.env", "data/stacks/web/html/index.html", "data/.smb-abc.cred", "data/stacks/Web/.env"):
+        assert panel_member(bad) is None, bad
+    # Restaurar appbackup.json: los servidores de aquí mandan; el mismo servidor con otro id se reutiliza
+    here = {"id": "aaaa1111", "name": "nuevo", "type": "ssh", "host": "10.0.0.9", "port": 22, "user": "r", "path": "/srv/r"}
+    old_cfg = {"dests": [{**here, "id": "bbbb2222", "name": "viejo"},
+                         {"id": "cccc3333", "name": "win", "type": "smb", "host": "w1", "port": 445, "share": "R", "path": "",
+                          "domain": "D", "user": "u", "password": "p"}],
+               "apps": {"erp": {"dest": "bbbb2222", "schedule": "weekly", "time": "03:00", "keep": 5}, "../x": {}},
+               "panel": {"enabled": True, "dest": "cccc3333"}}
+    mg = merge_backup_config({"dests": [here], "apps": {}, "panel": {}, "state": {"erp": {"last_ok": True}}}, old_cfg)
+    assert [d["id"] for d in mg["dests"]] == ["aaaa1111", "cccc3333"] and mg["dests"][1]["password"] == "p"
+    assert mg["apps"]["erp"]["dest"] == "aaaa1111" and mg["apps"]["erp"]["keep"] == 5 and "../x" not in mg["apps"]
+    assert mg["panel"]["enabled"] and mg["panel"]["dest"] == "cccc3333" and mg["state"] == {"erp": {"last_ok": True}}
     print("ok")

@@ -16,7 +16,7 @@ Este módulo publica aplicaciones **Laravel** (y [otros proyectos PHP](#proyecto
 
 Los despliegues de todo el servidor se hacen **de a uno**, en orden de llegada. Si el panel se reinicia en medio de uno, ese despliegue queda como **Falló** y los que esperaban en la cola continúan.
 
-> **Nota:** Todo pasa en la red interna. No se usan certificados de Let's Encrypt: las aplicaciones se sirven por HTTP.
+> **Nota:** Las aplicaciones se sirven por HTTP. Si tienen nombre, puedes activar **[HTTPS](#https)** en cada una: Let's Encrypt (servidores con IP pública), autofirmado (red interna) o un certificado propio.
 
 ## Requisitos
 
@@ -70,6 +70,7 @@ Comprueba desde un equipo de la red: `nslookup prueba.apps.empresa.local` debe r
 | Puerto | Para qué |
 |---|---|
 | **80/tcp** | Nombres internos (`miapp.apps.empresa.local`). |
+| **443/tcp** | Nombres internos con [HTTPS](#https). |
 | **8081–8999/tcp** | Puertos propios de las aplicaciones (puedes abrir solo los que uses). |
 
 En el [Firewall](20-firewall.md) del panel agrega reglas para esos puertos, limitadas a la red interna si es posible. Con UFW desde la terminal: `sudo ufw allow from 10.0.0.0/8 to any port 80 proto tcp` y `sudo ufw allow from 10.0.0.0/8 to any port 8081:8999 proto tcp`.
@@ -100,7 +101,7 @@ En el [Firewall](20-firewall.md) del panel agrega reglas para esos puertos, limi
 
 Si cierras el asistente a la mitad, la aplicación queda como **Borrador** en la lista; pulsa **Continuar** para terminarla o **Eliminar** para descartarla.
 
-> **¿El proyecto ya está en producción en la carpeta de Apache (`/var/www/...`)?** Sigue la guía [Migrar proyectos existentes a Despliegues](60-migrar-proyectos.md): subirlo a GitHub, conservar la `APP_KEY`, usar o copiar la base y los archivos subidos, y cambiar el tráfico sin cortes.
+> **¿El proyecto ya está en producción en la carpeta de Apache (`/var/www/...`)?** Créalo sin marcar **Desplegar al terminar** y usa la pestaña **Importar** de la app: trae el `.env` (con su `APP_KEY`), la base de datos y los archivos subidos. La guía completa está en [Migrar proyectos existentes a Despliegues](60-migrar-proyectos.md).
 
 ### Agregar la clave de despliegue en GitHub
 
@@ -220,6 +221,7 @@ En **Configuración** puedes cambiar el repositorio, la rama, el puerto público
 | Cambio | Cuándo se aplica |
 |---|---|
 | Puerto público o nombre interno | Al guardar (se reescribe Nginx; si `nginx -t` falla, no se guarda). |
+| HTTPS | Al pulsar **Aplicar HTTPS** en su tarjeta (ver [HTTPS](#https)). |
 | Servicios, memoria, CPUs, puerto interno, ajustes de `php.ini` | Al pulsar **Aplicar ahora** (recrea contenedores sin compilar). |
 | Repositorio, rama, versión de PHP, extensiones, paquetes del sistema | En el próximo despliegue (se compila una imagen nueva). |
 
@@ -263,6 +265,25 @@ El nombre interno (por ejemplo `quetzal.local`) se atiende en el puerto 80. Si e
 Si el puerto 80 lo ocupa otro programa que no es Apache ni Nginx, el despliegue se detiene con un aviso: quita el nombre interno o libera el puerto.
 
 > **Recuerda:** el nombre tiene que apuntar a la IP del servidor: un registro en tu DNS interno o, para probar, una línea en el archivo `hosts` de tu equipo (`192.100.10.64 quetzal.local`).
+
+### HTTPS
+
+La tarjeta **HTTPS** de **Configuración** cifra la app con un certificado. Necesita un **Nombre interno** (el certificado es para ese nombre) y que la app esté desplegada. Elige el **Certificado** y pulsa **Aplicar HTTPS**:
+
+| Certificado | Cuándo usarlo | Qué hace el panel |
+|---|---|---|
+| **Let's Encrypt** | El servidor tiene **IP pública** y el nombre es un dominio real que apunta a ella (por ejemplo, un VPS en Oracle Cloud). | Instala `certbot` si falta, valida el dominio por el puerto 80 y pide el certificado. Se **renueva solo** (el temporizador de certbot) y recarga Nginx o Apache al renovarse. El **Correo** es opcional: Let's Encrypt avisa ahí si una renovación falla. |
+| **Autofirmado** | Red interna, sin Internet. | Crea un certificado para el nombre, válido 825 días. El navegador avisa «No es seguro» la primera vez: es normal en certificados autofirmados. Si faltan menos de 30 días para que venza, **Aplicar HTTPS** crea otro. |
+| **Certificado propio** | Tienes uno de la **CA de tu Active Directory**, uno comprado o uno comodín (`*.empresa.local`). | Pega el certificado en PEM (el del sitio y debajo los intermedios) y su clave privada **sin contraseña**. El panel comprueba que la clave corresponda, que sea para el nombre de la app y que no esté vencido. Para cambiarlo, pega el nuevo; vacío conserva el actual. |
+
+- **Redirigir HTTP a HTTPS** (activado por defecto) manda a `https://nombre` las visitas por `http://nombre` **y** las del puerto propio (`http://servidor:8081`). La ruta `/.well-known/acme-challenge/` nunca se redirige, para que Let's Encrypt pueda renovar.
+- Funciona con **Nginx** o con **Apache** en los puertos 80 y 443. Con Apache, el panel agrega el `VirtualHost *:443` a su sitio `matipanel-app-<app>.conf` y activa los módulos `ssl` y `headers`. Si el 443 lo usa otro programa, no se aplica y el panel dice cuál.
+- Pon `APP_URL=https://nombre` en **Entorno** (el panel te lo recuerda) y, si la app genera enlaces con `http://`, haz que Laravel confíe en el proxy (ver el consejo de **Variables de entorno**). El panel le pasa a la app `X-Forwarded-Proto: https` y el puerto 443.
+- **Si cambias el Nombre interno**, el HTTPS se desactiva solo (el certificado era del nombre anterior): vuelve a aplicarlo.
+- Elegir **Sin HTTPS** y pulsar **Quitar HTTPS** vuelve a HTTP; con Let's Encrypt también se borra el certificado, para que su renovación no falle cada día.
+- Los certificados se vigilan en [Notificaciones](33-notificaciones.md): avisa si alguno está por vencer.
+
+> **Importante (Oracle Cloud y otros VPS):** Let's Encrypt entra desde Internet. Abre los puertos **80 y 443** en la **Security List** de la VCN **y** en el firewall del servidor (`sudo iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT`, lo mismo con 443, y `sudo netfilter-persistent save`). El nombre debe resolver a la **IP pública** (por ejemplo, `139.177.96.232`), no a la privada.
 
 ### Usar tu propio Dockerfile
 

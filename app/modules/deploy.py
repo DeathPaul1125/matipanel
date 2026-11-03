@@ -8,11 +8,13 @@ GitHub (X-Hub-Signature-256), un límite por IP y un tope de 1 MB.
 """
 import json
 import os
+import re
 import shutil
 from urllib.parse import parse_qs
 from flask import Blueprint, render_template, jsonify, request, redirect, url_for, abort
 from flask_login import login_required
 from .. import deployer as D
+from .. import importer as IM
 from ..distro import detect
 from ..util import run, RateLimiter
 from .packages import apt_get
@@ -24,6 +26,7 @@ LOG_CHUNK = 256 * 1024
 _hook_rate = RateLimiter(max_fails=60, window=60)     # peticiones por IP y minuto
 _hook_bad = RateLimiter(max_fails=10, window=600)     # firmas inválidas por IP
 
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PACKAGES = {"docker": ["docker.io"], "compose": ["docker-compose"], "buildx": ["docker-buildx"],
             "git": ["git"], "nginx": ["nginx"]}
 COMPOSE_FALLBACK = ["docker-compose-plugin"]  # nombre en el repositorio oficial de Docker
@@ -610,11 +613,16 @@ def config(name):
     if error:
         return _err(error)
     new = {**cfg, **opts}
+    tls_off = bool(cfg.get("tls")) and new.get("hostname") != cfg.get("hostname")
+    if tls_off:  # el certificado es para el nombre anterior
+        opts["tls"] = new["tls"] = ""
     if new.get("active_slot") and (new["port"] != cfg["port"] or new["hostname"] != cfg.get("hostname")):
         ok, out = D.apply_nginx(name, new, D.slot_port(new, new["active_slot"]))
         if not ok:
             return _err("No se guardó: " + out[-1500:], 409)
     D.update_config(name, lambda c: c.update(opts))
+    if tls_off and cfg.get("tls") == "letsencrypt":
+        D.remove_le(name)
     svc_keys = ("database", "redis", "worker", "scheduler", "mem_mb", "cpus", "container_port",
                 "docroot", "env_path", "persist", "php_ini")
     changed = any(new.get(k) != cfg.get(k) for k in svc_keys)
@@ -624,7 +632,92 @@ def config(name):
         except (OSError, ValueError) as e:
             return _err(f"Guardado, pero no se pudo regenerar compose: {e}", 500)
     rebuild = any(new.get(k) != cfg.get(k) for k in ("repo", "branch", "php", "php_ext", "kind", "apt_pkgs"))
-    return jsonify({"ok": True, "needs_apply": changed and bool(new.get("active_slot")), "needs_deploy": rebuild})
+    return jsonify({"ok": True, "needs_apply": changed and bool(new.get("active_slot")), "needs_deploy": rebuild,
+                    "tls_off": tls_off})
+
+
+@deploy_bp.route("/api/apps/<name>/import/scan", methods=["POST"])
+@login_required
+def import_scan(name):
+    """Analiza una carpeta del servidor con un proyecto existente (sin ruta: lista sugerencias)."""
+    cfg = _cfg(name)
+    path = str(_data().get("path") or "").strip()
+    if not path:
+        return jsonify({"ok": True, "candidates": IM.candidates()})
+    src, error = IM.valid_source(path)
+    if error:
+        return _err(error)
+    return jsonify({"ok": True, "scan": IM.scan(src, cfg), "deployed": bool(cfg.get("active_slot"))})
+
+
+@deploy_bp.route("/api/apps/<name>/import", methods=["POST"])
+@login_required
+def import_run(name):
+    """Pasos elegidos del asistente: env (antes de desplegar), db y storage (con la app desplegada)."""
+    cfg = _cfg(name)
+    if _busy(name):
+        return _err("Hay un despliegue en curso; espera a que termine", 409)
+    d = _data()
+    src, error = IM.valid_source(d.get("path"))
+    if error:
+        return _err(error)
+    steps = [s for s in ("env", "db", "storage") if s in (d.get("steps") or [])]
+    if not steps:
+        return _err("Elige al menos un paso")
+    if any(s in steps for s in ("db", "storage")) and not cfg.get("active_slot"):
+        return _err("Para copiar la base y los archivos la app debe estar desplegada: copia primero el .env y despliega")
+    results = []
+    for step in steps:
+        if step == "env":
+            ok, msg = IM.merge_env(name, cfg, src)
+        elif step == "db":
+            pairs = D.parse_env(IM.read_old_env(src) or "")[0]
+            old = dict(pairs)
+            if old.get("DB_HOST", "").strip() not in IM.LOCAL_HOSTS:
+                ok, msg = False, "La base vieja no está en este servidor"
+            else:
+                ok, msg = IM.import_db(name, cfg, old.get("DB_DATABASE", "").strip())
+        else:
+            ok, msg = IM.copy_storage(name, src)
+        results.append({"step": step, "ok": ok, "msg": msg})
+    return jsonify({"ok": all(r["ok"] for r in results), "results": results,
+                    "needs_apply": "env" in steps and bool(cfg.get("active_slot"))})
+
+
+@deploy_bp.route("/api/apps/<name>/tls", methods=["GET", "POST"])
+@login_required
+def tls(name):
+    """HTTPS de la app: estado (GET) o activar/cambiar/quitar (POST)."""
+    cfg = _cfg(name)
+    if request.method == "POST":
+        if _busy(name):
+            return _err("Hay un despliegue en curso; espera a que termine", 409)
+        d = _data()
+        mode, email = d.get("mode", ""), str(d.get("email") or "").strip()
+        if mode not in D.TLS_MODES:
+            return _err("Modo de HTTPS inválido")
+        if email and (len(email) > 254 or not EMAIL_RE.fullmatch(email)):
+            return _err("Correo inválido")
+        log = ""
+        if mode == "letsencrypt" and not shutil.which("certbot"):
+            if detect()["pkg"] != "apt":
+                return _err("Instala certbot para usar Let's Encrypt")
+            ok, out, msg = _apt_install(["certbot"])
+            if not ok:
+                return _err(f"No se pudo instalar certbot: {msg}", 500, output=out[-3000:])
+            log = "certbot instalado.\n"
+        ok, out = D.set_tls(name, mode, email, d.get("redirect", True) is not False,
+                            str(d.get("cert") or ""), str(d.get("key") or ""))
+        if not ok:
+            return _err(out[-3000:], 409)
+        cfg = D.load_config(name)
+        log += out
+    files = D.tls_files(name, cfg)
+    info = D.cert_info(files[0]) if files else None
+    return jsonify({"ok": True, "mode": cfg.get("tls") or "", "redirect": cfg.get("tls_redirect", True) is not False,
+                    "email": cfg.get("tls_email", ""), "hostname": cfg.get("hostname", ""), "cert": info,
+                    "modes": D.TLS_MODES, "deployed": bool(cfg.get("active_slot")),
+                    "certbot": bool(shutil.which("certbot")), "output": log if request.method == "POST" else ""})
 
 
 @deploy_bp.route("/api/apps/<name>/php")

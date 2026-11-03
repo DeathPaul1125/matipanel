@@ -65,7 +65,7 @@ El panel acepta el código actual y también el inmediatamente anterior o siguie
 
 Cada código sirve **una sola vez**. Táchalo de tu lista.
 
-> **Nota:** No hay un botón para generar solo códigos nuevos. Para tener una lista nueva, desactiva el 2FA y vuelve a configurarlo (ver [Cambiar de teléfono](#cambiar-de-teléfono)).
+> **Nota:** No hay un botón para generar solo códigos nuevos. Para tener una lista nueva, desactiva el 2FA y vuelve a configurarlo (ver [Cambiar de teléfono](#cambiar-de-telefono)).
 
 ## Desactivar 2FA
 

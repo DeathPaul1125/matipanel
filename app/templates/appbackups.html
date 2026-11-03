@@ -50,11 +50,39 @@
     Si uno falla se reintenta a la hora y, si lo activaste, te llega un correo (<a href="{{ url_for('notify.index') }}">Notificaciones</a>).</p>
 </div>
 
+<div class="card" id="panel-card">
+  <div class="card-head"><h3>Configuración del panel</h3>
+    <div class="ab-acts"><button class="btn btn-sm btn-primary" id="pn-now" onclick="panelBackupNow()">Respaldar ahora</button></div></div>
+  <p class="small muted">Respalda la configuración de este MatiPanel (<span class="mono" id="pn-host"></span>): usuarios con 2FA, permisos, notificaciones y umbrales,
+    apariencia, monitor, multiservidor, respaldos, stacks y el certificado HTTPS. No incluye las apps (tienen sus propios respaldos) ni los historiales.
+    <b>Contiene secretos</b> (2FA, contraseñas de correo y de los servidores Windows): protege el servidor de respaldos.
+    <a href="{{ url_for('help.page', slug='57-respaldos-apps') }}#configuracion-del-panel">Qué incluye</a></p>
+  <div class="ab-sched" style="align-items: flex-end; gap: 12px; margin-bottom: 8px">
+    <label class="form-row"><span>Servidor</span><select class="input ab-in" id="pn-dest"></select></label>
+    <label class="form-row"><span>Programación</span><select class="input ab-in" id="pn-schedule"></select></label>
+    <label class="form-row"><span>Hora</span><input class="input ab-in ab-time" id="pn-time" type="time"></label>
+    <label class="form-row"><span>Conservar</span><input class="input ab-in ab-keep" id="pn-keep" type="number" min="1" max="365"></label>
+    <label class="dlg-check"><input type="checkbox" id="pn-enabled"> Respaldo programado activo</label>
+    <button class="btn btn-sm" onclick="panelSave()">Guardar</button>
+  </div>
+  <div class="small" id="pn-last"></div>
+  <div id="pn-busy" class="ab-busy" hidden></div>
+  <h4>Respaldos de configuración en el servidor <button class="btn btn-sm" onclick="panelList()">Actualizar</button></h4>
+  <p class="small muted">Aparecen los de <b>todos</b> los paneles que respaldan en ese servidor: en un servidor nuevo, restaura aquí la configuración del anterior
+    y después recupera sus apps en «Recuperación ante desastres».</p>
+  <table class="lx" id="pn-table" data-table data-table-filter="off">
+    <thead><tr><th>Panel</th><th>Fecha</th><th>Tamaño</th><th data-nosort>Acciones</th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">—</td></tr></tbody>
+  </table>
+  <pre class="terminal ab-log" id="pn-log" hidden>—</pre>
+</div>
+
 <div class="card" id="dr">
   <div class="card-head"><h3>Recuperación ante desastres</h3>
     <div class="ab-acts"><select class="input ab-in" id="dr-dest" title="Servidor de respaldos"></select>
       <button class="btn btn-sm" onclick="drScan()">Buscar apps en el servidor</button></div></div>
-  <p class="small muted">Si este servidor se perdió: instala MatiPanel en uno nuevo, agrega arriba el mismo servidor de respaldos y recupera cada app.
+  <p class="small muted">Si este servidor se perdió: instala MatiPanel en uno nuevo, agrega arriba el mismo servidor de respaldos,
+    restaura la <a href="#panel-card">configuración del panel</a> (opcional) y recupera cada app.
     Se recrea con su configuración original, se restauran la base de datos y los archivos, y se despliega desde GitHub.
     <a href="{{ url_for('help.page', slug='57-respaldos-apps') }}#recuperacion-ante-desastres">Guía paso a paso</a></p>
   <div id="dr-warn" class="flash flash-error" hidden></div>
@@ -167,7 +195,101 @@ async function load() {
   renderDests();
   renderApps();
   fillDrDest();
+  renderPanel();
   if (DETAIL) loadStatus();
+}
+
+// ── Configuración del panel ──
+let PN_FIRST = true, pnWasBusy = false;
+function renderPanel() {
+  const p = OV.panel, s = p.settings, st = p.state;
+  $('pn-host').textContent = p.host;
+  $('pn-now').disabled = !OV.configured || !!(p.busy && p.busy.busy);
+  const card = $('panel-card');
+  if (!card.contains(document.activeElement) || !document.activeElement.matches('input, select')) {
+    $('pn-dest').innerHTML = OV.dests.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('') || '<option value="">(sin servidores)</option>';
+    $('pn-dest').value = s.dest;
+    $('pn-schedule').innerHTML = Object.entries(SCHEDULES).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('');
+    $('pn-schedule').value = s.schedule;
+    $('pn-time').value = s.time; $('pn-time').hidden = s.schedule === '6h';
+    $('pn-keep').value = s.keep;
+    $('pn-enabled').checked = s.enabled;
+  }
+  $('pn-last').innerHTML = 'Último respaldo: ' + (st.last_t
+    ? (st.last_ok ? `<span class="pill ok">Correcto</span> ${escapeHtml(fmtDate(st.last_t))} · ${escapeHtml(fmtBytes(st.last_size || 0))}`
+                  : `<span class="pill err">Falló</span> ${escapeHtml(fmtDate(st.last_t))} <span class="muted">${escapeHtml((st.last_error || '').slice(0, 160))}</span>`)
+      + (st.dest_name ? ` <span class="muted">en ${escapeHtml(st.dest_name)}</span>` : '')
+    : '<span class="muted">Nunca</span>');
+  if (PN_FIRST && OV.configured) { PN_FIRST = false; panelList(); }
+  if (p.busy && p.busy.busy && !pnWasBusy) panelFollow();
+}
+$('pn-schedule').addEventListener('change', () => { $('pn-time').hidden = $('pn-schedule').value === '6h'; });
+$('pn-dest').addEventListener('change', () => panelList());
+async function panelSave() {
+  const d = await postJSON(API + 'panel/settings', {dest: $('pn-dest').value, schedule: $('pn-schedule').value, time: $('pn-time').value,
+    keep: $('pn-keep').value, enabled: $('pn-enabled').checked});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo guardar', {title: 'Error', icon: 'error'});
+  ui.toast('Programación del respaldo del panel guardada');
+  document.activeElement.blur(); load();
+}
+async function panelBackupNow() {
+  const d = await postJSON(API + 'panel/backup', {});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo iniciar', {title: 'Error', icon: 'error'});
+  ui.toast('Respaldo de la configuración iniciado', 'info');
+  pnWasBusy = true; setTimeout(panelFollow, 500);
+}
+async function panelList() {
+  const tb = $('pn-table').tBodies[0], dest = $('pn-dest').value;
+  if (!dest) { tb.innerHTML = '<tr><td colspan="4" class="muted center">Agrega primero un servidor de respaldos</td></tr>'; return; }
+  tb.innerHTML = '<tr><td colspan="4" class="muted center">Consultando el servidor de respaldos…</td></tr>';
+  const d = await getJSON(API + 'panel/list?dest=' + encodeURIComponent(dest));
+  if (dest !== $('pn-dest').value) return;
+  if (!d.ok) { tb.innerHTML = `<tr><td colspan="4" class="muted center">${escapeHtml(d.error || 'Error')}</td></tr>`; return; }
+  if (!d.backups.length) { tb.innerHTML = '<tr><td colspan="4" class="muted center">Todavía no hay respaldos de configuración en este servidor</td></tr>'; return; }
+  tb.innerHTML = d.backups.map(b => `<tr><td><b class="mono">${escapeHtml(b.host)}</b>${b.host === d.host ? ' <span class="pill mute">este panel</span>' : ''}</td>
+    <td data-sort="${b.t}">${escapeHtml(fmtDate(b.t))} <span class="small muted mono">${escapeHtml(b.name)}</span></td>
+    <td data-sort="${b.size}">${escapeHtml(fmtBytes(b.size))}</td>
+    <td class="nowrap"><button class="btn btn-sm" onclick="panelRestore(${jsArg(b.host)}, ${jsArg(b.name)})">Restaurar…</button>
+      <button class="btn btn-sm btn-danger" onclick="panelDelete(${jsArg(b.host)}, ${jsArg(b.name)})">Eliminar</button></td></tr>`).join('');
+}
+async function panelRestore(host, stamp) {
+  const r = await ui.form({title: `Restaurar la configuración de ${host} · ${fmtDate(stampTime(stamp))}`,
+    text: 'Se reemplazan la configuración, los usuarios con 2FA, los permisos, las notificaciones, los stacks y el certificado HTTPS de este panel ' +
+          'por los del respaldo. Los servidores de respaldo que ya tienes aquí se conservan. Al terminar, el panel se reinicia y tendrás que volver a iniciar sesión.',
+    fields: [{name: 'confirm', label: `Escribe «${host}» para confirmar`, required: true}], confirmText: 'Restaurar', danger: true});
+  if (!r) return;
+  const d = await postJSON(API + 'panel/restore', {dest: $('pn-dest').value, host, stamp, confirm: r.confirm});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo iniciar', {title: 'Error', icon: 'error'});
+  ui.toast('Restauración de la configuración iniciada', 'info');
+  pnWasBusy = true; setTimeout(panelFollow, 500);
+}
+async function panelDelete(host, stamp) {
+  if (!await ui.confirm(`¿Eliminar el respaldo de configuración ${stamp} de «${host}»?`, {title: 'Eliminar respaldo', danger: true, confirmText: 'Eliminar'})) return;
+  const d = await postJSON(API + 'panel/delete', {dest: $('pn-dest').value, host, stamp});
+  if (!d.ok) return ui.alert(d.error || 'No se pudo eliminar', {title: 'Error', icon: 'error'});
+  panelList();
+}
+async function panelFollow() {
+  const d = await getJSON(API + 'panel/status');
+  if (!d.ok) {  // el panel se está reiniciando tras restaurar
+    if (pnWasBusy) { $('pn-busy').hidden = false; $('pn-busy').textContent = 'El panel se está reiniciando…'; setTimeout(() => location.reload(), 4000); }
+    return;
+  }
+  const busy = d.busy && d.busy.busy;
+  $('pn-busy').hidden = !busy;
+  if (busy) $('pn-busy').innerHTML = `<span class="led sm warn live"></span> ${escapeHtml(d.busy.busy)} en curso: ${escapeHtml(d.busy.step || '')}`;
+  $('pn-log').hidden = !d.log.length;
+  $('pn-log').textContent = d.log.join('\n');
+  $('pn-log').scrollTop = 1e9;
+  if (busy) { pnWasBusy = true; return setTimeout(panelFollow, 1500); }
+  if (pnWasBusy) {
+    pnWasBusy = false;
+    if (d.log.some(l => l.includes('El panel se reinicia'))) {
+      $('pn-busy').hidden = false; $('pn-busy').textContent = 'Configuración restaurada. El panel se reinicia; la página se recargará sola…';
+      return setTimeout(() => location.reload(), 8000);
+    }
+    panelList(); load();
+  }
 }
 
 function renderDests() {

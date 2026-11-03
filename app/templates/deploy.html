@@ -138,6 +138,7 @@
         <label class="dlg-check" data-kind="laravel"><input type="checkbox" id="wz-scheduler"> Programador de tareas (schedule:work)</label>
         <label class="dlg-check"><input type="checkbox" id="wz-auto" checked> Desplegar solo con cada push a la rama</label>
         <label class="dlg-check"><input type="checkbox" id="wz-now" checked> Desplegar al terminar</label>
+        <span class="dlg-help">¿El proyecto ya funciona en una carpeta de este servidor (<span class="mono">/var/www/…</span>)? Desmárcalo y, al crear la app, usa su pestaña <b>Importar</b> para traer el .env, la base y los archivos.</span>
       </div>
     </div>
 
@@ -173,6 +174,7 @@
   <button class="tab" data-tab="logs">Logs</button>
   <button class="tab" data-tab="artisan" id="tab-artisan">Artisan</button>
   <button class="tab" data-tab="config">Configuración</button>
+  <button class="tab" data-tab="import">Importar</button>
   <button class="tab" data-tab="delete">Eliminar</button>
 </div>
 
@@ -342,6 +344,35 @@
       <div class="form-actions"><button class="btn btn-primary" onclick="saveConfig()">Guardar configuración</button></div>
     </div>
   </div>
+  <div class="card" id="tls-card">
+    <div class="card-head"><h3>HTTPS</h3><span class="small" id="tls-state"></span></div>
+    <p class="small muted" id="tls-need" hidden>Para usar HTTPS la app necesita un <b>Nombre interno</b> (por ejemplo <span class="mono">miapp.empresa.com</span>) y estar desplegada. Escríbelo arriba y guarda.</p>
+    <div id="tls-form">
+      <div class="dp-form2">
+        <label class="form-row"><span>Certificado</span>
+          <select class="input" id="tls-mode" onchange="tlsUI()">
+            <option value="">Sin HTTPS (solo HTTP)</option>
+            <option value="letsencrypt">Let's Encrypt (dominio público, gratis y automático)</option>
+            <option value="self">Autofirmado (red interna)</option>
+            <option value="custom">Certificado propio (CA de la empresa, comprado…)</option>
+          </select></label>
+        <label class="form-row" data-tls="letsencrypt"><span>Correo para avisos de Let's Encrypt (opcional)</span>
+          <input class="input mono" id="tls-email" type="email" placeholder="admin@empresa.com" autocomplete="off"></label>
+      </div>
+      <p class="dlg-help" data-tls="letsencrypt">El nombre debe apuntar a la <b>IP pública</b> de este servidor y los puertos <b>80 y 443</b> deben estar abiertos desde Internet (en Oracle Cloud: Security List e iptables). Se renueva solo antes de vencer. Si certbot no está instalado, se instala.</p>
+      <p class="dlg-help" data-tls="self">Cifra la conexión sin depender de Internet. El navegador mostrará un aviso la primera vez («No es seguro»): es normal en certificados autofirmados. Dura 825 días y se renueva al volver a aplicar.</p>
+      <div data-tls="custom">
+        <p class="dlg-help">Pega el certificado en formato PEM (el del sitio y debajo los intermedios) y su clave privada sin contraseña. Debe ser para el nombre de la app o un comodín (<span class="mono">*.empresa.local</span>). Déjalos vacíos para conservar el actual.</p>
+        <div class="dp-form2">
+          <label class="form-row"><span>Certificado (.crt / .pem)</span><textarea class="input mono dp-key" id="tls-cert" rows="5" placeholder="-----BEGIN CERTIFICATE-----" spellcheck="false"></textarea></label>
+          <label class="form-row"><span>Clave privada (.key)</span><textarea class="input mono dp-key" id="tls-key" rows="5" placeholder="-----BEGIN PRIVATE KEY-----" spellcheck="false"></textarea></label>
+        </div>
+      </div>
+      <label class="dlg-check" data-tls="on"><input type="checkbox" id="tls-redirect" checked> Redirigir HTTP a HTTPS (también las visitas al puerto propio)</label>
+      <div class="form-actions"><button class="btn btn-primary" id="tls-apply" onclick="applyTls()">Aplicar HTTPS</button></div>
+      <pre class="terminal output dp-log" id="tls-out" hidden></pre>
+    </div>
+  </div>
   <div class="grid grid-2">
     <div class="card">
       <h3>Clave de despliegue (SSH)</h3>
@@ -366,6 +397,40 @@
         <button class="btn btn-sm" onclick="toggleSecret()">Mostrar</button>
         <button class="btn btn-sm" data-copy="#wh-secret">Copiar secreto</button>
         <button class="btn btn-sm btn-danger" onclick="regenSecret()">Regenerar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Importar un proyecto que ya está en el servidor -->
+<div data-panel="import" hidden>
+  <div class="card">
+    <h3>Importar un proyecto que ya está en este servidor</h3>
+    <p class="small muted">Para proyectos que hoy se sirven desde una carpeta de Apache (<span class="mono">/var/www/…</span>) con la base en este servidor.
+      El código ya viene de GitHub; aquí se traen el <b>.env</b> (con su <span class="mono">APP_KEY</span>), la <b>base de datos</b> y los <b>archivos subidos</b>.
+      La carpeta y la base viejas no se tocan: el sitio actual sigue funcionando. Guía completa: <a href="/ayuda/60-migrar-proyectos" target="_blank">Migrar proyectos existentes</a>.</p>
+    <div class="dp-form2">
+      <label class="form-row"><span>Carpeta del proyecto</span>
+        <input class="input mono" id="im-path" list="im-cands" placeholder="/var/www/html/miproyecto" autocomplete="off">
+        <datalist id="im-cands"></datalist></label>
+      <div class="form-row"><span>&nbsp;</span><div><button class="btn" onclick="importScan()">Analizar</button></div></div>
+    </div>
+  </div>
+  <div id="im-result" hidden>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Qué se puede importar</h3>
+        <label class="dlg-check"><input type="checkbox" id="im-env"> <b>1 · Copiar el .env</b> <span class="small muted" id="im-env-info"></span></label>
+        <details class="small dp-mt"><summary>Ver qué variables se copian</summary><table class="table small" id="im-env-rows"></table></details>
+        <label class="dlg-check dp-mt"><input type="checkbox" id="im-db"> <b>2 · Copiar la base de datos</b> <span class="small muted" id="im-db-info"></span></label>
+        <label class="dlg-check"><input type="checkbox" id="im-st"> <b>3 · Copiar los archivos subidos</b> <span class="small muted" id="im-st-info"></span></label>
+        <p class="dlg-help" id="im-order"></p>
+        <div class="form-actions"><button class="btn btn-primary" id="im-run" onclick="importRun()">Importar</button></div>
+        <ul class="small" id="im-done"></ul>
+      </div>
+      <div class="card">
+        <h3>Revisar antes de cambiar el tráfico</h3>
+        <ul class="small" id="im-checks"></ul>
       </div>
     </div>
   </div>
@@ -655,6 +720,7 @@ function showTab(tab) {
   if (tab === 'logs') { fillServices(); loadLogs(); }
   if (tab === 'summary') loadContainers();
   if (tab === 'config') { if (!configFilled) fillConfig(); loadSecret(); }
+  if (tab === 'import' && !$('#im-cands').children.length) importCands();
 }
 $('#dp-tabs').addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
 
@@ -972,6 +1038,52 @@ function fillConfig() {
     : 'El repositorio es público por HTTPS: no se usa. Sirve si cambias a la URL SSH (git@github.com:…).';
   $('#wh-url').value = location.origin + INFO.webhook_path;
   $('#del-nginx').textContent = INFO.nginx_file;
+  loadTls();
+}
+
+// HTTPS
+function tlsUI() {
+  const m = $('#tls-mode').value;
+  document.querySelectorAll('[data-tls]').forEach(el => { el.hidden = !(el.dataset.tls === m || (el.dataset.tls === 'on' && m)); });
+  $('#tls-apply').textContent = m ? 'Aplicar HTTPS' : 'Quitar HTTPS';
+}
+function tlsShow(d) {
+  const st = $('#tls-state'), c = d.cert;
+  const ready = !!d.hostname && d.deployed;
+  $('#tls-need').hidden = ready; $('#tls-form').hidden = !ready;
+  if (!d.mode) { st.className = 'small muted'; st.textContent = 'Desactivado: la app se sirve por HTTP'; }
+  else if (!c) { st.className = 'small dp-bad'; st.textContent = d.modes[d.mode] + ': falta el certificado; pulsa Aplicar HTTPS'; }
+  else {
+    const days = c.days_left;
+    st.className = 'small ' + (days !== null && days < 15 ? 'dp-bad' : 'dp-good');
+    st.textContent = `${d.modes[d.mode]} · https://${d.hostname}` + (days !== null ? ` · vence en ${days} días` : '') + (c.issuer ? ` · emisor: ${c.issuer}` : '');
+  }
+  $('#tls-mode').value = d.mode; $('#tls-email').value = d.email || ''; $('#tls-redirect').checked = d.redirect;
+  $('#tls-cert').value = ''; $('#tls-key').value = '';
+  tlsUI();
+}
+async function loadTls() {
+  const d = await getJSON(appApi('tls'));
+  if (d.ok) tlsShow(d);
+}
+async function applyTls() {
+  const mode = $('#tls-mode').value;
+  if (!mode && !await ui.confirm('La app volverá a servirse solo por HTTP.', { title: 'Quitar HTTPS', danger: true, confirmText: 'Quitar' })) return;
+  const out = $('#tls-out'), btn = $('#tls-apply');
+  out.hidden = false; out.textContent = mode === 'letsencrypt' ? 'Pidiendo el certificado a Let\'s Encrypt (puede tardar un minuto)…' : 'Aplicando…';
+  btn.disabled = true;
+  const d = await postJSON(appApi('tls'), { mode, email: $('#tls-email').value.trim(), redirect: $('#tls-redirect').checked,
+    cert: $('#tls-cert').value, key: $('#tls-key').value });
+  btn.disabled = false;
+  out.textContent = d.ok ? (d.output || 'Listo') : (d.error || 'Error') + (d.output ? '\n\n' + d.output : '');
+  if (!d.ok) return showError(d, 'No se aplicó HTTPS');
+  tlsShow(d);
+  ui.toast(mode ? 'HTTPS activo' : 'HTTPS desactivado');
+  if (mode && !/APP_URL=["']?https:/.test(await envText())) ui.toast('Recuerda poner APP_URL=https://' + d.hostname + ' en Entorno', 'info');
+}
+async function envText() {
+  const d = await getJSON(appApi('env'));
+  return (d && d.text) || '';
 }
 async function saveConfig() {
   const c = INFO.config;
@@ -991,6 +1103,7 @@ async function saveConfig() {
   const d = await postJSON(appApi('config'), body);
   if (!d.ok) return showError(d, 'No se guardó');
   ui.toast('Configuración guardada');
+  if (d.tls_off) ui.alert('Cambiaste el nombre de la app y su certificado era para el nombre anterior, así que HTTPS se desactivó. Vuelve a activarlo en la tarjeta HTTPS.', { title: 'HTTPS desactivado', icon: 'warning' });
   configFilled = false;
   await loadInfo();
   if (d.needs_apply) applyNow('Cambiaste servicios o límites. ¿Recrear los contenedores ahora (sin cortes, con la misma imagen)?');
@@ -1023,6 +1136,63 @@ async function regenSecret() {
   ui.toast('Secreto regenerado');
 }
 
+// Importar proyecto existente
+let IMPORT = null;
+async function importCands() {
+  const d = await postJSON(appApi('import/scan'), {});
+  if (d.ok) $('#im-cands').innerHTML = d.candidates.map(c => `<option value="${escapeHtml(c)}">`).join('');
+}
+function mb(b) { return b == null ? '?' : b < 1048576 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1048576).toFixed(1) + ' MB'; }
+async function importScan() {
+  const path = $('#im-path').value.trim();
+  if (!path) return ui.toast('Escribe la carpeta del proyecto', 'info');
+  const d = await postJSON(appApi('import/scan'), { path });
+  if (!d.ok) return showError(d, 'No se pudo analizar');
+  IMPORT = d; const s = d.scan, li = (cls, html) => `<li class="${cls}">${html}</li>`;
+  $('#im-result').hidden = false; $('#im-done').innerHTML = '';
+  const copied = s.env.rows.filter(r => r.copy);
+  $('#im-env').checked = s.env.found; $('#im-env').disabled = !s.env.found;
+  $('#im-env-info').textContent = !s.env.found ? '— la carpeta no tiene .env'
+    : `— ${copied.length} variables` + (s.env.has_key ? ', con la APP_KEY de siempre' : ' (¡sin APP_KEY!)');
+  $('#im-env-rows').innerHTML = s.env.rows.map(r => `<tr><td class="mono">${escapeHtml(r.key)}</td><td class="${r.copy ? 'dp-good' : 'muted'}">${r.copy ? 'se copia' : 'no se copia'}${r.reason ? ' · ' + escapeHtml(r.reason) : ''}</td></tr>`).join('');
+  const db = s.db;
+  $('#im-db').checked = db.importable && d.deployed; $('#im-db').disabled = !db.importable;
+  $('#im-db-info').textContent = db.importable ? `— «${db.source}» del servidor → «${db.target}» de la app (reemplaza sus tablas)` : '— ' + db.why;
+  $('#im-st').checked = s.storage.exists && d.deployed; $('#im-st').disabled = !s.storage.exists;
+  $('#im-st-info').textContent = s.storage.exists ? `— storage/app (${mb(s.storage.bytes)}) al volumen storage` : '— no hay storage/app';
+  $('#im-order').textContent = d.deployed ? 'La app ya está desplegada: después de copiar el .env pulsa «Aplicar ahora» para que lo use.'
+    : 'La app aún no está desplegada. Primero copia el .env, despliega (Desplegar ahora) y vuelve aquí para copiar la base y los archivos.';
+  const checks = [];
+  if (!s.laravel) checks.push(li('dp-bad', 'La carpeta no tiene <span class="mono">artisan</span>: ¿es un proyecto Laravel? Para otros proyectos PHP usa el tipo PHP con carpetas persistentes.'));
+  if (s.git.repo && s.git.pending) checks.push(li('dp-bad', `La carpeta tiene <b>${s.git.pending} cambios sin subir</b> a git. Lo que se despliega viene de GitHub: haz commit y push antes (Paso 1 de la guía).`));
+  if (s.git.repo && s.git.remote) checks.push(li('', `Repositorio de la carpeta: <span class="mono">${escapeHtml(s.git.remote)}</span>; la app usa <span class="mono">${escapeHtml(INFO.config.repo)}</span>.`));
+  if (!s.git.repo) checks.push(li('', 'La carpeta no es un repositorio de git: confirma que el código de GitHub sea el mismo que está en producción.'));
+  if (s.uploads.length) checks.push(li('dp-bad', 'Archivos en <b>public/</b> que no vienen del repositorio (se perderían en cada despliegue): ' + s.uploads.map(u => `<span class="mono">${escapeHtml(u)}</span>`).join(', ') + '. Muévelos a storage (ver la guía).'));
+  if (s.mix) checks.push(li('dp-bad', 'Usa Laravel Mix y <span class="mono">package.json</span> no tiene script <span class="mono">build</span>: agrégalo o el despliegue fallará.'));
+  if (s.php_req) checks.push(li('', `PHP que pide composer.json: <span class="mono">${escapeHtml(s.php_req)}</span> (la app usa ${escapeHtml(INFO.config.php)}).`));
+  s.cron.forEach(c => checks.push(li('', `Cron en <span class="mono">${escapeHtml(c.file)}</span>: <span class="mono">${escapeHtml(c.line)}</span>. Desactívalo al cambiar el tráfico y activa el Programador.`)));
+  s.supervisor.forEach(f => checks.push(li('', `Supervisor: <span class="mono">${escapeHtml(f)}</span>. Desactívalo al cambiar el tráfico y activa el Worker.`)));
+  s.apache.forEach(f => checks.push(li('', `Sitio de Apache: <span class="mono">${escapeHtml(f)}</span>. Desactívalo con a2dissite cuando la app nueva tenga el nombre.`)));
+  if (db.importable === false && INFO.config.database === 'none' && db.host) checks.push(li('', 'La app usa la base del servidor: el .env se copia con <span class="mono">DB_HOST=host.docker.internal</span>. MariaDB debe aceptar conexiones desde Docker (Ayuda → Despliegues → Usar una base de datos de este mismo servidor).'));
+  $('#im-checks').innerHTML = checks.join('') || li('dp-good', 'No se encontró nada más que revisar.');
+}
+async function importRun() {
+  const steps = [['env', '#im-env'], ['db', '#im-db'], ['storage', '#im-st']].filter(([, id]) => $(id).checked && !$(id).disabled).map(([s]) => s);
+  if (!steps.length) return ui.toast('Elige al menos un paso', 'info');
+  if (steps.includes('db') && !await ui.confirm(`Se reemplazarán las tablas de la base «${IMPORT.scan.db.target}» de la app con las de «${IMPORT.scan.db.source}». La base vieja no se modifica.`, { title: 'Copiar la base de datos', danger: true, typed: APP, confirmText: 'Copiar' })) return;
+  const btn = $('#im-run'); btn.disabled = true;
+  const d = await postJSON(appApi('import'), { path: IMPORT.scan.path, steps });
+  btn.disabled = false;
+  if (!d.results) return showError(d, 'No se importó');
+  const names = { env: '.env', db: 'Base de datos', storage: 'Archivos' };
+  $('#im-done').innerHTML = d.results.map(r => `<li class="${r.ok ? 'dp-good' : 'dp-bad'}"><b>${names[r.step]}:</b> ${escapeHtml(r.msg)}</li>`).join('');
+  envLoaded = false;
+  if (d.ok) ui.toast('Importación terminada');
+  if (d.needs_apply) applyNow('Se copió el .env. ¿Recrear los contenedores ahora para que lo usen (sin cortes)?');
+  else if (d.ok && steps.includes('env') && !INFO.config.active_slot && await ui.confirm('El .env ya está listo. ¿Desplegar ahora? Cuando termine, vuelve a esta pestaña para copiar la base y los archivos.', { title: 'Desplegar', confirmText: 'Desplegar ahora', cancelText: 'Más tarde' })) deployNow();
+  if (steps.includes('db') && d.ok) ui.toast('Revisa en Artisan: migrate:status', 'info');
+}
+
 // Eliminar
 async function deleteApp() {
   const vols = $('#del-vols').checked;
@@ -1039,7 +1209,7 @@ async function deleteApp() {
 loadReq();
 loadInfo().then(() => {
   const [tab, id] = location.hash.slice(1).split(':');
-  if (['summary', 'deploys', 'env', 'logs', 'artisan', 'config', 'delete'].includes(tab)) showTab(tab);
+  if (['summary', 'deploys', 'env', 'logs', 'artisan', 'config', 'import', 'delete'].includes(tab)) showTab(tab);
   else loadContainers();
   if (tab === 'deploys' && id && INFO) openLog(id);
 });

@@ -14,7 +14,7 @@ systemctl stop matipanel.service 2>/dev/null || true
 systemctl disable matipanel.service 2>/dev/null || true
 
 echo "→ Borrando archivos…"
-rm -f /etc/systemd/system/matipanel.service /etc/pam.d/matipanel /etc/sudoers.d/matipanel
+rm -f /etc/systemd/system/matipanel.service /etc/pam.d/matipanel /etc/sudoers.d/matipanel /etc/default/matipanel
 rm -f /etc/cron.d/matipanel-backups  # trabajos de respaldo programados (los .tar.gz se conservan)
 rm -rf /opt/matipanel /etc/matipanel /var/lib/matipanel /var/log/matipanel
 

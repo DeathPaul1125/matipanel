@@ -4,7 +4,7 @@
 
 Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.15.2-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.16.0-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -51,7 +51,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Discos** | Particiones, **qué ocupa más espacio** carpeta por carpeta, archivos más grandes y **limpieza segura** (caché de APT, journal, logs rotados, Docker, paquetes huérfanos…) |
 | **Almacenamiento** | LVM (PV, VG, LV, snapshots), RAID con mdadm y cuotas de disco |
 | **Respaldos** | Respaldos `.tar.gz` de carpetas, descarga, restauración y programación con retención |
-| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otros servidores: Linux por SSH o Windows/NAS por carpeta compartida con cuenta del AD** (varios a la vez, cada app elige el suyo): programados, con retención, verificación SHA-256, restauración y **recuperación ante desastres** en un servidor nuevo |
+| **Respaldos de apps** | Base de datos, volúmenes y configuración de cada app desplegada a **otros servidores: Linux por SSH o Windows/NAS por carpeta compartida con cuenta del AD** (varios a la vez, cada app elige el suyo): programados, con retención, verificación SHA-256, restauración y **recuperación ante desastres** en un servidor nuevo; también la **configuración del propio panel** |
 | **Usuarios y grupos** | Crear/borrar usuarios, contraseñas, bloqueo, shells, grupos, membresías y **claves SSH** autorizadas |
 | **Permisos del panel** | Roles por usuario: administrador, solo lectura, módulos concretos o sin acceso |
 | **Seguridad del servidor** | Chequeo con semáforo (SSH, firewall, actualizaciones, reinicio pendiente, puertos, cuentas) con correcciones guiadas y gestión de fail2ban |
@@ -71,7 +71,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Correo** | Postfix y Dovecot: configuración, cola, alias, SSL, registro y correo de prueba |
 | **DNS** | BIND 9: zonas primarias, inversas y secundarias, registros, SOA, reenviadores y pruebas con `dig` |
 | **Compartidos** | Samba (recursos, usuarios, sesiones) y NFS (exports) |
-| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno; base de datos propia o externa y **PHP del contenedor** (versión, extensiones detectadas desde composer, php.ini y paquetes del sistema). Guía para [migrar proyectos que ya están en Apache](app/docs/60-migrar-proyectos.md) |
+| **Despliegues** | Apps Laravel o PHP desde GitHub en contenedores, sin cortes, con auto-despliegue, webhook, reversión y nombre interno; base de datos propia o externa y **PHP del contenedor** (versión, extensiones detectadas desde composer, php.ini y paquetes del sistema). **HTTPS por app** (Let's Encrypt, autofirmado o certificado propio); asistente **Importar** para traer proyectos que ya están en Apache (`.env` con su `APP_KEY`, base y archivos) y [guía de migración](app/docs/60-migrar-proyectos.md) |
 | **Stacks** | Proyectos de Docker Compose propios (Portainer, Uptime Kuma, wikis…) con plantillas, validación y avisos de configuraciones peligrosas |
 | **Docker** | Contenedores agrupados por proyecto con nombres propios, imágenes, volúmenes y logs |
 | **Explorador BD** | Estilo phpMyAdmin para las bases del servidor y las de cada app desplegada, con **diagrama entidad-relación** exportable |
@@ -98,12 +98,12 @@ Requisitos: Debian 12 o 13 (o Ubuntu 22.04+), acceso root e internet durante la 
 ```bash
 # En el servidor, como root (su -  o  sudo -i)
 apt update && apt install -y git
-git clone https://github.com/DeathPaul1125/matipanel.git /tmp/matipanel
-cd /tmp/matipanel
+git clone https://github.com/DeathPaul1125/matipanel.git /opt/matipanel-src
+cd /opt/matipanel-src
 bash scripts/install.sh TU_USUARIO
 ```
 
-`TU_USUARIO` es la cuenta Linux con la que entrarás al panel; el instalador la agrega al grupo `matipanel`. Al terminar, abre en el navegador:
+Clona en una carpeta permanente como `/opt/matipanel-src`, no en `/tmp` (se vacía al reiniciar). `TU_USUARIO` es la cuenta Linux con la que entrarás al panel; el instalador la agrega al grupo `matipanel`. Necesita **contraseña de Linux**: en VPS donde se entra con clave SSH (Oracle, AWS…) el instalador avisa si no la tiene y ofrece ponérsela. Al terminar, abre en el navegador:
 
 ```
 https://IP-DEL-SERVIDOR:8443
@@ -119,7 +119,7 @@ El instalador:
 4. Genera un certificado HTTPS autofirmado en `/etc/matipanel/`.
 5. Configura PAM (`/etc/pam.d/matipanel`) e instala el servicio systemd `matipanel`.
 
-Para usar otro puerto: `MATIPANEL_PORT=9443 bash scripts/install.sh TU_USUARIO`. Si tienes firewall activo, abre el puerto (`ufw allow 8443/tcp`).
+Para usar otro puerto: `MATIPANEL_PORT=9443 bash scripts/install.sh TU_USUARIO`. Solo hace falta la primera vez: el puerto queda guardado en `/etc/default/matipanel` y las actualizaciones lo reutilizan. Si el puerto ya lo usa otro programa, el instalador se detiene antes de instalar, dice cuál es y sugiere uno libre. Si tienes firewall activo, abre el puerto (`ufw allow 8443/tcp`).
 
 ### Versiones
 
@@ -128,10 +128,10 @@ MatiPanel usa versionado semántico (`MAYOR.MENOR.PARCHE`); la versión está en
 ### Actualizar
 
 ```bash
-cd /tmp/matipanel && git pull && sudo bash scripts/install.sh TU_USUARIO
+cd /opt/matipanel-src && sudo git pull && sudo bash scripts/install.sh TU_USUARIO
 ```
 
-Recarga el navegador con **Ctrl+F5**. Se conservan el certificado, el 2FA, las preferencias, el historial de métricas, las apps desplegadas y los respaldos.
+No hace falta repetir `MATIPANEL_PORT`: se usa el puerto de la instalación anterior. Si instalaste desde `/tmp/matipanel`, muévela una vez con `sudo mv /tmp/matipanel /opt/matipanel-src` (el instalador te lo recuerda). Recarga el navegador con **Ctrl+F5**. Se conservan el certificado, el 2FA, las preferencias, el historial de métricas, las apps desplegadas y los respaldos.
 
 ### Recuperación ante desastres
 
@@ -237,7 +237,7 @@ python tests/run.py            # todas
 python tests/run.py roles fm   # solo las que contienen esos textos
 ```
 
-Cada prueba corre en una carpeta temporal con la app de prueba, sin tocar `/var/lib/matipanel`, y al final se ejecutan las auto-pruebas de los módulos que las tienen. Funciona en Windows (para desarrollar) y en Linux. **No la ejecutes como root**: en el servidor, `cd /tmp/matipanel && /opt/matipanel/venv/bin/python tests/run.py` con tu usuario normal.
+Cada prueba corre en una carpeta temporal con la app de prueba, sin tocar `/var/lib/matipanel`, y al final se ejecutan las auto-pruebas de los módulos que las tienen. Funciona en Windows (para desarrollar) y en Linux. **No la ejecutes como root**: en el servidor, `cd /opt/matipanel-src && /opt/matipanel/venv/bin/python tests/run.py` con tu usuario normal.
 
 ## Roadmap
 
@@ -251,7 +251,8 @@ Cada prueba corre en una carpeta temporal con la app de prueba, sin tocar `/var/
 - [x] Permisos por usuario y seguridad del servidor
 - [x] Respaldos en Windows/NAS con Active Directory y varios servidores
 - [x] Recuperación ante desastres de las apps
-- [ ] Respaldo de la configuración del propio panel
+- [x] Respaldo de la configuración del propio panel
+- [x] HTTPS por app e importación de proyectos existentes
 - [ ] DNSSEC y zonas inversas IPv6
 - [ ] Buzones virtuales de correo
 
