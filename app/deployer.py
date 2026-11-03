@@ -413,12 +413,21 @@ def _root_steps(exts, apt):
     return steps + ["USER www-data"]
 
 
-def render_dockerfile(php, node=False, npm_lock=False, php_ext=(), apt=()):
+def assets_need_php(package_json, vite_config):
+    """¿La compilación de assets ejecuta PHP? El plugin de Vite de Wayfinder (starter kits de Laravel 12)
+    corre «php artisan wayfinder:generate» en cada build; otros configs llaman a artisan a mano."""
+    return "@laravel/vite-plugin-wayfinder" in (package_json or "") or any(
+        w in (vite_config or "") for w in ("artisan", "wayfinder"))
+
+
+def render_dockerfile(php, node=False, npm_lock=False, php_ext=(), apt=(), php_assets=False):
     """Dockerfile de producción para Laravel sobre serversideup/php (Nginx + PHP-FPM en :8080, www-data).
 
     El .env NO entra en la imagen: se pasa al contenedor con env_file. Al arrancar, las
     automatizaciones de la imagen (AUTORUN_ENABLED) hacen storage:link y config/route/view cache;
-    las migraciones se desactivan aquí porque el panel las ejecuta antes de cambiar de versión."""
+    las migraciones se desactivan aquí porque el panel las ejecuta antes de cambiar de versión.
+    php_assets: los assets se compilan sobre la etapa base (PHP, extensiones, código y vendor) con Node
+    copiado de node:22-slim, para plugins de Vite que ejecutan artisan (Wayfinder)."""
     if php not in PHP_VERSIONS:
         raise ValueError("versión de PHP no soportada")
     lines = [
@@ -438,18 +447,37 @@ def render_dockerfile(php, node=False, npm_lock=False, php_ext=(), apt=()):
         " && composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader \\",
         " && chmod -R ug+rwX storage bootstrap/cache",
     ]
-    if node:
+    # npm ci exige que package-lock.json coincida con package.json; si no (descuido común), npm install
+    # resuelve igual y el aviso queda en el registro del despliegue para corregir el lock en el repositorio
+    npm = ("RUN npm ci --no-audit --no-fund \\\n"
+           " || { echo '*** MatiPanel: package-lock.json no coincide con package.json; "
+           "se usa npm install. Corrigelo en el repositorio: npm install y sube el package-lock.json ***'; "
+           "npm install --no-audit --no-fund; }") if npm_lock else "RUN npm install --no-audit --no-fund"
+    if node and php_assets:
+        # ponytail: parte de base, que cambia con cada commit, así que npm ci corre en cada despliegue; si se
+        # vuelve lento, usar una etapa PHP aparte que copie primero solo package*.json (caché de capas).
+        lines += [
+            "",
+            "FROM base AS assets",
+            "USER root",
+            "COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node",
+            "COPY --from=node:22-slim /usr/local/lib/node_modules /usr/local/lib/node_modules",
+            "RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \\",
+            " && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx",
+            "WORKDIR /var/www/html",
+            npm,
+            "RUN npm run build",
+            "",
+            "FROM base",
+            "COPY --from=assets --chown=www-data:www-data /var/www/html/public /var/www/html/public",
+        ]
+    elif node:
         lines += [
             "",
             "FROM node:22-alpine AS assets",
             "WORKDIR /app",
             "COPY package.json package-lock.json* ./",
-            # npm ci exige que package-lock.json coincida con package.json; si no (descuido común), npm install
-            # resuelve igual y el aviso queda en el registro del despliegue para corregir el lock en el repositorio
-            ("RUN npm ci --no-audit --no-fund \\\n"
-             " || { echo '*** MatiPanel: package-lock.json no coincide con package.json; "
-             "se usa npm install. Corrigelo en el repositorio: npm install y sube el package-lock.json ***'; "
-             "npm install --no-audit --no-fund; }") if npm_lock else "RUN npm install --no-audit --no-fund",
+            npm,
             "COPY . .",
             "COPY --from=base /var/www/html/vendor ./vendor",
             "RUN npm run build",
@@ -1789,11 +1817,15 @@ def _build(name, cfg, image, sha, log):
             raise Fail("El repositorio no tiene composer.json ni Dockerfile: no parece un proyecto Laravel")
         node = lstat_kind(src / "package.json") == "file"
         lock = lstat_kind(src / "package-lock.json") == "file"
+        vite = "".join(read_text(src / f, 256 * 1024) or "" for f in ("vite.config.js", "vite.config.ts", "vite.config.mjs")
+                       if lstat_kind(src / f) == "file")
+        php_assets = node and assets_need_php(read_text(src / "package.json", 256 * 1024) or "", vite)
         log.step(f"Generando Dockerfile para Laravel (PHP {cfg['php']}"
-                 + (", con compilación de assets (npm)" if node else ", sin package.json: sin npm") + ")")
+                 + ((", con compilación de assets (npm" + (", con PHP para Wayfinder" if php_assets else "") + ")")
+                    if node else ", sin package.json: sin npm") + ")")
         dockerfile = d / "Dockerfile"
         exts = _log_exts(log, cfg, composer_extensions(src))
-        write_file(dockerfile, render_dockerfile(cfg["php"], node, lock, exts, cfg.get("apt_pkgs") or []))
+        write_file(dockerfile, render_dockerfile(cfg["php"], node, lock, exts, cfg.get("apt_pkgs") or [], php_assets))
         if lstat_kind(src / ".dockerignore") is None:
             fd = os.open(src / ".dockerignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_BINARY, 0o644)
             with os.fdopen(fd, "wb") as f:
@@ -2349,6 +2381,15 @@ if __name__ == "__main__":
         "PHP_MEMORY_LIMIT": "512M", "PHP_UPLOAD_MAX_FILE_SIZE": "64M", "PHP_POST_MAX_SIZE": "64M", "PHP_DATE_TIMEZONE": "America/Guatemala"}
     assert df.rstrip().endswith("/var/www/html/public") and "install-php-extensions intl gd\n" in df and "bad" not in df
     assert "npm install" in render_dockerfile("8.2", node=True)
+    assert assets_need_php('{"devDependencies": {"@laravel/vite-plugin-wayfinder": "^0.1"}}', "")
+    assert assets_need_php("{}", "wayfinder({ formVariants: true })") and not assets_need_php('{"vite": "^8"}', "laravel({})")
+    dfw = render_dockerfile("8.4", node=True, npm_lock=True, php_ext=["gd"], php_assets=True)
+    assert "FROM base AS assets" in dfw and "COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node" in dfw
+    assert "node:22-alpine" not in dfw and "npm install --no-audit" in dfw and "RUN npm run build" in dfw
+    assert dfw.rstrip().endswith("COPY --from=assets --chown=www-data:www-data /var/www/html/public /var/www/html/public")
+    assert dfw.index("install-php-extensions gd") < dfw.index("FROM base AS assets")  # artisan con las extensiones
+    assert render_dockerfile("8.4", node=True, php_assets=False) == render_dockerfile("8.4", node=True)
+    assert "FROM base AS assets" not in render_dockerfile("8.4", php_assets=True)  # sin package.json no hay assets
     try:
         render_dockerfile("7.4")
         raise AssertionError

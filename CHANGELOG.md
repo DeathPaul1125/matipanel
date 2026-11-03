@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.16.1] - 2026-11-03
+
+### Corregido
+- Despliegues: los **starter kits de Laravel 12** (Vue, React o Livewire con **Wayfinder**) fallaban en `npm run build` con `php: not found`, porque el plugin de Vite de Wayfinder ejecuta `php artisan wayfinder:generate` y los assets se compilaban en una imagen de Node sin PHP. Ahora el panel lo detecta (`package.json` o `vite.config`) y compila los assets sobre la imagen PHP de la app, con Node 22; el resto de los proyectos se compila igual que antes.
+
 ## [0.16.0] - 2026-11-02
 
 ### Añadido
