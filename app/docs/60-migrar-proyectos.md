@@ -338,6 +338,114 @@ sudo docker exec -i matipanel-miproyecto-db-1 \
 
 Como el primer despliegue ya creó las tablas, la importación chocaría con ellas. Antes de importar, vacía el esquema en **Artisan** con `db:wipe` (pide escribir el nombre de la app) y después importa.
 
+### De MariaDB o MySQL a PostgreSQL
+
+Si el proyecto usaba MariaDB o MySQL y al crear la app elegiste **PostgreSQL 16**, un volcado `.sql` no sirve: la sintaxis de las dos bases es distinta. Los datos se pasan con **pgloader**, que lee la base vieja y escribe en las tablas que ya creó el primer despliegue con las migraciones de tu código.
+
+**Antes de empezar, revisa el código.** Algunas consultas que funcionan en MySQL fallan o se comportan distinto en PostgreSQL:
+
+| En MySQL | En PostgreSQL | Cambio |
+|---|---|---|
+| `orderByRaw("FIELD(estado, 'a', 'b')")` | `FIELD` no existe | `orderByRaw("CASE estado WHEN 'a' THEN 1 WHEN 'b' THEN 2 ELSE 3 END")` |
+| `DATE_FORMAT(fecha, '%m%d')` | no existe | `to_char(fecha, 'MMDD')` |
+| `where('nombre', 'like', "%$q%")` no distingue mayúsculas | `like` **sí** distingue | `whereLike('nombre', "%$q%")` (Laravel 11+) o `'ilike'` |
+| `where('email', $email)` no distingue mayúsculas | **sí** distingue | guarda y compara en minúsculas |
+
+**Por qué un script y no solo pgloader.** pgloader copia **todas** las columnas de la base vieja, y falla si en PostgreSQL falta alguna:
+
+```
+pgloader failed to find column "public"."contrataciones"."fecha_solicitud"
+```
+
+Pasa cuando en el repositorio se **borró una migración que ya se había ejecutado**, en lugar de crear otra que deshiciera el cambio. La base vieja conserva esas columnas, pero la nueva, creada con las migraciones actuales, no las tiene. El script de abajo lo resuelve sin tocar la base original:
+
+1. Hace una copia temporal de la base vieja.
+2. Compara las dos estructuras y quita de la copia las tablas y columnas que ya no existen en el código. Antes borra las llaves foráneas de esas columnas.
+3. Avisa si, al revés, PostgreSQL tiene columnas que la base vieja no tiene.
+4. Ejecuta pgloader desde la copia.
+5. Al terminar, borra la copia, el usuario temporal y el archivo de configuración, aunque algo falle.
+
+**Paso a paso** (en el servidor, como root; la base vieja tiene que estar en este mismo servidor):
+
+1. Instala pgloader: `apt install -y pgloader`.
+2. Crea el script con `nano /root/migrar_pg.sh`, pega lo de abajo y cambia `SRC` (la base vieja) y `APP` (el nombre de la app en el panel):
+
+```
+#!/bin/bash
+# Copia los datos de una base MariaDB del servidor a la base PostgreSQL de una app de MatiPanel.
+# Las columnas/tablas que ya no existen en el código se quitan en una COPIA temporal; la original no se toca.
+set -euo pipefail
+export LC_ALL=C
+SRC=mibase                  # base MariaDB vieja
+APP=miproyecto              # app de MatiPanel (PostgreSQL)
+TMP=${SRC}_migra
+C=matipanel-$APP-db-1
+set -a; . /var/lib/matipanel/apps/$APP/db.env; set +a
+PGIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$C")
+PGQ() { docker exec "$C" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F $'\t' -c "$1"; }
+trap 'rm -f /root/migra.load; mariadb -e "DROP USER IF EXISTS '"'"'pgloader'"'"'@'"'"'127.0.0.1'"'"'; DROP DATABASE IF EXISTS \`$TMP\`"' EXIT
+
+echo "== 1) Copia temporal $SRC -> $TMP"
+mariadb -e "DROP DATABASE IF EXISTS \`$TMP\`; CREATE DATABASE \`$TMP\`"
+mysqldump --single-transaction --routines --triggers "$SRC" | mariadb "$TMP"
+
+echo "== 2) Comparando estructuras"
+mariadb -N -e "SELECT c.table_name, c.column_name FROM information_schema.columns c
+  JOIN information_schema.tables t ON t.table_schema=c.table_schema AND t.table_name=c.table_name
+  WHERE c.table_schema='$TMP' AND t.table_type='BASE TABLE'" | sort > /tmp/mig_my.txt
+PGQ "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema='public'" | sort > /tmp/mig_pg.txt
+cut -f1 /tmp/mig_my.txt | sort -u > /tmp/mig_myt.txt
+cut -f1 /tmp/mig_pg.txt | sort -u > /tmp/mig_pgt.txt
+
+for t in $(comm -23 /tmp/mig_myt.txt /tmp/mig_pgt.txt); do
+  echo "   - tabla que ya no existe en el código: $t"
+  mariadb "$TMP" -e "SET FOREIGN_KEY_CHECKS=0; DROP TABLE \`$t\`"
+done
+comm -23 /tmp/mig_my.txt /tmp/mig_pg.txt | awk -F'\t' 'NR==FNR{t[$1]=1;next} ($1 in t)' /tmp/mig_pgt.txt - |
+while IFS=$'\t' read -r t c; do
+  for fk in $(mariadb -N -e "SELECT constraint_name FROM information_schema.key_column_usage
+      WHERE table_schema='$TMP' AND table_name='$t' AND column_name='$c' AND referenced_table_name IS NOT NULL"); do
+    mariadb "$TMP" -e "ALTER TABLE \`$t\` DROP FOREIGN KEY \`$fk\`"
+  done
+  echo "   - columna que ya no existe en el código: $t.$c"
+  mariadb "$TMP" -e "ALTER TABLE \`$t\` DROP COLUMN \`$c\`"
+done
+FALTAN=$(comm -13 /tmp/mig_my.txt /tmp/mig_pg.txt | awk -F'\t' 'NR==FNR{t[$1]=1;next} ($1 in t)' /tmp/mig_myt.txt - || true)
+if [ -n "$FALTAN" ]; then
+  echo "   ! PostgreSQL tiene columnas que MariaDB no (quedarán vacías o con su valor por defecto):"
+  echo "$FALTAN" | sed 's/^/       /'
+fi
+
+echo "== 3) Copiando datos con pgloader"
+mariadb -e "CREATE USER IF NOT EXISTS 'pgloader'@'127.0.0.1' IDENTIFIED BY 'Migra2026tmp';
+            GRANT SELECT, SHOW VIEW ON \`$TMP\`.* TO 'pgloader'@'127.0.0.1';"
+cat > /root/migra.load <<EOF
+LOAD DATABASE
+  FROM mysql://pgloader:Migra2026tmp@127.0.0.1:3306/$TMP
+  INTO postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$PGIP:5432/$POSTGRES_DB
+WITH data only, truncate, reset sequences, workers = 4, concurrency = 1
+SET PostgreSQL PARAMETERS session_replication_role to 'replica'
+EXCLUDING TABLE NAMES MATCHING 'migrations'
+ALTER SCHEMA '$TMP' RENAME TO 'public';
+EOF
+pgloader /root/migra.load
+echo "== Listo. Se borraron la copia temporal y el usuario pgloader."
+```
+
+3. Ejecútalo con `bash /root/migrar_pg.sh` y revisa la salida:
+   - El paso 2 lista las columnas y tablas que se omiten. Comprueba que de verdad sean cosas que el código ya no usa.
+   - En la tabla final de pgloader, la columna `errors` debe estar en `0` en todas las filas.
+   - Si aparece «PostgreSQL tiene columnas que MariaDB no», la base vieja está atrasada respecto al código: esas columnas quedan vacías o con su valor por defecto.
+4. En la app, pulsa **Reiniciar** y ejecuta `migrate:status` en **Artisan**.
+
+Puedes repetir el script cuantas veces quieras: cada vez vacía las tablas de PostgreSQL antes de copiar. Así puedes hacer una prueba ahora y la copia definitiva el día del cambio de tráfico.
+
+**Notas:**
+- El script **no copia** la tabla `migrations`: la de PostgreSQL ya la llenó el primer despliegue.
+- `session_replication_role = replica` desactiva las llaves foráneas solo durante la copia, para que no importe el orden de las tablas.
+- `reset sequences` ajusta los contadores de los `id`. Sin esto, el primer registro nuevo chocaría con un `id` existente.
+- Para que las bases de otros entornos (tu PC, pruebas) queden iguales, agrega al repositorio una migración que quite esas columnas si existen (`Schema::hasColumn`). La próxima vez que quieras deshacer una migración ya ejecutada, crea una nueva en lugar de borrarla.
+
 ### Borrar el volcado
 
 El archivo `.sql` contiene todos los datos. Cuando la importación esté comprobada, bórralo: `sudo rm /root/mibase.sql`.
@@ -378,7 +486,7 @@ Tienes dos caminos:
 Abre la app por su puerto (`http://IP-DEL-SERVIDOR:8081`, la dirección exacta está en el **Resumen**) y revisa:
 
 - [ ] La página de inicio carga sin errores y con estilos (CSS y JS compilados).
-- [ ] **Iniciar sesión** con un usuario real funciona. (Si dice que la contraseña es incorrecta pero en el sitio viejo funciona, la base no es la correcta.)
+- [ ] **Iniciar sesión** con un usuario real funciona. (Si dice que la contraseña es incorrecta pero en el sitio viejo funciona, revisa [Nadie puede iniciar sesión](#nadie-puede-iniciar-sesion-con-la-misma-contrasena-de-siempre).)
 - [ ] Los listados muestran los **datos** de siempre.
 - [ ] Las **imágenes y descargas** subidas por usuarios se ven.
 - [ ] Subir un archivo nuevo funciona (permisos del volumen).
@@ -525,6 +633,31 @@ Sí, pero es mejor uno por uno: cada uno tiene su `.env`, su base y sus particul
 ### ¿Qué pasa si no copio la `APP_KEY`?
 
 La app arranca, pero todo lo cifrado con la clave vieja deja de leerse (`The MAC is invalid`), y las sesiones abiertas se cierran. Las contraseñas de los usuarios **no** dependen de la `APP_KEY` (usan bcrypt), así que el inicio de sesión sigue funcionando. Si ya desplegaste con una clave nueva, pon la vieja en **Entorno** y pulsa **Aplicar ahora**.
+
+### Nadie puede iniciar sesión con la misma contraseña de siempre
+
+Si el login responde «credenciales inválidas» aunque la contraseña sea correcta, revisa en este orden:
+
+1. **Falta una extensión de PHP que el proyecto usa sin declararla.** Es el caso típico del login por **Active Directory/LDAP**: el código revisa `extension_loaded('ldap')` y, si la extensión no está, deja de consultar el directorio sin avisar. En el servidor viejo funcionaba porque PHP sí tenía `ldap`; la imagen del panel solo instala las extensiones que pide `composer.json`.
+   - Compruébalo en la **Terminal** del panel, eligiendo en **Dónde** el contenedor de la app (`matipanel-miproyecto-app_blue-1` o `_green-1`). Ahí ya estás dentro del contenedor, así que no uses `docker`:
+
+     ```
+     php -m | grep -i ldap
+     ```
+
+     Si no imprime nada, falta la extensión.
+   - **Arreglo:** en **Configuración → PHP del contenedor → Extensiones de PHP adicionales** agrega `ldap`, guarda y pulsa **Desplegar ahora**. El log debe decir «Extensiones de PHP a instalar: ldap».
+   - **Arreglo definitivo:** en tu equipo, ejecuta `composer require ext-ldap:*` y sube `composer.json` y `composer.lock`. Así cualquier despliegue la instala solo.
+   - Después, comprueba que el contenedor llega al controlador de dominio. Debe imprimir `bool(true)`:
+
+     ```
+     php -r 'var_dump((bool) @fsockopen("IP-DEL-AD", 389, $e, $s, 3));'
+     ```
+
+2. **Las mayúsculas, si cambiaste a PostgreSQL.** MySQL compara `Juan@Dominio.com` igual que `juan@dominio.com`; PostgreSQL no. Si el usuario quedó guardado con mayúsculas y el login busca en minúsculas (o al revés), no lo encuentra. Compara en minúsculas en el código, o normaliza la columna con `UPDATE users SET email = lower(email);`.
+3. **La base no es la correcta.** En **Explorador BD**, comprueba que la tabla `users` tenga los usuarios del sitio viejo.
+
+Las contraseñas no dependen de la `APP_KEY`: un hash de `bcrypt` copiado de la base vieja sigue funcionando en la nueva.
 
 ### ¿Puedo seguir usando phpMyAdmin u otra herramienta para la base?
 

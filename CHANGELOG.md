@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.16.2] - 2026-11-03
+
+### Documentación
+- Guía de migración de proyectos: nueva sección **De MariaDB o MySQL a PostgreSQL**. Incluye un script con pgloader que trabaja sobre una copia temporal de la base vieja y omite las tablas y columnas que ya no existen en el código (migraciones borradas después de ejecutarse). También tiene una tabla de consultas que cambian entre las dos bases (`FIELD`, `DATE_FORMAT`, `like` y mayúsculas).
+- Preguntas frecuentes: **Nadie puede iniciar sesión con la misma contraseña de siempre**. Cubre la extensión `ldap` que falta en el contenedor (login por Active Directory), las mayúsculas en PostgreSQL y cómo comprobar cada caso desde la Terminal.
+
 ## [0.16.1] - 2026-11-03
 
 ### Corregido
