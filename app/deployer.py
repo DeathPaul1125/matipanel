@@ -687,9 +687,10 @@ def render_nginx(cfg, upstream_port, tls=None, via_apache=False):
                 f"    }}\n")
 
     # Puerto propio: con HTTPS y redirección, las visitas directas van a https://nombre (las que reenvía
-    # Apache desde 127.0.0.1 no, o sería un bucle).
+    # Apache desde 127.0.0.1 no, o sería un bucle). 302 y no 301: el navegador guarda las 301 para siempre,
+    # y al quitar el nombre o el HTTPS seguiría mandando cada ruta ya visitada al nombre viejo.
     guard = (f"        if ($remote_addr != \"127.0.0.1\") {{\n"
-             f"            return 301 https://{host}$request_uri;\n"
+             f"            return 302 https://{host}$request_uri;\n"
              f"        }}\n") if redirect else ""
     out = (f"# Generado por MatiPanel (Despliegues) para «{name}». No lo edites: se reescribe en cada despliegue.\n"
            f"map $http_upgrade {var} {{\n    default upgrade;\n    ''      close;\n}}\n"
@@ -2427,7 +2428,7 @@ if __name__ == "__main__":
     hc = {"name": "mi-app", "port": 8082, "hostname": "mi.empresa.com", "tls": "self"}
     ngt = render_nginx(hc, 20003, ("/c/full.pem", "/c/key.pem"))
     assert "listen 443 ssl;" in ngt and "ssl_certificate /c/full.pem;" in ngt and "ssl_certificate_key /c/key.pem;" in ngt
-    assert "return 301 https://mi.empresa.com$request_uri;" in ngt and "return 301 https://$host$request_uri;" in ngt
+    assert "return 302 https://mi.empresa.com$request_uri;" in ngt and "return 301 https://$host$request_uri;" in ngt
     assert ngt.count("proxy_pass http://127.0.0.1:20003;") == 2  # puerto propio + 443 (el 80 solo redirige)
     assert "return 301" not in render_nginx({**hc, "tls_redirect": False}, 20003, ("/c/f", "/c/k"))
     nga = render_nginx(hc, 20003, ("/c/f", "/c/k"), via_apache=True)

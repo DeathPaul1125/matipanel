@@ -2,6 +2,11 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.16.3] - 2026-11-04
+
+### Corregido
+- Despliegues: con HTTPS y **Redirigir HTTP a HTTPS**, el puerto propio de la app (`http://servidor:8081`) redirigía con 301. El navegador guarda las 301 para siempre, así que, al quitar después el nombre o el HTTPS, seguía mandando cada ruta ya visitada al nombre viejo, aunque el servidor ya no redirigiera. Ahora esa redirección es 302 (temporal). La documentación explica cómo limpiar las 301 que ya guardó el navegador.
+
 ## [0.16.2] - 2026-11-03
 
 ### Documentación
