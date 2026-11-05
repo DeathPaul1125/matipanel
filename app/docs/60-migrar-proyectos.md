@@ -56,7 +56,8 @@ Los pasos 4, 6 y 7 (el `.env`, la base y los archivos subidos) los hace el panel
 2. Abre la app → pestaña **Importar**. En **Carpeta del proyecto** escribe la ruta (se sugieren las carpetas de `/var/www` y `/srv` que tienen `artisan`) y pulsa **Analizar**.
 3. Revisa **Qué se puede importar**:
    - **1 · Copiar el .env:** copia las variables del `.env` viejo, **con la misma `APP_KEY`**. No copia las que maneja el panel: `APP_ENV`, `APP_DEBUG`, `LOG_CHANNEL`, `APP_URL`, las `DB_*` si la app tiene base propia o externa, y las de sesión, caché y colas si la app usa el Redis del panel. Si la app no tiene base en el panel (opción A), copia las `DB_*` y cambia `127.0.0.1`/`localhost` por `host.docker.internal`. Las referencias `${APP_NAME}` se reemplazan por su valor. En **Ver qué variables se copian** está el detalle (sin mostrar los valores).
-   - **2 · Copiar la base de datos:** `mysqldump` de la base que dice el `.env` viejo (`DB_DATABASE`) hacia la base del contenedor de la app. **Reemplaza** sus tablas; la base vieja no se toca. Corrige sola la collation `utf8mb4_0900_ai_ci` de MySQL 8. Solo con MariaDB/MySQL en este servidor y la app con **MariaDB 11**; para PostgreSQL sigue el [Paso 6](#paso-6-importar-los-datos-solo-opcion-b).
+   - **2 · Copiar la base de datos:** `mysqldump` de la base que dice el `.env` viejo (`DB_DATABASE`) hacia la base del contenedor de la app. **Reemplaza** sus tablas; la base vieja no se toca. Corrige sola la collation `utf8mb4_0900_ai_ci` de MySQL 8. La base vieja tiene que ser MariaDB/MySQL de este servidor.
+     - Si la app usa **PostgreSQL 16**, la base se **convierte** con pgloader (lo instala si falta). Solo copia los datos, porque las tablas ya las creó el primer despliegue, y omite las tablas y columnas que ya no existen en el código. Ver [De MariaDB o MySQL a PostgreSQL](#de-mariadb-o-mysql-a-postgresql). El análisis también lista las consultas del código que PostgreSQL no entiende (`FIELD`, `DATE_FORMAT`, `GROUP_CONCAT`, `IFNULL`, `STR_TO_DATE`).
    - **3 · Copiar los archivos subidos:** copia `storage/app` al volumen `storage` de la app, con dueño `www-data`.
 4. Revisa **Revisar antes de cambiar el tráfico**: el panel avisa si la carpeta tiene **cambios sin subir a git**, **subidas en `public/`** que se perderían, **Laravel Mix** sin script `build`, la versión de PHP que pide `composer.json`, y qué **cron**, **Supervisor** y **sitio de Apache** del proyecto habrá que desactivar en el [Paso 9](#paso-9-cambiar-el-trafico-al-proyecto-nuevo).
 5. Deja marcado solo **1 · Copiar el .env** y pulsa **Importar**. El panel ofrece desplegar enseguida.
@@ -365,7 +366,17 @@ Pasa cuando en el repositorio se **borró una migración que ya se había ejecut
 4. Ejecuta pgloader desde la copia.
 5. Al terminar, borra la copia, el usuario temporal y el archivo de configuración, aunque algo falle.
 
-**Paso a paso** (en el servidor, como root; la base vieja tiene que estar en este mismo servidor):
+**Desde el panel (recomendado).** La pestaña **Importar** de la app hace todo lo anterior sin consola:
+
+1. Despliega la app con **PostgreSQL 16** al menos una vez, para que las migraciones creen las tablas.
+2. En **Importar**, escribe la carpeta del proyecto viejo y pulsa **Analizar**. En **2 · Copiar la base de datos** debe decir «(MariaDB) … → (PostgreSQL) …, con pgloader». En **Revisar antes de cambiar el tráfico** aparecen las líneas del código con `FIELD`, `DATE_FORMAT` y otras funciones que hay que cambiar.
+3. Marca solo **2**, pulsa **Importar** y escribe el nombre de la app para confirmar. La salida se ve en vivo: las columnas que se omiten y la tabla final de pgloader. Puede tardar varios minutos.
+4. El resultado dice qué se omitió y qué columnas no tenía la base vieja. Si pgloader tuvo errores, la importación se marca como fallida y muestra las líneas `ERROR`.
+5. Pulsa **Reiniciar** y ejecuta `migrate:status` en **Artisan**.
+
+Puedes repetirlo cuantas veces quieras: cada vez vacía las tablas de PostgreSQL antes de copiar.
+
+**Por consola**, si la base vieja está en otro servidor o prefieres hacerlo a mano. En el servidor, como root; el script espera la base vieja en este mismo servidor, así que, si está en otro, cópiala primero con `mysqldump`:
 
 1. Instala pgloader: `apt install -y pgloader`.
 2. Crea el script con `nano /root/migrar_pg.sh`, pega lo de abajo y cambia `SRC` (la base vieja) y `APP` (el nombre de la app en el panel):

@@ -4,6 +4,7 @@ Automatiza los pasos manuales de app/docs/60-migrar-proyectos.md, una vez creada
   scan()          lee la carpeta vieja: .env, base, storage, subidas en public/, git, cron, Supervisor, Apache
   merge_env()     lleva el .env viejo al de la app (APP_KEY incluida) sin pisar lo que maneja el panel
   import_db()     copia la base del MariaDB/MySQL del servidor a la base del contenedor de la app
+                  (si la app usa PostgreSQL, import_db_pg la convierte con pgloader)
   copy_storage()  copia storage/app al volumen storage de la app (dueño www-data, uid 33)
 
 No toca la carpeta ni la base viejas: el sitio actual sigue funcionando hasta que se cambie el tráfico.
@@ -12,7 +13,10 @@ import glob
 import json
 import os
 import re
+import secrets
+import shutil
 import subprocess
+import tempfile
 from . import deployer as D
 from . import jobs
 
@@ -29,6 +33,7 @@ KEEP = {"APP_ENV": "se deja production", "APP_DEBUG": "se deja false",
 REDIS_KEYS = ("SESSION_DRIVER", "CACHE_STORE", "CACHE_DRIVER", "QUEUE_CONNECTION", "REDIS_CLIENT", "REDIS_PASSWORD")
 UPLOAD_HINTS = {"uploads", "upload", "files", "archivos", "adjuntos", "documentos", "docs", "fotos", "imagenes",
                 "images", "img", "media", "attachments", "storage"}
+MYSQL_ONLY_RE = re.compile(r"\b(FIELD|DATE_FORMAT|GROUP_CONCAT|IFNULL|STR_TO_DATE)\s*\(")  # no existen en PostgreSQL
 BUILD_ONLY = {"public/build", "public/hot", "public/storage", "public/mix-manifest.json", "public/js", "public/css",
               "public/fonts", "public/vendor"}
 
@@ -150,10 +155,10 @@ def scan(src, cfg):
         out["git"]["pending"] = len([l for l in st.splitlines() if l.strip()]) if code == 0 else 0
     # Base de datos
     host, dbn = old.get("DB_HOST", "").strip(), old.get("DB_DATABASE", "").strip()
-    db = {"source": dbn, "host": host, "engine": old.get("DB_CONNECTION", "mysql"), "importable": False, "why": ""}
-    if cfg.get("database") != "mariadb":
-        db["why"] = ("la app usa una base externa o ninguna: no hace falta copiar datos" if cfg.get("database") == "none"
-                     else "el asistente copia bases MySQL/MariaDB; para PostgreSQL usa la guía")
+    db = {"source": dbn, "host": host, "engine": old.get("DB_CONNECTION", "mysql"), "importable": False, "why": "",
+          "convert": cfg.get("database") == "postgres"}
+    if cfg.get("database") not in ("mariadb", "postgres"):
+        db["why"] = "la app usa una base externa o ninguna: no hace falta copiar datos"
     elif db["engine"] not in ("mysql", "mariadb"):
         db["why"] = "el proyecto viejo no usa MySQL/MariaDB"
     elif host not in LOCAL_HOSTS:
@@ -170,6 +175,7 @@ def scan(src, cfg):
             db["importable"] = True
     db["target"] = D.db_name(cfg)
     out["db"] = db
+    out["mysql_only"] = mysql_only_sql(src) if db["convert"] else []
     sa = os.path.join(src, "storage", "app")
     out["storage"] = {"exists": os.path.isdir(sa), "bytes": _du(sa) if os.path.isdir(sa) else 0}
     out["uploads"] = upload_dirs(src, git_ok)
@@ -218,6 +224,8 @@ def import_db(name, cfg, source):
     from .modules.databases import _my_opts
     if not SRC_DB_RE.fullmatch(source or "-"):
         return False, "Nombre de la base vieja inválido"
+    if cfg.get("database") == "postgres":
+        return import_db_pg(name, cfg, source)
     container = f"{D.project_name(name)}-db-1"
     code, out, _ = D._run(["docker", "inspect", "-f", "{{.State.Running}}", container], 20)
     if code != 0 or out.strip() != "true":
@@ -252,6 +260,182 @@ def import_db(name, cfg, source):
     if lcode != 0:
         return False, "La importación falló: " + lerr.decode(errors="replace").strip()[-800:]
     return True, f"Base «{source}» copiada a «{target}» ({max(1, sent // (1024 * 1024))} MB)"
+
+
+def mysql_only_sql(src, limit=20):
+    """Funciones de MySQL que PostgreSQL no tiene, en app/ del proyecto viejo. → [{"file", "line"}]"""
+    found = []
+    for root, dirs, files in os.walk(os.path.join(src, "app")):
+        dirs.sort()
+        for fn in sorted(files):
+            if not fn.endswith(".php"):
+                continue
+            path = os.path.join(root, fn)
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    for n, line in enumerate(f, 1):
+                        if MYSQL_ONLY_RE.search(line):
+                            found.append({"file": os.path.relpath(path, src).replace(os.sep, "/") + f":{n}",
+                                          "line": line.strip()[:200]})
+                            if len(found) >= limit:
+                                return found
+            except OSError:
+                continue
+    return found
+
+
+def schema_diff(my_cols, pg_cols):
+    """Columnas (tabla, columna) de la base vieja y de la nueva. → (tablas y columnas que sobran en la vieja,
+    columnas que faltan en la vieja); solo cuenta tablas de las dos, y nunca la tabla migrations."""
+    my_cols = {c for c in my_cols if c[0] != "migrations"}
+    pg_cols = {c for c in pg_cols if c[0] != "migrations"}
+    my_t, pg_t = {t for t, _ in my_cols}, {t for t, _ in pg_cols}
+    both = my_t & pg_t
+    return (sorted(my_t - pg_t), sorted(c for c in my_cols - pg_cols if c[0] in both),
+            sorted(c for c in pg_cols - my_cols if c[0] in both))
+
+
+def pgloader_errors(text):
+    """Suma la columna errors del resumen de pgloader (filas «nombre  errores  …»); None si no hay resumen."""
+    total, inside = None, False
+    for line in text.splitlines():
+        if re.match(r"\s*table name\s+errors\b", line):
+            inside, total = True, total or 0
+            continue
+        # nombre (palabras separadas por un espacio), 2+ espacios y la columna errors (número o ✓)
+        m = re.match(r"\s*\S+(?: \S+)*\s{2,}(\S+)", line) if inside else None
+        if m and m.group(1).isdigit():
+            total += int(m.group(1))
+    return total
+
+
+def _q(ident):
+    return "`" + ident.replace("`", "``") + "`"
+
+
+def _lit(text):
+    return text.replace("\\", "\\\\").replace("'", "''")
+
+
+def _mysql(sql, db=None, timeout=600):
+    from .modules.databases import _my_opts
+    return D._run(["mysql", *_my_opts(), "-N", "-B", *([db] if db else []), "-e", sql], timeout)
+
+
+def import_db_pg(name, cfg, source):
+    """Base MariaDB/MySQL del servidor → PostgreSQL del contenedor de la app, con pgloader, solo datos (las
+    tablas las creó el primer despliegue con las migraciones). Trabaja sobre una copia temporal de la base
+    vieja, de la que quita las tablas y columnas que ya no existen en el código (migraciones borradas después
+    de ejecutarse), porque pgloader falla con columnas que PostgreSQL no tiene. → (ok, mensaje)"""
+    from .modules.databases import _my_opts
+    from .modules.deploy import _apt_install
+    container = f"{D.project_name(name)}-db-1"
+    code, out, _ = D._run(["docker", "inspect", "-f", "{{.State.Running}}", container], 20)
+    if code != 0 or out.strip() != "true":
+        return False, "La base de la app no está en marcha: despliega la app primero"
+    if not shutil.which("pgloader"):
+        _say("$ apt install pgloader")
+        ok, aout, amsg = _apt_install(["pgloader"])
+        if not ok:
+            return False, f"No se pudo instalar pgloader: {amsg}"
+    denv = dict(D.parse_env(D.read_text(D.app_dir(name) / "db.env", ENV_LIMIT) or "")[0])
+    pg_user, pg_db, pg_pw = denv.get("POSTGRES_USER", ""), denv.get("POSTGRES_DB", ""), denv.get("POSTGRES_PASSWORD", "")
+    code, ips, _ = D._run(["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+                           container], 20)
+    pg_ip = (ips.split() or [""])[0]
+    if not (pg_user and pg_db and pg_ip):
+        return False, "No se pudieron leer los datos de la base PostgreSQL de la app (db.env o la IP del contenedor)"
+    tmp = source[:56] + "_mpmigra"
+    pw = secrets.token_urlsafe(24)
+    load_path = None
+    try:
+        _say(f"$ mysqldump {source} | mysql {tmp}   (copia temporal; la base vieja no se toca)")
+        code, _, err = _mysql(f"DROP DATABASE IF EXISTS {_q(tmp)}; CREATE DATABASE {_q(tmp)}")
+        if code != 0:
+            return False, "No se pudo crear la copia temporal: " + err.strip()[-500:]
+        dump = subprocess.Popen(["mysqldump", *_my_opts(), "--single-transaction", "--routines", "--triggers",
+                                 "--", source], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd="/")
+        load = subprocess.Popen(["mysql", *_my_opts(), "--", tmp], stdin=dump.stdout,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd="/")
+        dump.stdout.close()
+        _, lerr = load.communicate()
+        derr = dump.stderr.read().decode(errors="replace")
+        if dump.wait() != 0:
+            return False, "mysqldump falló: " + derr.strip()[-800:]
+        if load.returncode != 0:
+            return False, "La copia temporal falló: " + lerr.decode(errors="replace").strip()[-800:]
+
+        code, my_out, err = _mysql(
+            "SELECT c.table_name, c.column_name FROM information_schema.columns c JOIN information_schema.tables t"
+            " ON t.table_schema = c.table_schema AND t.table_name = c.table_name"
+            f" WHERE c.table_schema = '{tmp}' AND t.table_type = 'BASE TABLE'")
+        if code != 0:
+            return False, "No se pudieron leer las columnas de la copia: " + err.strip()[-500:]
+        code, pg_out, err = D._run(["docker", "exec", container, "sh", "-c",
+                                    'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F "$1" -c "$2"', "sh", "\t",
+                                    "SELECT table_name, column_name FROM information_schema.columns"
+                                    " WHERE table_schema = 'public'"], 60)
+        if code != 0:
+            return False, "No se pudieron leer las columnas de PostgreSQL: " + err.strip()[-500:]
+        cols = lambda text: {tuple(l.split("\t", 1)) for l in text.splitlines() if "\t" in l}
+        drop_t, drop_c, missing = schema_diff(cols(my_out), cols(pg_out))
+
+        for t, c in drop_c:
+            _say(f"  - columna que ya no existe en el código: {t}.{c}")
+            code, fks, _ = _mysql("SELECT constraint_name FROM information_schema.key_column_usage"
+                                  f" WHERE table_schema = '{tmp}' AND table_name = '{_lit(t)}'"
+                                  f" AND column_name = '{_lit(c)}'"
+                                  " AND referenced_table_name IS NOT NULL")
+            sql = "".join(f"ALTER TABLE {_q(t)} DROP FOREIGN KEY {_q(fk)}; " for fk in fks.split())
+            code, _, err = _mysql(sql + f"ALTER TABLE {_q(t)} DROP COLUMN {_q(c)}", tmp)
+            if code != 0:
+                return False, f"No se pudo quitar {t}.{c} de la copia: " + err.strip()[-500:]
+        for t in drop_t:
+            _say(f"  - tabla que ya no existe en el código: {t}")
+            code, _, err = _mysql(f"SET FOREIGN_KEY_CHECKS = 0; DROP TABLE {_q(t)}", tmp)
+            if code != 0:
+                return False, f"No se pudo quitar la tabla {t} de la copia: " + err.strip()[-500:]
+        for t, c in missing:
+            _say(f"  ! PostgreSQL tiene {t}.{c} y la base vieja no: queda vacía o con su valor por defecto")
+
+        code, _, err = _mysql(f"CREATE USER IF NOT EXISTS 'mp_pgloader'@'127.0.0.1' IDENTIFIED BY '{pw}';"
+                              f" ALTER USER 'mp_pgloader'@'127.0.0.1' IDENTIFIED BY '{pw}';"
+                              f" GRANT SELECT, SHOW VIEW ON {_q(tmp)}.* TO 'mp_pgloader'@'127.0.0.1'")
+        if code != 0:
+            return False, "No se pudo crear el usuario temporal de MariaDB: " + err.strip()[-500:]
+        fd, load_path = tempfile.mkstemp(prefix="matipanel-pgloader-", suffix=".load")  # 0600: lleva una contraseña
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"LOAD DATABASE\n"
+                    f"  FROM mysql://mp_pgloader:{pw}@127.0.0.1:3306/{tmp}\n"
+                    f"  INTO postgresql://{pg_user}@{pg_ip}:5432/{pg_db}?sslmode=disable\n"
+                    f"WITH data only, truncate, reset sequences, workers = 4, concurrency = 1\n"
+                    f"SET PostgreSQL PARAMETERS session_replication_role to 'replica'\n"
+                    f"EXCLUDING TABLE NAMES MATCHING 'migrations'\n"
+                    f"ALTER SCHEMA '{tmp}' RENAME TO 'public';\n")
+        _say("$ pgloader (solo datos; vacía las tablas de PostgreSQL antes de copiar)")
+        # La contraseña de PostgreSQL va por PGPASSWORD y no en el archivo ni en la línea de comandos
+        code, pout, perr = D._run(["pgloader", load_path], 6 * 3600, env={**os.environ, "PGPASSWORD": pg_pw})
+        text = pout + perr
+        for line in text.splitlines()[-60:]:
+            _say(line)
+        errors = pgloader_errors(text)
+        if code != 0 or errors:
+            return False, (f"pgloader terminó con {errors} errores" if errors else f"pgloader falló (código {code})") \
+                + ": " + "\n".join(l for l in text.splitlines() if "ERROR" in l)[-800:]
+        msg = f"Base «{source}» (MariaDB) copiada a «{D.db_name(cfg)}» (PostgreSQL)"
+        if drop_c or drop_t:
+            msg += "; se omitió lo que ya no existe en el código: " + ", ".join(
+                [f"tabla {t}" for t in drop_t] + [f"{t}.{c}" for t, c in drop_c][:30])
+        if missing:
+            msg += "; la base vieja no tenía: " + ", ".join(f"{t}.{c}" for t, c in missing[:30])
+        return True, msg
+    finally:
+        _mysql(f"DROP USER IF EXISTS 'mp_pgloader'@'127.0.0.1'; DROP DATABASE IF EXISTS {_q(tmp)}")
+        if load_path:
+            try:
+                os.unlink(load_path)
+            except OSError:
+                pass
 
 
 def copy_storage(name, src):
@@ -289,4 +473,25 @@ if __name__ == "__main__":
     assert "DB_HOST" not in upd3
     assert valid_source("relativa")[0] is None and valid_source("/etc")[0] is None and valid_source("/var/www")[0] is None
     assert SRC_DB_RE.fullmatch("erp_2024") and not SRC_DB_RE.fullmatch("a;b") and not SRC_DB_RE.fullmatch("")
+    my = {("users", "id"), ("users", "email"), ("contrataciones", "id"), ("contrataciones", "fecha_solicitud"),
+          ("viejas", "id"), ("migrations", "id"), ("migrations", "batch")}
+    pg = {("users", "id"), ("users", "email"), ("users", "avatar"), ("contrataciones", "id"), ("nuevas", "id"),
+          ("migrations", "id")}
+    assert schema_diff(my, pg) == (["viejas"], [("contrataciones", "fecha_solicitud")], [("users", "avatar")])
+    summary = """             table name     errors       read   imported      bytes      total time
+-----------------------  ---------  ---------  ---------  ---------  --------------
+        fetch meta data          0         12         12                     0.050s
+---------------------------------  ---------  ---------  ---------  ---------  --------------
+       "public"."users"          {e}        100        100     10.2 kB          0.030s
+   "public"."empleados"          0         50         50      5.1 kB          0.020s
+-----------------------  ---------  ---------  ---------  ---------  --------------
+COPY Threads Completion          0          4          4                     0.100s
+      Total import time          ✓        150        150     15.3 kB          0.150s
+"""
+    assert pgloader_errors(summary.format(e=0)) == 0 and pgloader_errors(summary.format(e=3)) == 3
+    assert pgloader_errors("FATAL: no se pudo conectar") is None
+    assert MYSQL_ONLY_RE.search("orderByRaw(\"FIELD(estado, 'a')\")") and not MYSQL_ONLY_RE.search("$this->field('x')")
+    assert _q("a`b") == "`a``b`"
+    sc = scan(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), {"database": "postgres", "name": "x"})
+    assert sc["db"]["convert"] and "guía" not in sc["db"]["why"], sc["db"]
     print("ok")

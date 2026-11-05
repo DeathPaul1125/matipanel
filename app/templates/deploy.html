@@ -1157,7 +1157,9 @@ async function importScan() {
   $('#im-env-rows').innerHTML = s.env.rows.map(r => `<tr><td class="mono">${escapeHtml(r.key)}</td><td class="${r.copy ? 'dp-good' : 'muted'}">${r.copy ? 'se copia' : 'no se copia'}${r.reason ? ' · ' + escapeHtml(r.reason) : ''}</td></tr>`).join('');
   const db = s.db;
   $('#im-db').checked = db.importable && d.deployed; $('#im-db').disabled = !db.importable;
-  $('#im-db-info').textContent = db.importable ? `— «${db.source}» del servidor → «${db.target}» de la app (reemplaza sus tablas)` : '— ' + db.why;
+  $('#im-db-info').textContent = !db.importable ? '— ' + db.why
+    : db.convert ? `— «${db.source}» (MariaDB) del servidor → «${db.target}» (PostgreSQL) de la app, con pgloader (reemplaza sus datos; omite lo que ya no existe en el código)`
+    : `— «${db.source}» del servidor → «${db.target}» de la app (reemplaza sus tablas)`;
   $('#im-st').checked = s.storage.exists && d.deployed; $('#im-st').disabled = !s.storage.exists;
   $('#im-st-info').textContent = s.storage.exists ? `— storage/app (${mb(s.storage.bytes)}) al volumen storage` : '— no hay storage/app';
   $('#im-order').textContent = d.deployed ? 'La app ya está desplegada: después de copiar el .env pulsa «Aplicar ahora» para que lo use.'
@@ -1169,6 +1171,8 @@ async function importScan() {
   if (!s.git.repo) checks.push(li('', 'La carpeta no es un repositorio de git: confirma que el código de GitHub sea el mismo que está en producción.'));
   if (s.uploads.length) checks.push(li('dp-bad', 'Archivos en <b>public/</b> que no vienen del repositorio (se perderían en cada despliegue): ' + s.uploads.map(u => `<span class="mono">${escapeHtml(u)}</span>`).join(', ') + '. Muévelos a storage (ver la guía).'));
   if (s.mix) checks.push(li('dp-bad', 'Usa Laravel Mix y <span class="mono">package.json</span> no tiene script <span class="mono">build</span>: agrégalo o el despliegue fallará.'));
+  if (s.mysql_only && s.mysql_only.length) checks.push(li('dp-bad', 'Consultas de MySQL que PostgreSQL no entiende (cámbialas antes de cambiar el tráfico; ver la guía, «De MariaDB o MySQL a PostgreSQL»): ' + s.mysql_only.map(x => `<br><span class="mono">${escapeHtml(x.file)}</span>: <span class="mono">${escapeHtml(x.line)}</span>`).join('')));
+  if (db.convert && db.importable) checks.push(li('', 'En PostgreSQL <span class="mono">like</span> y las comparaciones de texto distinguen mayúsculas: revisa búsquedas y correos (usa <span class="mono">whereLike</span> o <span class="mono">ilike</span>).'));
   if (s.php_req) checks.push(li('', `PHP que pide composer.json: <span class="mono">${escapeHtml(s.php_req)}</span> (la app usa ${escapeHtml(INFO.config.php)}).`));
   s.cron.forEach(c => checks.push(li('', `Cron en <span class="mono">${escapeHtml(c.file)}</span>: <span class="mono">${escapeHtml(c.line)}</span>. Desactívalo al cambiar el tráfico y activa el Programador.`)));
   s.supervisor.forEach(f => checks.push(li('', `Supervisor: <span class="mono">${escapeHtml(f)}</span>. Desactívalo al cambiar el tráfico y activa el Worker.`)));
@@ -1179,7 +1183,10 @@ async function importScan() {
 async function importRun() {
   const steps = [['env', '#im-env'], ['db', '#im-db'], ['storage', '#im-st']].filter(([, id]) => $(id).checked && !$(id).disabled).map(([s]) => s);
   if (!steps.length) return ui.toast('Elige al menos un paso', 'info');
-  if (steps.includes('db') && !await ui.confirm(`Se reemplazarán las tablas de la base «${IMPORT.scan.db.target}» de la app con las de «${IMPORT.scan.db.source}». La base vieja no se modifica.`, { title: 'Copiar la base de datos', danger: true, typed: APP, confirmText: 'Copiar' })) return;
+  const cdb = IMPORT.scan.db;
+  if (steps.includes('db') && !await ui.confirm(cdb.convert
+    ? `Se vaciarán las tablas de la base PostgreSQL «${cdb.target}» de la app y se llenarán con los datos de «${cdb.source}» (MariaDB), sin las tablas y columnas que ya no existen en el código. Se trabaja sobre una copia temporal: la base vieja no se modifica. Puede tardar varios minutos.`
+    : `Se reemplazarán las tablas de la base «${cdb.target}» de la app con las de «${cdb.source}». La base vieja no se modifica.`, { title: 'Copiar la base de datos', danger: true, typed: APP, confirmText: 'Copiar' })) return;
   const btn = $('#im-run'); btn.disabled = true;
   const d = await postJSON(appApi('import'), { path: IMPORT.scan.path, steps });
   btn.disabled = false;

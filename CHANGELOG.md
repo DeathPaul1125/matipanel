@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.17.0] - 2026-11-05
+
+### Añadido
+- Despliegues → **Importar**: **Copiar la base de datos** también funciona cuando la app nueva usa **PostgreSQL** y la vieja usaba MariaDB/MySQL en el mismo servidor. Convierte los datos con **pgloader** (lo instala si falta) sobre una copia temporal de la base vieja, de la que quita las tablas y columnas que ya no existen en el código, por ejemplo de migraciones borradas después de ejecutarse. Avisa de las columnas que la base vieja no tiene y marca la importación como fallida si pgloader informa errores. Al terminar, siempre borra la copia, el usuario temporal y el archivo de configuración. La base vieja no se modifica.
+- **Analizar** lista las consultas del código que PostgreSQL no entiende (`FIELD`, `DATE_FORMAT`, `GROUP_CONCAT`, `IFNULL`, `STR_TO_DATE`) y recuerda que `like` distingue mayúsculas.
+
 ## [0.16.3] - 2026-11-04
 
 ### Corregido
