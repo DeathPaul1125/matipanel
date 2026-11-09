@@ -34,6 +34,12 @@
     <button class="btn btn-primary" data-pkg="lvm2" onclick="install('lvm2', this)">Instalar</button>
   </div>
 
+  <div class="card" id="grow-card">
+    <div class="card-head"><h3>Espacio sin usar en los discos</h3>
+      <button class="btn btn-sm" onclick="growRescan(this)" title="Si agrandaste el disco en el hipervisor, el kernel vuelve a leer su tamaño">Detectar espacio nuevo</button></div>
+    <div id="grow-body"><p class="muted" style="margin:0;">Consultando…</p></div>
+  </div>
+
   <div class="card">
     <div class="card-head"><h3>Dispositivos de bloque</h3>
       <span class="muted small"><b>Libre</b> = sin particiones, sin sistema de archivos y sin montar</span></div>
@@ -156,6 +162,9 @@ const API = {
   vgExtend: "{{ url_for('storage.vg_extend') }}",
   lvCreate: "{{ url_for('storage.lv_create') }}",
   lvExtend: "{{ url_for('storage.lv_extend') }}",
+  grow: "{{ url_for('storage.grow_status') }}",
+  growRescan: "{{ url_for('storage.grow_rescan') }}",
+  growRun: "{{ url_for('storage.grow_run') }}",
   lvRemove: "{{ url_for('storage.lv_remove') }}",
   snapCreate: "{{ url_for('storage.snap_create') }}",
   raidCreate: "{{ url_for('storage.raid_create') }}",
@@ -234,7 +243,7 @@ async function install(pkg, btn) {
 }
 
 async function reloadAll() {
-  await Promise.all([loadLvm(), loadRaid()]);
+  await Promise.all([loadLvm(), loadRaid(), loadGrow()]);
   if (QUOTA) loadQuota();
 }
 
@@ -260,6 +269,67 @@ function updateHead() {
   else if (degraded.length) head('err', degraded.length === 1 ? `RAID degradado: /dev/${degraded[0].name}` : `${degraded.length} arrays RAID degradados`, sub);
   else if (syncing.length) head('warn', `${SYNC[syncing[0].sync.action] || 'Sincronizando'} /dev/${syncing[0].name}: ${syncing[0].sync.percent}%`, sub);
   else head('ok', 'Almacenamiento en orden', sub);
+}
+
+// ── Espacio sin usar (disco agrandado en el hipervisor) ──
+let GROW = null;
+const CONTENT = { LVM2_member: 'LVM', ext2: 'ext2', ext3: 'ext3', ext4: 'ext4', xfs: 'XFS', btrfs: 'Btrfs', swap: 'swap' };
+async function loadGrow() {
+  GROW = await getJSON(API.grow);
+  const body = document.getElementById('grow-body');
+  const cands = GROW.candidates || [];
+  if (GROW.error) { body.innerHTML = `<p class="muted" style="margin:0;">${escapeHtml(GROW.error)}</p>`; return; }
+  if (!cands.length) {
+    body.innerHTML = '<p class="muted" style="margin:0;">No hay espacio sin asignar en los discos. Si agrandaste un disco en el hipervisor, pulsa <b>Detectar espacio nuevo</b>.</p>';
+    return;
+  }
+  const needTool = cands.some(c => c.action === 'grow' && c.part) && !GROW.growpart;
+  body.innerHTML = (needTool ? `<p style="margin-top:0;">Para ampliar particiones hace falta <b>growpart</b>.
+      ${GROW.can_install ? `<button class="btn btn-sm btn-primary" onclick="install('cloud-guest-utils', this)">Instalar cloud-guest-utils</button>` : ''}</p>` : '')
+    + '<ul style="margin:0;">' + cands.map(c => {
+      const what = c.part ? `después de <span class="mono">${escapeHtml(c.part)}</span>` : '(el disco entero es un PV)';
+      const content = [CONTENT[c.content] || c.content || 'sin formato', c.vg ? `grupo ${c.vg}` : '', c.mount].filter(Boolean).map(escapeHtml).join(' · ');
+      const btn = c.action === 'grow'
+        ? ` <button class="btn btn-sm btn-primary" ${needTool && c.part ? 'disabled' : ''} onclick="growRun(${jsArg(c.disk)}, ${jsArg(c.part)})">Ampliar ${escapeHtml((c.part || c.disk).replace('/dev/', ''))}</button>`
+        : `<br><span class="muted small">${escapeHtml(c.why)}</span>`;
+      return `<li><b class="mono">${escapeHtml(c.disk)}</b>: <b>${fmtBytes(c.free)}</b> sin asignar ${what} <span class="muted">(${content})</span>${btn}</li>`;
+    }).join('') + '</ul>';
+}
+async function growRescan(btn) {
+  btn.disabled = true;
+  await act(API.growRescan, {}, 'Releyendo el tamaño de los discos…');
+  btn.disabled = false;
+  await Promise.all([loadGrow(), loadLvm()]);
+}
+async function growRun(disk, part) {
+  const c = (GROW.candidates || []).find(x => x.disk === disk && x.part === part);
+  if (!c) return;
+  const target = (part || disk).replace('/dev/', '');
+  const inner = c.content === 'LVM2_member' ? `el volumen físico (pvresize). El espacio queda libre en el grupo ${c.vg}`
+    : `el sistema de archivos ${CONTENT[c.content] || c.content} montado en ${c.mount}`;
+  const steps = part ? `1) Se respalda la tabla de particiones de ${disk} en /var/lib/matipanel/partition-backups.
+`
+      + (c.extended ? `2) Se amplía la partición extendida ${c.extended} y después ${part} hasta el final del disco.
+`
+                    : `2) Se prueba sin escribir y después se amplía ${part} hasta el final del disco.
+`)
+      + `3) Se amplía ${inner}.` : `Se amplía ${inner}.`;
+  const lvs = c.vg ? (LVM.lvm.lvs || []).filter(l => l.vg === c.vg && !l.snapshot && !l.thin_pool) : [];
+  if (!await ui.confirm(`Se usarán ${fmtBytes(c.free)} nuevos de ${disk}, sin borrar datos ni reiniciar:
+${steps}
+
+Escribe ${target} para confirmar.`,
+      { title: 'Ampliar ' + target, danger: true, typed: target, confirmText: 'Ampliar' })) return;
+  const d = await act(API.growRun, { disk, part }, 'Ampliando… puede tardar unos minutos');
+  if (!d) { loadGrow(); return; }
+  if (d.vg && lvs.length) {
+    const root = lvs.find(l => (l.mounts || []).includes('/')) || lvs[0];
+    const lv = await ui.prompt(`El grupo ${d.vg} tiene ${fmtBytes(d.vg_free || 0)} libres. ¿A qué volumen lógico se los das? ` +
+      `Volúmenes: ${lvs.map(l => l.name + ((l.mounts || []).length ? ' (' + l.mounts.join(', ') + ')' : '')).join(', ')}. Déjalo vacío para hacerlo después.`,
+      { title: 'Ampliar el volumen lógico', value: root.name, confirmText: 'Ampliar con todo el espacio' });
+    if (lv && lvs.some(l => l.name === lv.trim())) await act(API.lvExtend, { vg: d.vg, lv: lv.trim(), size: '100%' }, 'Ampliando el volumen…');
+  }
+  await Promise.all([loadGrow(), loadLvm()]);
 }
 
 // ── Discos y LVM ──

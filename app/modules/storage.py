@@ -29,7 +29,7 @@ FSTAB = "/etc/fstab"
 MDADM_CONF = "/etc/mdadm/mdadm.conf"
 ENV = {**os.environ, "LC_ALL": "C", "LVM_SUPPRESS_FD_WARNINGS": "1"}
 LSBLK_COLS = "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,ROTA,PTTYPE,UUID"
-INSTALLABLE = {"lvm2", "mdadm", "quota", "xfsprogs"}
+INSTALLABLE = {"lvm2", "mdadm", "quota", "xfsprogs", "cloud-guest-utils"}
 
 # \Z en vez de $: "$" acepta un salto de línea final ("vg\n"), que acabaría en /etc/fstab
 LVM_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}\Z")
@@ -1211,3 +1211,214 @@ def quota_set():
     if code != 0:
         return _err(_msg(out, err, "setquota falló"), 500)
     return jsonify({"ok": True, "message": f"Límites de {name} en {target} actualizados."})
+
+
+# ── Ampliar un disco que creció (VM agrandada en el hipervisor) ─────────
+# 1) el kernel vuelve a leer el tamaño (device/rescan), 2) growpart amplía la última partición,
+# 3) pvresize o el redimensionado del sistema de archivos. Antes de tocar la tabla se respalda con sfdisk.
+
+PART_BACKUP_DIR = "/var/lib/matipanel/partition-backups"
+GROW_MIN = 16 * 1024 ** 2  # menos que esto es alineación o la copia de la tabla GPT, no espacio agregado
+SECTOR = 512  # /sys/class/block/*/{size,start} siempre en sectores de 512 B
+DISK_NAME_RE = re.compile(r"^[a-z][a-z0-9]{0,31}\Z")
+GROW_FS = {"ext2", "ext3", "ext4", "xfs", "btrfs"}
+
+
+def unallocated_tail(disk_sectors, parts, pttype):
+    """Espacio sin asignar al final del disco y la partición que termina más tarde.
+    parts: [{"name", "number", "start", "size"}] en sectores (sysfs). En MBR la extendida mide 1-2 sectores
+    en sysfs, así que no cuenta para el final; si la última es lógica (5+), hay que ampliar antes la extendida.
+    → {"free": bytes, "last": part o None, "extended": part o None}"""
+    real = [p for p in parts if not (pttype == "dos" and p["number"] <= 4 and p["size"] <= 2)]
+    if not real:
+        return {"free": 0, "last": None, "extended": None}
+    last = max(real, key=lambda p: p["start"] + p["size"])
+    margin = 2048  # 1 MiB: copia de la tabla GPT y alineación
+    free = max(0, disk_sectors - (last["start"] + last["size"]) - margin) * SECTOR
+    ext = None
+    if pttype == "dos" and last["number"] >= 5:
+        ext = next((p for p in parts if p["number"] <= 4 and p["size"] <= 2), None)
+    return {"free": free, "last": last, "extended": ext}
+
+
+def parse_growpart(out):
+    """growpart: «CHANGE:» (--dry-run) o «CHANGED:» → ("change", sectores nuevos); «NOCHANGE:» → ("nochange", None)."""
+    m = re.search(r"^CHANGED?:.*\bnew: size=(\d+)", out or "", re.M)
+    if m:
+        return "change", int(m.group(1))
+    if re.search(r"^NOCHANGE:", out or "", re.M):
+        return "nochange", None
+    return "error", None
+
+
+def _sysfs(name, field):
+    try:
+        with open(f"/sys/class/block/{name}/{field}") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def grow_candidates(devs, pvs=()):
+    """Discos con espacio sin asignar al final y qué se puede hacer con él (action "grow" o why)."""
+    by_path = {d["path"]: d for d in devs}
+    pv_vg = {p["path"]: (p["vg"], p["size"]) for p in pvs}
+    out = []
+    for d in devs:
+        if d["type"] != "disk" or d["name"].startswith(SKIP_PREFIXES) or not DISK_NAME_RE.match(d["name"]):
+            continue
+        disk_sectors = _sysfs(d["name"], "size")
+        if not disk_sectors:
+            continue
+        kids = [by_path[c] for c in d["children"] if c in by_path and by_path[c]["type"] == "part"]
+        if not kids:
+            # Disco entero usado como PV de LVM (sin particiones): basta pvresize
+            if d["fstype"] == "LVM2_member" and d["path"] in pv_vg:
+                vg, pv_size = pv_vg[d["path"]]
+                free = disk_sectors * SECTOR - pv_size
+                if free >= GROW_MIN:
+                    out.append({"disk": d["path"], "free": free, "part": "", "extended": "", "content": "LVM2_member",
+                                "mount": "", "vg": vg, "action": "grow", "why": ""})
+            continue
+        if d["pttype"] not in ("gpt", "dos"):
+            continue
+        parts = []
+        for k in kids:
+            num, start, size = (_sysfs(k["name"], f) for f in ("partition", "start", "size"))
+            if None not in (num, start, size):
+                parts.append({"name": k["name"], "path": k["path"], "number": num, "start": start, "size": size})
+        tail = unallocated_tail(disk_sectors, parts, d["pttype"])
+        if tail["free"] < GROW_MIN or not tail["last"]:
+            continue
+        node = by_path[tail["last"]["path"]]
+        fs, mount = node["fstype"], next((m for m in node["mounts"] if m.startswith("/")), "")
+        why = ""
+        if fs == "swap" or "[SWAP]" in node["mounts"]:
+            why = (f"la última partición ({node['name']}) es swap: la que está antes no toca el espacio nuevo. "
+                   "Ver la ayuda: «Usar el espacio que agregaste a un disco».")
+        elif fs in ("ext2", "ext3", "ext4", "xfs", "btrfs") and not mount:
+            why = f"{node['name']} ({fs}) no está montada: móntala primero para ampliarla en línea."
+        elif fs != "LVM2_member" and fs not in GROW_FS:
+            why = f"{node['name']} contiene {fs or 'algo que no se reconoce'}: el panel solo amplía LVM, ext4, XFS y Btrfs."
+        out.append({"disk": d["path"], "free": tail["free"], "part": node["path"],
+                    "extended": f"{d['path']}{'p' if d['name'][-1].isdigit() else ''}{tail['extended']['number']}"
+                    if tail["extended"] else "",
+                    "content": fs, "mount": mount, "vg": pv_vg.get(node["path"], ("", 0))[0],
+                    "action": "" if why else "grow", "why": why})
+    return out
+
+
+def _part_number(path):
+    m = re.search(r"(\d+)\Z", path)
+    return m.group(1) if m else ""
+
+
+@storage_bp.route("/api/grow")
+@login_required
+def grow_status():
+    devs, error = _devices()
+    st = _lvm_state(devs or [])
+    rescan = any(os.path.exists(f"/sys/class/block/{d['name']}/device/rescan") for d in devs or []
+                 if d["type"] == "disk" and DISK_NAME_RE.match(d["name"]))
+    return jsonify({"candidates": grow_candidates(devs or [], st.get("pvs") or []), "error": error,
+                    "growpart": bool(shutil.which("growpart")), "rescan": rescan, "can_install": _can_install()})
+
+
+@storage_bp.route("/api/grow/rescan", methods=["POST"])
+@login_required
+@exclusive
+def grow_rescan():
+    """Pide al kernel que vuelva a leer el tamaño de cada disco (no escribe nada en el disco)."""
+    devs, error = _devices()
+    if error:
+        return _err(error, 500)
+    done = []
+    for d in devs:
+        if d["type"] != "disk" or d["name"].startswith(SKIP_PREFIXES) or not DISK_NAME_RE.match(d["name"]):
+            continue
+        path = f"/sys/class/block/{d['name']}/device/rescan"
+        if os.path.exists(path):
+            try:
+                with open(path, "w") as f:
+                    f.write("1")
+                done.append(d["name"])
+            except OSError:
+                pass
+    msg = (f"Tamaño releído en {', '.join(done)}." if done
+           else "Los discos de este servidor actualizan su tamaño solos (virtio/NVMe): no hizo falta releerlo.")
+    return jsonify({"ok": True, "message": msg})
+
+
+@storage_bp.route("/api/grow", methods=["POST"])
+@login_required
+@exclusive
+def grow_run():
+    d = _data()
+    devs, error = _devices()
+    if error:
+        return _err(error, 500)
+    st = _lvm_state(devs)
+    c = next((x for x in grow_candidates(devs, st.get("pvs") or [])
+              if x["disk"] == d.get("disk") and x["part"] == (d.get("part") or "")), None)
+    if not c:
+        return _err("Ese disco ya no tiene espacio sin asignar; refresca la página.")
+    if c["action"] != "grow":
+        return _err(c["why"])
+    steps = []
+
+    def step(cmd, timeout=300):
+        code, out, err = _cmd(cmd, timeout=timeout)
+        steps.append({"cmd": " ".join(cmd), "ok": code == 0, "output": ((out or "") + (err or "")).strip()[-2000:]})
+        return code, (out or "") + (err or "")
+
+    if c["part"]:
+        if not shutil.which("growpart"):
+            return _err("Falta growpart: instala el paquete cloud-guest-utils.")
+        # 1) Respaldo de la tabla de particiones (se restaura con: sfdisk /dev/sdX < respaldo)
+        code, dump, err = _cmd(["sfdisk", "--dump", c["disk"]], timeout=30)
+        if code != 0 or not dump.strip():
+            return _err("No se pudo respaldar la tabla de particiones: " + _msg(dump, err))
+        os.makedirs(PART_BACKUP_DIR, mode=0o700, exist_ok=True)
+        backup = os.path.join(PART_BACKUP_DIR, f"{os.path.basename(c['disk'])}-{time.strftime('%Y%m%d-%H%M%S')}.sfdisk")
+        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(dump)
+        steps.append({"cmd": f"sfdisk --dump {c['disk']} > {backup}", "ok": True, "output": ""})
+        # 2) MBR con la última partición lógica: primero la extendida
+        if c["extended"]:
+            code, out = step(["growpart", c["disk"], _part_number(c["extended"])])
+            if parse_growpart(out)[0] == "error":
+                return jsonify({"ok": False, "error": "No se pudo ampliar la partición extendida: "
+                                + out.strip()[-500:], "steps": steps, "backup": backup}), 500
+        # 3) Prueba sin escribir y 4) ampliación real
+        num = _part_number(c["part"])
+        code, out = step(["growpart", "--dry-run", c["disk"], num])
+        if parse_growpart(out)[0] != "change":
+            return jsonify({"ok": False, "error": "growpart no puede ampliar la partición: " + out.strip()[-500:],
+                            "steps": steps, "backup": backup}), 400
+        code, out = step(["growpart", c["disk"], num])
+        if parse_growpart(out)[0] != "change":
+            return jsonify({"ok": False, "error": "growpart falló; la tabla está respaldada en " + backup,
+                            "steps": steps, "backup": backup}), 500
+    else:
+        backup = ""
+    # 5) Lo que hay adentro
+    target, fs = c["part"] or c["disk"], c["content"]
+    if fs == "LVM2_member":
+        cmd = ["pvresize", target]
+    elif fs in ("ext2", "ext3", "ext4"):
+        cmd = ["resize2fs", target]
+    elif fs == "xfs":
+        cmd = ["xfs_growfs", c["mount"]]
+    else:
+        cmd = ["btrfs", "filesystem", "resize", "max", c["mount"]]
+    code, out = step(cmd, timeout=3600)
+    if code != 0:
+        return jsonify({"ok": False, "error": f"La partición creció, pero {cmd[0]} falló. Revisa la salida.",
+                        "steps": steps, "backup": backup}), 500
+    res = {"ok": True, "steps": steps, "backup": backup, "vg": c["vg"],
+           "message": f"{target} ampliado" + (f": el grupo {c['vg']} tiene el espacio nuevo libre." if c["vg"] else ".")}
+    if c["vg"]:
+        vgo = next((v for v in _lvm_state().get("vgs") or [] if v["name"] == c["vg"]), None)
+        res["vg_free"] = vgo["free"] if vgo else 0
+    return jsonify(res)

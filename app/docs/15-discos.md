@@ -95,6 +95,10 @@ La tarjeta **Qué ocupa más espacio** muestra las carpetas y archivos de una ca
 
 Discos solo muestra particiones montadas. Revisa que el disco se vea en **Sistema → Hardware → Dispositivos de bloque**. Después tendrás que crear una partición, formatearla y montarla desde la [Terminal](29-terminal.md), y agregarla a `/etc/fstab`.
 
+### Agrandé el disco en el hipervisor y el tamaño no cambia
+
+Linux no usa solo el espacio nuevo: hay que releer el tamaño del disco y ampliar la partición y lo que tiene adentro. Hazlo en **Almacenamiento → Discos y LVM → Espacio sin usar en los discos**. Ver [Usar el espacio que agregaste a un disco](53-almacenamiento.md#usar-el-espacio-que-agregaste-a-un-disco).
+
 ### ¿Por qué aparece /boot/efi con tipo vfat?
 
 Es la partición de arranque UEFI. Es pequeña y normalmente casi vacía. No la modifiques.

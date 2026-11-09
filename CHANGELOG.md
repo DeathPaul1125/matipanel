@@ -2,6 +2,16 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.18.0] - 2026-11-09
+
+### Añadido
+- Almacenamiento → **Discos y LVM**: nueva tarjeta **Espacio sin usar en los discos**, para usar el espacio de un disco agrandado en el hipervisor.
+  - **Detectar espacio nuevo** hace que el kernel vuelva a leer el tamaño de los discos (`device/rescan`).
+  - **Ampliar** respalda la tabla de particiones con `sfdisk`, prueba con `growpart --dry-run` y amplía la última partición hasta el final del disco. En MBR con partición lógica, amplía antes la extendida.
+  - Después amplía el contenido (`pvresize`, `resize2fs`, `xfs_growfs` o `btrfs filesystem resize max`). Si es LVM, ofrece dar el espacio nuevo a un volumen lógico, por defecto el de `/`.
+  - Todo se hace en línea. Si no se puede (por ejemplo, Debian sin LVM con la swap después de la raíz), explica el motivo en lugar de intentarlo.
+- `cloud-guest-utils` (growpart) se puede instalar desde Almacenamiento.
+
 ## [0.17.0] - 2026-11-05
 
 ### Añadido

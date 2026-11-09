@@ -144,6 +144,52 @@ Si el volumen tiene ext4 o XFS, el sistema de archivos también se amplía, incl
 
 > **Importante:** El panel solo amplía, **nunca reduce**. Reducir un volumen puede destruir datos y XFS no lo permite. Si de verdad necesitas reducir uno, hazlo desde la [Terminal](29-terminal.md) con un respaldo reciente.
 
+## Usar el espacio que agregaste a un disco
+
+Si agrandaste el disco de una máquina virtual en el hipervisor (VMware, Hyper-V, Proxmox…), Linux **no usa el espacio nuevo solo**. Faltan tres pasos:
+
+1. **El kernel no se enteró del tamaño nuevo.** Los discos SCSI (`sda`, típicos de VMware y Hyper-V) siguen mostrando el tamaño viejo hasta que se les pide que lo relean. Los discos virtio (`vda`) y NVMe se actualizan solos.
+2. **La partición no crece.** El espacio nuevo queda **sin asignar** al final del disco.
+3. **Lo que hay dentro tampoco crece.** Si la partición es LVM, falta ampliar el volumen físico y después el volumen lógico. Si tiene el sistema de archivos directo, falta ampliarlo.
+
+La tarjeta **Espacio sin usar en los discos**, arriba de **Dispositivos de bloque**, hace los tres:
+
+1. Pulsa **Detectar espacio nuevo**. El kernel vuelve a leer el tamaño de los discos; no se escribe nada en ellos.
+2. Si aparece «**/dev/sda: 20 GB sin asignar después de /dev/sda3**», pulsa **Ampliar sda3** y escribe el nombre de la partición para confirmar. El panel:
+   - **respalda la tabla de particiones** en `/var/lib/matipanel/partition-backups/`;
+   - prueba la ampliación **sin escribir** (`growpart --dry-run`) y solo si sale bien amplía la partición hasta el final del disco. Con particiones MBR donde la última es lógica (`sda5`, la instalación con LVM de Debian), amplía primero la extendida (`sda2`);
+   - amplía lo que hay dentro: `pvresize` si es LVM, `resize2fs` si es ext4, `xfs_growfs` si es XFS o `btrfs filesystem resize max` si es Btrfs.
+3. Si es LVM, el panel ofrece dar el espacio nuevo a un volumen lógico, por defecto el de `/`. Si prefieres repartirlo, déjalo vacío y usa **Ampliar** en [cada volumen](#ampliar-un-volumen).
+
+Todo se hace **en línea**, sin desmontar ni reiniciar. Ampliar particiones necesita `growpart`, del paquete `cloud-guest-utils`; si falta, la tarjeta ofrece instalarlo. Si un disco entero (sin particiones) es un volumen físico de LVM, solo hace falta `pvresize`, y el panel lo hace igual.
+
+### Cuando no se puede ampliar
+
+La tarjeta dice el motivo en lugar del botón. El caso más común:
+
+- **«La última partición es swap».** Debian instalado **sin LVM** deja la raíz en `sda1` y la swap en `sda5`, **después** de la raíz. El espacio nuevo queda pegado a la swap, no a la raíz, y una partición solo crece hacia el espacio que tiene a continuación. Hay dos opciones:
+  - **Agregar un disco nuevo** en el hipervisor y usarlo con LVM: **Crear PV**, **Crear VG** y **Crear volumen**, montado donde haga falta, por ejemplo `/var/lib/docker` o `/srv`. Es lo más seguro.
+  - **Quitar la swap y volver a crearla al final**, desde la [Terminal](29-terminal.md): `swapoff -a`, borrar `sda5` y `sda2` con `fdisk`, ampliar `sda1` con `growpart /dev/sda 1` y `resize2fs /dev/sda1`, y crear la swap como archivo (`fallocate -l 2G /swapfile`, `mkswap`, `swapon` y su línea en `/etc/fstab`). Hazlo con un respaldo reciente o un snapshot de la máquina virtual.
+- **«No está montada».** ext4, XFS y Btrfs se amplían montados. Móntala primero.
+- **«Contiene … el panel solo amplía LVM, ext4, XFS y Btrfs».** Por ejemplo, LUKS o NTFS: hazlo a mano.
+
+### Si algo sale mal
+
+La tabla de particiones de antes queda en `/var/lib/matipanel/partition-backups/sda-AAAAMMDD-HHMMSS.sfdisk`. Para restaurarla: `sfdisk /dev/sda < /var/lib/matipanel/partition-backups/sda-….sfdisk`. Ampliar solo mueve el final de la partición hacia el espacio libre, así que los datos no se tocan.
+
+### Por consola
+
+Es lo mismo que hace el panel; por ejemplo, para LVM en `sda3`:
+
+```
+echo 1 > /sys/class/block/sda/device/rescan
+apt install -y cloud-guest-utils
+sfdisk --dump /dev/sda > /root/sda.sfdisk
+growpart /dev/sda 3
+pvresize /dev/sda3
+lvextend -r -l +100%FREE /dev/debian-vg/root
+```
+
 ## Usar snapshots
 
 Un snapshot congela el estado de un volumen en un instante. Sirve, por ejemplo, para tener un punto de retorno antes de actualizar una aplicación.
@@ -292,7 +338,7 @@ Pulsa **Refrescar**. Si aparece como **tabla vacía** o **con datos**, tiene res
 
 ### ¿Puedo ampliar el disco del sistema?
 
-Sí, si el sistema se instaló con LVM (por ejemplo `/dev/mapper/debian--vg-root`). Agrega un disco al grupo con **Crear PV** y **Agregar PV**, y luego pulsa **Ampliar** en el volumen raíz. Si se instaló en una partición normal, el panel no puede ampliarlo.
+Sí. Si agrandaste el disco en el hipervisor, sigue [Usar el espacio que agregaste a un disco](#usar-el-espacio-que-agregaste-a-un-disco). Si el sistema se instaló con LVM (por ejemplo `/dev/mapper/debian--vg-root`), también puedes agregar un disco nuevo al grupo con **Crear PV** y **Agregar PV**, y luego pulsar **Ampliar** en el volumen raíz. Si se instaló sin LVM y la swap quedó después de la raíz, revisa [Cuando no se puede ampliar](#cuando-no-se-puede-ampliar).
 
 ### ¿Qué pasa si el servidor se reinicia mientras un array se sincroniza?
 
