@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.18.1] - 2026-11-12
+
+### Documentación
+- Respaldos de apps: nueva pregunta frecuente **¿Puedo pasar las apps a otro servidor con MatiPanel?**, con el paso a paso de **Recuperación ante desastres** para mudar apps y el cambio definitivo. Reemplaza la respuesta vieja, que decía que había que hacerlo a mano. También se aclara dónde está la tarjeta: al final de **Respaldos de apps**, no en **Respaldos**.
+- Migrar proyectos: aviso al inicio para las apps que ya están en otro MatiPanel.
+
 ## [0.18.0] - 2026-11-09
 
 ### Añadido

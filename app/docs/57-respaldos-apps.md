@@ -156,6 +156,10 @@ Al restaurar:
 
 Si este servidor se pierde (falla de disco, reinstalación, robo), las apps se recrean en un servidor nuevo a partir de sus respaldos: configuración, base de datos, archivos y código.
 
+También sirve para **mudar apps de un MatiPanel a otro** sin que nada falle: ver [¿Puedo pasar las apps a otro servidor con MatiPanel?](#puedo-pasar-las-apps-a-otro-servidor-con-matipanel).
+
+La tarjeta **Recuperación ante desastres** está **al final** de la página **Respaldos de apps** (menú **Archivos y discos**), debajo de **Configuración del panel**. No confundir con **Respaldos**, que respalda carpetas.
+
 ### Antes de que pase (hazlo ya)
 
 - **Guarda fuera de este servidor** los datos del servidor de respaldos: IP, usuario y carpeta (Linux) o recurso, dominio, usuario y **contraseña** de la cuenta (Windows). Sin ellos no podrás conectar el panel nuevo.
@@ -208,9 +212,23 @@ Lo que pese la base comprimida más los archivos subidos. La lista de respaldos 
 
 Cada app se respalda en un solo servidor. Para tener una segunda copia, cambia su **Servidor** de vez en cuando y pulsa **Respaldar ahora**, o copia la carpeta de respaldos del servidor Linux al Windows (o al revés) con las herramientas de esos servidores.
 
-### ¿Puedo restaurar en otro servidor?
+### ¿Puedo pasar las apps a otro servidor con MatiPanel?
 
-Sí, a mano: copia la carpeta del respaldo, crea la app en el otro MatiPanel y restaura `db.sql.gz` (`gunzip -c db.sql.gz | mariadb`) y los volúmenes (`tar -xzf vol-….tar.gz -C <volumen>`). En `config.tar.gz` está el `.env` original.
+Sí, con [Recuperación ante desastres](#recuperacion-ante-desastres). Los dos paneles tienen que usar el **mismo servidor de respaldos**:
+
+1. **En el panel viejo:** en cada app, pulsa **Respaldar ahora**. Opcional: en **Configuración del panel**, pulsa **Respaldar** para llevarte también usuarios, permisos y ajustes.
+2. **En el panel nuevo:** en **Servidores de respaldo**, agrega el mismo servidor.
+   - Si es Linux, agrega en ese servidor la clave SSH del panel nuevo, como se explica en [Paso a paso en el servidor nuevo](#paso-a-paso-en-el-servidor-nuevo).
+   - Si quieres la configuración del panel viejo, restáurala ahora, en **Configuración del panel → Restaurar…**.
+3. Al final de la página, en **Recuperación ante desastres**, pulsa **Buscar apps en el servidor** y luego **Recuperar…** en cada app.
+4. **Prueba la app nueva.** El panel viejo sigue funcionando y las dos copias trabajan por separado: lo que se guarde en una no aparece en la otra.
+5. **Para el cambio definitivo:**
+   1. Haz un último **Respaldar ahora** en el panel viejo.
+   2. En el nuevo, abre **Ver respaldos → Restaurar…** con ese respaldo.
+   3. Actualiza el DNS o el archivo `hosts` de los equipos, y la URL del webhook en GitHub.
+   4. Detén o elimina la app del panel viejo.
+
+Si el otro servidor tiene proyectos en Apache, fuera de Despliegues, no se recuperan así. Copia su carpeta y su base a este servidor y usa la pestaña **Importar** ([Migrar proyectos](60-migrar-proyectos.md)).
 
 ## Ver también
 

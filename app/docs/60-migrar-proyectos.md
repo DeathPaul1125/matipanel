@@ -8,6 +8,8 @@ La migración se hace **sin apagar el sitio actual**: el proyecto viejo sigue at
 
 > **Atajo:** después de subir el código a GitHub y crear la app, la pestaña **Importar** de la app hace sola los pasos del `.env`, la base y los archivos. Ver [Atajo: la pestaña Importar](#atajo-la-pestana-importar).
 
+> **¿La app ya está en otro MatiPanel?** No hace falta esta guía: usa [Recuperación ante desastres](57-respaldos-apps.md#puedo-pasar-las-apps-a-otro-servidor-con-matipanel), que la recrea con su configuración, su base y sus archivos.
+
 ## Antes de empezar
 
 ### Qué cambia
