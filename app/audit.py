@@ -28,7 +28,7 @@ MODULES = {
     "auth": "Acceso", "dashboard": "Dashboard", "system": "Sistema", "processes": "Procesos", "services": "Servicios",
     "cron": "Tareas", "disk": "Discos", "backups": "Respaldos", "users": "Usuarios", "network": "Red",
     "traffic": "Tráfico de red", "firewall": "Firewall", "webserver": "Servidor web", "ssl": "SSL", "php": "PHP",
-    "databases": "Bases de datos", "docker": "Docker", "files": "Archivos", "packages": "Paquetes", "logs": "Logs",
+    "databases": "Bases de datos", "docker": "Docker", "files": "Archivos", "cfiles": "Archivos de contenedores", "packages": "Paquetes", "logs": "Logs",
     "terminal": "Terminal", "appearance": "Apariencia", "help": "Ayuda", "remote": "Multi-servidor", "mail": "Correo",
     "dns": "DNS", "shares": "Compartidos", "storage": "Almacenamiento", "dbexplorer": "Explorador BD",
     "deploy": "Despliegues", "audit": "Auditoría", "notify": "Notificaciones", "appbackup": "Respaldos de apps", "roles": "Permisos del panel",

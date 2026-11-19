@@ -2,6 +2,22 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.19.0] - 2026-11-19
+
+### Añadido
+- **Archivos de contenedores** (menú **Archivos y discos**; también los botones **Archivos** de Docker y de la tabla Contenedores de cada app):
+  - es un gestor de archivos dentro de cualquier contenedor en marcha;
+  - permite navegar, abrir y editar texto (hasta 2 MB, avisando si el archivo cambió mientras se editaba), descargar archivos o carpetas (`.tar`), subir, crear, renombrar y eliminar;
+  - lo nuevo queda con el dueño de la carpeta (`www-data` en las apps);
+  - marca qué carpetas son **volúmenes** (se conservan) y avisa de que el resto se pierde al volver a desplegar.
+
+  Funciona con `docker exec` y `docker cp`, así que los enlaces simbólicos se resuelven dentro del contenedor. El rol Solo lectura no tiene acceso.
+- Almacenamiento → **Mover la swap a un archivo y ampliar**: para Debian sin LVM, con la swap después de la raíz. El panel respalda la tabla, `fstab` y `resume`, apaga la swap y borra su partición y la extendida. Después amplía la raíz en línea, crea `/swapfile` del mismo tamaño y actualiza `fstab` y el initramfs. Solo se ofrece si la swap en uso cabe en la RAM.
+- Si una operación de Almacenamiento falla, el aviso muestra el comando que falló y su salida.
+
+### Corregido
+- Almacenamiento: la **partición extendida** de MBR (`sda2`, 1 KB) aparecía como «libre» con el botón **Crear PV**, y crear un PV ahí podía romper las particiones lógicas, como la swap. Ahora aparece como **extendida**, sin acciones.
+
 ## [0.18.1] - 2026-11-12
 
 ### Documentación

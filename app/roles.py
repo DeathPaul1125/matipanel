@@ -24,7 +24,7 @@ USER_RE = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]{0,63}")
 # Siempre permitidos a quien entra: su propia cuenta (2FA), apariencia, ayuda, dashboard y la salida en vivo
 ALWAYS = {"auth", "appearance", "help", "dashboard", "jobs"}
 ADMIN_ONLY = {"roles"}
-READONLY_BLOCKED = {"terminal", "files", "dbexplorer"}
+READONLY_BLOCKED = {"terminal", "files", "cfiles", "dbexplorer"}
 READONLY_BLOCKED_EP = {"databases.dump", "traffic.capture_download", "traffic.capture_summary", "deploy.env",
                        "deploy.webhook_secret"}
 # Rutas de WebSocket (no tienen blueprint): primer segmento de la URL → módulo

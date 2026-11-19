@@ -68,6 +68,7 @@ async function loadInfo() {
 
 const DEPLOY_URL = {{ url_for('deploy.index')|tojson }};
 const TERM_URL = {{ url_for('terminal.index')|tojson }};
+const CFILES_URL = {{ url_for('cfiles.index')|tojson }};
 let CONT = {containers: [], groups: []};
 
 function containerRow(c) {
@@ -87,7 +88,8 @@ function containerRow(c) {
       <button class="btn btn-sm" title="Detener" onclick="dockerAction(${jsArg(c.id)},'stop',${jsArg(title)})">■</button>
       <button class="btn btn-sm" title="Reiniciar" onclick="dockerAction(${jsArg(c.id)},'restart',${jsArg(title)})">↻</button>
       <button class="btn btn-sm" onclick="viewLogs(${jsArg(c.id)},${jsArg(c.name)})">logs</button>
-      ${c.state === 'running' ? `<a class="btn btn-sm" title="Abrir una terminal dentro del contenedor" href="${escapeHtml(TERM_URL + '?container=' + encodeURIComponent(c.name))}">consola</a>` : ''}
+      ${c.state === 'running' ? `<a class="btn btn-sm" title="Abrir una terminal dentro del contenedor" href="${escapeHtml(TERM_URL + '?container=' + encodeURIComponent(c.name))}">consola</a>`
+        + ` <a class="btn btn-sm" title="Ver y editar los archivos del contenedor" href="${escapeHtml(CFILES_URL + '?c=' + encodeURIComponent(c.name) + '&path=%2F')}">archivos</a>` : ''}
     </td>
   </tr>`;
 }

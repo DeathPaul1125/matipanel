@@ -163,13 +163,30 @@ La tarjeta **Espacio sin usar en los discos**, arriba de **Dispositivos de bloqu
 
 Todo se hace **en línea**, sin desmontar ni reiniciar. Ampliar particiones necesita `growpart`, del paquete `cloud-guest-utils`; si falta, la tarjeta ofrece instalarlo. Si un disco entero (sin particiones) es un volumen físico de LVM, solo hace falta `pvresize`, y el panel lo hace igual.
 
+### La swap está al final del disco
+
+Debian instalado **sin LVM** deja la raíz en `sda1`, una partición **extendida** en `sda2` y la swap en `sda5`, **después** de la raíz. El espacio nuevo queda pegado a la swap, y una partición solo crece hacia el espacio que tiene a continuación.
+
+En ese caso, la tarjeta muestra **Mover la swap a un archivo y ampliar sda1**. Al pulsarlo y escribir el nombre de la partición, el panel:
+
+1. Respalda la tabla de particiones, `/etc/fstab` y la configuración de hibernación (`/etc/initramfs-tools/conf.d/resume`).
+2. Apaga la swap: lo que tenga en uso pasa a la RAM. Por eso solo se ofrece si la swap en uso cabe en la RAM libre.
+3. Borra `sda5` y la extendida `sda2`.
+4. Amplía `sda1` hasta el final del disco y su sistema de archivos (`resize2fs`, en línea).
+5. Crea `/swapfile` del mismo tamaño que la swap vieja y lo activa.
+6. En `/etc/fstab`, comenta la línea de la swap vieja y agrega `/swapfile`. Si el initramfs esperaba la swap vieja para hibernar, lo cambia a `RESUME=none` y lo regenera, para que el arranque no se demore buscándola.
+
+No borra datos ni hace falta reiniciar. Aun así, **toma un snapshot de la máquina virtual antes**: es la forma más rápida de volver atrás si algo sale mal. Si falla antes de borrar las particiones, la swap se vuelve a encender y el disco queda como estaba. Si falla después, el mensaje dice en qué paso y dónde está el respaldo de la tabla.
+
+Al terminar, comprueba con `df -h /` que la raíz tiene el tamaño nuevo y con `swapon --show` que la swap es `/swapfile`.
+
+> **Nota:** La partición extendida (`sda2`) aparece en **Dispositivos de bloque** con el estado **extendida**: solo contiene a las particiones lógicas, como `sda5`. No se puede usar como volumen físico de LVM.
+
 ### Cuando no se puede ampliar
 
 La tarjeta dice el motivo en lugar del botón. El caso más común:
 
-- **«La última partición es swap».** Debian instalado **sin LVM** deja la raíz en `sda1` y la swap en `sda5`, **después** de la raíz. El espacio nuevo queda pegado a la swap, no a la raíz, y una partición solo crece hacia el espacio que tiene a continuación. Hay dos opciones:
-  - **Agregar un disco nuevo** en el hipervisor y usarlo con LVM: **Crear PV**, **Crear VG** y **Crear volumen**, montado donde haga falta, por ejemplo `/var/lib/docker` o `/srv`. Es lo más seguro.
-  - **Quitar la swap y volver a crearla al final**, desde la [Terminal](29-terminal.md): `swapoff -a`, borrar `sda5` y `sda2` con `fdisk`, ampliar `sda1` con `growpart /dev/sda 1` y `resize2fs /dev/sda1`, y crear la swap como archivo (`fallocate -l 2G /swapfile`, `mkswap`, `swapon` y su línea en `/etc/fstab`). Hazlo con un respaldo reciente o un snapshot de la máquina virtual.
+- **«La última partición es swap y no se puede mover sola».** Ver [La swap está al final del disco](#la-swap-esta-al-final-del-disco). El motivo dice qué falta: por ejemplo, que la swap en uso no cabe en la RAM libre (cierra programas o espera a que baje) o que hay otras particiones además de la swap detrás de la que se ampliaría.
 - **«No está montada».** ext4, XFS y Btrfs se amplían montados. Móntala primero.
 - **«Contiene … el panel solo amplía LVM, ext4, XFS y Btrfs».** Por ejemplo, LUKS o NTFS: hazlo a mano.
 

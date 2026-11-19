@@ -28,7 +28,9 @@ storage_bp = Blueprint("storage", __name__)
 FSTAB = "/etc/fstab"
 MDADM_CONF = "/etc/mdadm/mdadm.conf"
 ENV = {**os.environ, "LC_ALL": "C", "LVM_SUPPRESS_FD_WARNINGS": "1"}
-LSBLK_COLS = "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,ROTA,PTTYPE,UUID"
+LSBLK_COLS = "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,ROTA,PTTYPE,UUID,PARTTYPE"
+# Particiones extendidas de MBR: contienen a las lógicas (sda5…); escribir en ellas rompe esa cadena
+EXTENDED_PARTTYPES = {"0x5", "0xf", "0x85"}
 INSTALLABLE = {"lvm2", "mdadm", "quota", "xfsprogs", "cloud-guest-utils"}
 
 # \Z en vez de $: "$" acepta un salto de línea final ("vg\n"), que acabaría en /etc/fstab
@@ -126,6 +128,7 @@ def parse_lsblk(data):
                 "mounts": mounts, "model": (node.get("model") or "").strip(),
                 "serial": (node.get("serial") or "").strip(), "rota": _bool(node.get("rota")),
                 "pttype": node.get("pttype") or "", "uuid": node.get("uuid") or "",
+                "parttype": str(node.get("parttype") or "").lower(),
                 "children": [], "parents": [], "depth": depth,
             }
             order.append(path)
@@ -158,14 +161,23 @@ def is_free(n):
     """Sin particiones/hijos, sin sistema de archivos ni firma, sin montar y no es del sistema."""
     if n["type"] not in FREE_TYPES or n["name"].startswith(SKIP_PREFIXES) or n["size"] <= 0:
         return False
+    if is_extended(n):
+        return False
     if n["children"] or n["fstype"] or n["mounts"] or n.get("has_root"):
         return False
     return not (n["type"] == "disk" and n["pttype"])
 
 
+def is_extended(n):
+    """Partición extendida de MBR (por su tipo, o por medir menos de 1 MiB: lsblk la muestra de 1 KB)."""
+    return n["type"] == "part" and (n.get("parttype") in EXTENDED_PARTTYPES or 0 < n["size"] < 1024 ** 2)
+
+
 def _dev_status(n):
     if n["free"]:
         return "libre"
+    if is_extended(n):
+        return "extendida"
     if n.get("has_root") and n["type"] in ("disk", "part"):
         return "sistema"
     if "[SWAP]" in n["mounts"]:
@@ -1294,7 +1306,18 @@ def grow_candidates(devs, pvs=()):
         fs, mount = node["fstype"], next((m for m in node["mounts"] if m.startswith("/")), "")
         why = ""
         if fs == "swap" or "[SWAP]" in node["mounts"]:
-            why = (f"la última partición ({node['name']}) es swap: la que está antes no toca el espacio nuevo. "
+            plan, why = swap_plan(parts, by_path, d["pttype"])
+            if plan and not swap_fits(_read_meminfo()):
+                plan, why = None, "la swap en uso no cabe en la RAM libre para poder apagarla"
+            if plan:
+                prev = by_path[plan["prev"]["path"]]
+                out.append({"disk": d["path"], "free": tail["free"] + plan["swap_bytes"], "part": prev["path"],
+                            "extended": "", "content": plan["fs"], "mount": plan["mount"], "vg": "",
+                            "action": "swap", "plan": plan, "swap": [p["path"] for p in plan["swaps"]],
+                            "swap_bytes": plan["swap_bytes"], "removes_ext": bool(plan["delete_ext"]),
+                            "why": f"la swap ({node['name']}) está al final del disco, después de {prev['name']}"})
+                continue
+            why = (f"la última partición ({node['name']}) es swap y no se puede mover sola: {why}. "
                    "Ver la ayuda: «Usar el espacio que agregaste a un disco».")
         elif fs in ("ext2", "ext3", "ext4", "xfs", "btrfs") and not mount:
             why = f"{node['name']} ({fs}) no está montada: móntala primero para ampliarla en línea."
@@ -1306,6 +1329,38 @@ def grow_candidates(devs, pvs=()):
                     "content": fs, "mount": mount, "vg": pv_vg.get(node["path"], ("", 0))[0],
                     "action": "" if why else "grow", "why": why})
     return out
+
+
+def _read_meminfo():
+    try:
+        with open("/proc/meminfo") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _backup_table(disk, steps):
+    """sfdisk --dump del disco en PART_BACKUP_DIR (0600). → (ruta, error)"""
+    code, dump, err = _cmd(["sfdisk", "--dump", disk], timeout=30)
+    if code != 0 or not dump.strip():
+        return "", "No se pudo respaldar la tabla de particiones: " + _msg(dump, err)
+    os.makedirs(PART_BACKUP_DIR, mode=0o700, exist_ok=True)
+    backup = os.path.join(PART_BACKUP_DIR, f"{os.path.basename(disk)}-{time.strftime('%Y%m%d-%H%M%S')}.sfdisk")
+    fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(dump)
+    steps.append({"cmd": f"sfdisk --dump {disk} > {backup}", "ok": True, "output": ""})
+    return backup, None
+
+
+def _fs_cmd(fs, target, mount):
+    if fs == "LVM2_member":
+        return ["pvresize", target]
+    if fs in ("ext2", "ext3", "ext4"):
+        return ["resize2fs", target]
+    if fs == "xfs":
+        return ["xfs_growfs", mount]
+    return ["btrfs", "filesystem", "resize", "max", mount]
 
 
 def _part_number(path):
@@ -1320,7 +1375,8 @@ def grow_status():
     st = _lvm_state(devs or [])
     rescan = any(os.path.exists(f"/sys/class/block/{d['name']}/device/rescan") for d in devs or []
                  if d["type"] == "disk" and DISK_NAME_RE.match(d["name"]))
-    return jsonify({"candidates": grow_candidates(devs or [], st.get("pvs") or []), "error": error,
+    cands = [{k: v for k, v in c.items() if k != "plan"} for c in grow_candidates(devs or [], st.get("pvs") or [])]
+    return jsonify({"candidates": cands, "error": error,
                     "growpart": bool(shutil.which("growpart")), "rescan": rescan, "can_install": _can_install()})
 
 
@@ -1375,15 +1431,9 @@ def grow_run():
         if not shutil.which("growpart"):
             return _err("Falta growpart: instala el paquete cloud-guest-utils.")
         # 1) Respaldo de la tabla de particiones (se restaura con: sfdisk /dev/sdX < respaldo)
-        code, dump, err = _cmd(["sfdisk", "--dump", c["disk"]], timeout=30)
-        if code != 0 or not dump.strip():
-            return _err("No se pudo respaldar la tabla de particiones: " + _msg(dump, err))
-        os.makedirs(PART_BACKUP_DIR, mode=0o700, exist_ok=True)
-        backup = os.path.join(PART_BACKUP_DIR, f"{os.path.basename(c['disk'])}-{time.strftime('%Y%m%d-%H%M%S')}.sfdisk")
-        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(dump)
-        steps.append({"cmd": f"sfdisk --dump {c['disk']} > {backup}", "ok": True, "output": ""})
+        backup, error = _backup_table(c["disk"], steps)
+        if error:
+            return _err(error)
         # 2) MBR con la última partición lógica: primero la extendida
         if c["extended"]:
             code, out = step(["growpart", c["disk"], _part_number(c["extended"])])
@@ -1403,15 +1453,8 @@ def grow_run():
     else:
         backup = ""
     # 5) Lo que hay adentro
-    target, fs = c["part"] or c["disk"], c["content"]
-    if fs == "LVM2_member":
-        cmd = ["pvresize", target]
-    elif fs in ("ext2", "ext3", "ext4"):
-        cmd = ["resize2fs", target]
-    elif fs == "xfs":
-        cmd = ["xfs_growfs", c["mount"]]
-    else:
-        cmd = ["btrfs", "filesystem", "resize", "max", c["mount"]]
+    target = c["part"] or c["disk"]
+    cmd = _fs_cmd(c["content"], target, c["mount"])
     code, out = step(cmd, timeout=3600)
     if code != 0:
         return jsonify({"ok": False, "error": f"La partición creció, pero {cmd[0]} falló. Revisa la salida.",
@@ -1422,3 +1465,172 @@ def grow_run():
         vgo = next((v for v in _lvm_state().get("vgs") or [] if v["name"] == c["vg"]), None)
         res["vg_free"] = vgo["free"] if vgo else 0
     return jsonify(res)
+
+
+# ── Mover la swap a un archivo para ampliar la partición que tiene delante ──
+# Debian sin LVM: sda1 (/), sda2 (extendida) y sda5 (swap) al final. El espacio nuevo queda pegado a la
+# swap: se apaga, se borran sda5 y la extendida, se amplía sda1 y la swap vuelve como /swapfile.
+
+SWAPFILE = "/swapfile"
+RESUME_CONF = "/etc/initramfs-tools/conf.d/resume"
+
+
+def _end(p):
+    return p["start"] + p["size"]
+
+
+def swap_plan(parts, nodes, pttype):
+    """¿Se puede quitar la swap del final para ampliar la partición de delante? parts como en
+    unallocated_tail (con "path"); nodes: path → nodo de lsblk. → (plan, None) o (None, motivo)."""
+    is_ext = lambda p: pttype == "dos" and p["number"] <= 4 and p["size"] <= 2
+    real = [p for p in parts if not is_ext(p)]
+    swaps = [p for p in real if nodes[p["path"]]["fstype"] == "swap"]
+    others = [p for p in real if p not in swaps]
+    if not swaps or not others:
+        return None, "no hay una partición de datos delante de la swap"
+    prev = max(others, key=_end)
+    behind = [p for p in real if p is not prev and p["start"] >= _end(prev)]
+    if any(p not in swaps for p in behind) or not behind:
+        return None, "hay otras particiones además de la swap después de la que se ampliaría"
+    node = nodes[prev["path"]]
+    mount = next((m for m in node["mounts"] if m.startswith("/")), "")
+    if node["fstype"] not in ("ext2", "ext3", "ext4", "xfs", "btrfs") or not mount:
+        return None, f"la partición de delante ({node['name']}) no es ext4, XFS o Btrfs montada"
+    ext = next((p for p in parts if is_ext(p)), None)
+    delete_ext = None
+    if ext and prev["number"] <= 4:
+        # La de delante es primaria: hay que quitar la extendida entera, así que solo puede tener swap
+        logical = [p for p in real if p["number"] >= 5]
+        if any(p not in behind for p in logical):
+            return None, "la partición extendida tiene otras particiones además de la swap"
+        delete_ext = ext
+    return {"prev": prev, "swaps": sorted(behind, key=lambda p: -p["number"]), "delete_ext": delete_ext,
+            "grow_ext": ext if ext and prev["number"] >= 5 else None,
+            "fs": node["fstype"], "mount": mount, "swap_bytes": sum(p["size"] for p in behind) * SECTOR}, None
+
+
+def swap_fits(meminfo):
+    """¿La swap en uso cabe en la RAM disponible (con 256 MB de margen) para poder apagarla?"""
+    kb = {}
+    for line in meminfo.splitlines():
+        k, _, v = line.partition(":")
+        if v.split() and v.split()[0].isdigit():
+            kb[k.strip()] = int(v.split()[0])
+    used = kb.get("SwapTotal", 0) - kb.get("SwapFree", 0)
+    return used * 1024 < kb.get("MemAvailable", 0) * 1024 - 256 * 1024 ** 2
+
+
+def fstab_swap_replace(text, refs):
+    """Comenta las líneas swap que apuntan a refs y agrega /swapfile (una sola vez)."""
+    lines = text.splitlines()
+    for i, f in fstab_entries(text):
+        if len(f) >= 3 and f[2] == "swap" and f[0] in refs:
+            lines[i] = "# MatiPanel (swap movida a /swapfile): " + lines[i]
+    if not any(f[0] == SWAPFILE for _, f in fstab_entries("\n".join(lines))):
+        lines.append(f"{SWAPFILE} none swap sw 0 0")
+    return "\n".join(lines) + "\n"
+
+
+def _swap_refs(nodes):
+    refs = set()
+    for n in nodes:
+        refs.add(n["path"])
+        if n.get("uuid"):
+            refs.update({f"UUID={n['uuid']}", f"/dev/disk/by-uuid/{n['uuid']}"})
+    return refs
+
+
+@storage_bp.route("/api/grow/swap", methods=["POST"])
+@login_required
+@exclusive
+def grow_swap():
+    d = _data()
+    devs, error = _devices()
+    if error:
+        return _err(error, 500)
+    st = _lvm_state(devs)
+    c = next((x for x in grow_candidates(devs, st.get("pvs") or [])
+              if x["disk"] == d.get("disk") and x["part"] == (d.get("part") or "")), None)
+    if not c or c["action"] != "swap":
+        return _err("Ese disco ya no está en esa situación; refresca la página.")
+    if not shutil.which("growpart"):
+        return _err("Falta growpart: instala el paquete cloud-guest-utils.")
+    if os.path.exists(SWAPFILE):
+        return _err(f"Ya existe {SWAPFILE}; revísalo antes de seguir.")
+    plan = c["plan"]
+    by_path = {n["path"]: n for n in devs}
+    swap_nodes = [by_path[p["path"]] for p in plan["swaps"]]
+    steps = []
+
+    def step(cmd, timeout=300):
+        code, out, err = _cmd(cmd, timeout=timeout)
+        steps.append({"cmd": " ".join(cmd), "ok": code == 0, "output": ((out or "") + (err or "")).strip()[-2000:]})
+        return code, (out or "") + (err or "")
+
+    def fail(msg, code=500):
+        return jsonify({"ok": False, "error": msg, "steps": steps, "backup": backup}), code
+
+    backup, error = _backup_table(c["disk"], steps)
+    if error:
+        return _err(error)
+    for f in (FSTAB, RESUME_CONF):
+        if os.path.exists(f):
+            steps.append({"cmd": f"cp {f} {_backup(f)}", "ok": True, "output": ""})
+    # 1) Apagar la swap (sus páginas pasan a la RAM)
+    for n in swap_nodes:
+        code, _ = step(["swapoff", n["path"]], timeout=600)
+        if code != 0:
+            for m in swap_nodes:
+                _cmd(["swapon", m["path"]], timeout=60)
+            return fail("No se pudo apagar la swap; se volvió a encender. No se cambió nada en el disco.")
+    # 2) Borrar las particiones de swap (de la última a la primera) y la extendida vacía
+    nums = [str(p["number"]) for p in plan["swaps"]] + ([str(plan["delete_ext"]["number"])] if plan["delete_ext"] else [])
+    for n in nums:
+        code, _ = step(["sfdisk", "--no-reread", "--force", "--delete", c["disk"], n])
+        if code != 0:
+            for m in swap_nodes:
+                _cmd(["swapon", m["path"]], timeout=60)
+            return fail(f"No se pudo borrar la partición {n}. Restaura la tabla con: sfdisk {c['disk']} < {backup}")
+        step(["partx", "-d", "--nr", n, c["disk"]])
+    # 3) Ampliar la partición de delante y su sistema de archivos
+    if plan["grow_ext"]:
+        code, out = step(["growpart", c["disk"], str(plan["grow_ext"]["number"])])
+        if parse_growpart(out)[0] == "error":
+            return fail(f"No se pudo ampliar la extendida. La tabla vieja está en {backup}")
+    num = str(plan["prev"]["number"])
+    code, out = step(["growpart", "--dry-run", c["disk"], num])
+    if parse_growpart(out)[0] != "change":
+        return fail(f"growpart no puede ampliar {c['part']}. La tabla vieja está en {backup}")
+    code, out = step(["growpart", c["disk"], num])
+    if parse_growpart(out)[0] != "change":
+        return fail(f"growpart falló. La tabla vieja está en {backup}")
+    cmd = _fs_cmd(plan["fs"], c["part"], plan["mount"])
+    code, _ = step(cmd, timeout=3600)
+    if code != 0:
+        return fail(f"La partición creció, pero {cmd[0]} falló; reintenta ese comando a mano. Después crea la swap.")
+    # 4) Swap nueva en archivo, del mismo tamaño
+    size = str(plan["swap_bytes"])
+    swap_cmds = ([["btrfs", "filesystem", "mkswapfile", "--size", size, SWAPFILE]] if plan["fs"] == "btrfs" else
+                 [["fallocate", "-l", size, SWAPFILE], ["chmod", "600", SWAPFILE], ["mkswap", SWAPFILE]])
+    for cmd in swap_cmds + [["swapon", SWAPFILE]]:
+        code, _ = step(cmd, timeout=600)
+        if code != 0:
+            return fail(f"El disco ya está ampliado, pero no se pudo crear la swap ({cmd[0]}). "
+                        f"Créala a mano y agrega «{SWAPFILE} none swap sw 0 0» a /etc/fstab.")
+    # 5) fstab: la swap vieja ya no existe
+    refs = _swap_refs(swap_nodes)
+    error = _fstab_transaction(fstab_swap_replace(_read(FSTAB), refs), lambda: None)
+    if error:
+        return fail("El disco está ampliado y la swap activa, pero no se pudo actualizar /etc/fstab: " + error)
+    steps.append({"cmd": f"/etc/fstab: swap vieja comentada, {SWAPFILE} agregado", "ok": True, "output": ""})
+    # 6) Hibernación: si el initramfs espera la swap vieja, el arranque se demora ~30 s buscándola
+    try:
+        resume = _read(RESUME_CONF)
+    except OSError:
+        resume = ""
+    if resume and any(r in resume for r in refs if r.startswith(("UUID=", "/dev/"))):
+        _write_atomic(RESUME_CONF, "RESUME=none\n")
+        step(["update-initramfs", "-u"], timeout=900)
+    _cmd(["systemctl", "daemon-reload"], timeout=60)
+    return jsonify({"ok": True, "steps": steps, "backup": backup,
+                    "message": f"{c['part']} ampliado; la swap ahora es {SWAPFILE}."})

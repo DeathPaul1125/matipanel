@@ -33,6 +33,7 @@ from .dbexplorer import dbexplorer_bp
 from .deploy import deploy_bp
 from .help import help_bp, CONTEXT as HELP_CONTEXT
 from .files import files_bp
+from .cfiles import cfiles_bp
 from .packages import packages_bp
 from .logs import logs_bp
 from .terminal import terminal_bp, register_websockets as register_terminal_ws
@@ -46,7 +47,7 @@ def register_modules(app, sock):
         (cron_bp, "/cron"), (disk_bp, "/disk"), (backups_bp, "/backups"),
         (users_bp, "/users"), (network_bp, "/network"), (traffic_bp, "/trafico"), (firewall_bp, "/firewall"),
         (webserver_bp, "/webserver"), (ssl_bp, "/ssl"), (php_bp, "/php"),
-        (databases_bp, "/databases"), (docker_bp, "/docker"), (files_bp, "/files"),
+        (databases_bp, "/databases"), (docker_bp, "/docker"), (files_bp, "/files"), (cfiles_bp, "/archivos-contenedores"),
         (packages_bp, "/packages"), (logs_bp, "/logs"), (terminal_bp, "/terminal"),
         (appearance_bp, "/apariencia"), (help_bp, "/ayuda"),
         (mail_bp, "/correo"), (dns_bp, "/dns"), (shares_bp, "/compartidos"),

@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Archivos de contenedores{% endblock %}
+{% block heading %}Archivos de contenedores{% endblock %}
+
+{% block content %}
+<div class="card fm-bar">
+  <div class="fm-nav">
+    <select class="input" id="ctr" style="max-width:340px; height:32px;" title="Contenedor"></select>
+    <button class="icon-btn" onclick="goUp()" title="Carpeta superior">↑</button>
+    <button class="icon-btn" onclick="load()" title="Actualizar">⟳</button>
+    <div class="fm-crumbs" id="crumbs" title="Haz clic en un espacio libre para escribir la ruta"></div>
+    <input class="input mono fm-pathinput" id="path-input" hidden>
+  </div>
+  <div class="fm-tools">
+    <input class="input fm-filter" id="filter" placeholder="Filtrar en esta carpeta…">
+    {% if write_enabled %}
+    <button class="btn btn-sm" onclick="createItem('dir')">Nueva carpeta</button>
+    <button class="btn btn-sm" onclick="createItem('file')">Nuevo archivo</button>
+    <label class="btn btn-sm">Subir<input type="file" id="up" multiple hidden onchange="upload(this.files)"></label>
+    {% endif %}
+    <button class="btn btn-sm" onclick="downloadDir()">Descargar carpeta (.tar)</button>
+  </div>
+  <div class="small" id="where"></div>
+</div>
+
+<div class="card fm-list">
+  <table class="lx fm-table" id="list">
+    <thead><tr><th>Nombre</th><th>Tamaño</th><th>Modificado</th><th>Permisos</th><th>Dueño</th><th></th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Elige un contenedor</td></tr></tbody>
+  </table>
+  <div class="fm-status" id="status"></div>
+</div>
+
+<div id="editor-modal" class="modal">
+  <div class="modal-box wide fm-editor">
+    <div class="fm-ed-head">
+      <div style="min-width:0;">
+        <div class="mono fm-ed-name"><span id="ed-dirty" class="fm-dirty" hidden title="Cambios sin guardar">●</span> <span id="ed-name"></span></div>
+        <div class="muted small" id="ed-info"></div>
+      </div>
+      <div style="display:flex; gap:8px; flex-shrink:0;">
+        {% if write_enabled %}<button class="btn btn-primary" onclick="saveFile()">Guardar</button>{% endif %}
+        <button class="btn" onclick="closeEditor()">Cerrar</button>
+      </div>
+    </div>
+    <div class="fm-ed-body"><textarea id="editor" spellcheck="false" wrap="off" style="flex:1;"></textarea></div>
+    <div class="fm-ed-status small muted"><span>UTF-8 · Ctrl+S guarda</span></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API = '{{ url_for("cfiles.index") }}api/';
+const WRITE = {{ write_enabled|tojson }};
+const $ = id => document.getElementById(id);
+let CUR = { c: '', path: '/' }, ENTRIES = [], ED = null;
+const fmt = n => { n = Number(n) || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + ' ' + u[i]; };
+const when = t => t ? new Date(t * 1000).toLocaleString() : '';
+const join = (dir, name) => (dir === '/' ? '' : dir) + '/' + name;
+const q = o => new URLSearchParams(o).toString();
+
+async function getJSON(url) { try { return await (await fetch(url)).json(); } catch (e) { return { ok: false, error: String(e) }; } }
+
+async function loadContainers() {
+  const d = await getJSON(API + 'containers');
+  const list = d.containers || [], groups = {};
+  list.forEach(c => (groups[c.project || 'Sin proyecto'] ||= []).push(c));
+  $('ctr').innerHTML = '<option value="">— Elige un contenedor —</option>' + Object.entries(groups).map(([g, cs]) =>
+    `<optgroup label="${escapeHtml(g)}">${cs.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('')}</optgroup>`).join('');
+  const p = new URLSearchParams(location.search);
+  const want = p.get('c') || '';
+  if (want && list.some(c => c.name === want)) { $('ctr').value = want; go(p.get('path') || '/'); }
+  else if (!list.length) $('list').tBodies[0].innerHTML = '<tr><td colspan="6" class="muted center">No hay contenedores en marcha</td></tr>';
+}
+$('ctr').addEventListener('change', () => { if ($('ctr').value) go('/'); });
+
+function go(path) { CUR = { c: $('ctr').value, path }; history.replaceState(null, '', '?' + q(CUR)); load(); }
+function goUp() { if (CUR.path !== '/') go(CUR.path.replace(/\/[^/]+$/, '') || '/'); }
+
+async function load() {
+  if (!CUR.c) return;
+  const tb = $('list').tBodies[0];
+  tb.innerHTML = '<tr><td colspan="6" class="muted center">Cargando…</td></tr>';
+  const d = await getJSON(API + 'ls?' + q(CUR));
+  renderCrumbs();
+  if (!d.ok) { tb.innerHTML = `<tr><td colspan="6" class="muted center">${escapeHtml(d.error)}</td></tr>`; $('where').innerHTML = ''; return; }
+  ENTRIES = d.entries;
+  $('where').innerHTML = d.here
+    ? `<span class="pill ok">volumen</span> Esta carpeta está en <b class="mono">${escapeHtml(d.here.name || d.here.dest)}</b> (${escapeHtml(d.here.type)}): lo que cambies aquí se conserva.`
+    : `<span class="pill warn">temporal</span> Esta carpeta es de la imagen: lo que cambies aquí <b>se pierde</b> al volver a desplegar o recrear el contenedor.`
+      + (d.mounts.length ? ` Carpetas persistentes: ${d.mounts.map(m => `<a href="#" class="mono" onclick="go(${jsArg(m.dest)});return false">${escapeHtml(m.dest)}</a>`).join(', ')}.` : '');
+  render();
+  $('status').textContent = `${ENTRIES.length} elemento(s)` + (d.truncated ? ' (se muestran los primeros 20 000)' : '');
+}
+
+function render() {
+  const f = $('filter').value.toLowerCase();
+  const rows = ENTRIES.filter(e => !f || e.name.toLowerCase().includes(f));
+  $('list').tBodies[0].innerHTML = rows.map(e => {
+    const icon = e.is_dir ? '📁' : e.kind === 'link' ? '🔗' : '📄';
+    const path = join(CUR.path, e.name);
+    const acts = [
+      !e.is_dir ? `<button class="btn btn-sm" onclick="openFile(${jsArg(path)})">Abrir</button>` : '',
+      `<a class="btn btn-sm" href="${API}download?${escapeHtml(q({ c: CUR.c, path, dir: e.is_dir ? '1' : '0' }))}">Descargar</a>`,
+      WRITE ? `<button class="btn btn-sm" onclick="renameItem(${jsArg(path)}, ${jsArg(e.name)})">Renombrar</button>` : '',
+      WRITE ? `<button class="btn btn-sm btn-danger" onclick="deleteItem(${jsArg(path)}, ${jsArg(e.name)})">Eliminar</button>` : '',
+    ].join(' ');
+    return `<tr ${e.is_dir ? `ondblclick="go(${jsArg(path)})"` : `ondblclick="openFile(${jsArg(path)})"`}>
+      <td><span class="fm-name">${icon} ${e.is_dir ? `<a href="#" onclick="go(${jsArg(path)});return false">${escapeHtml(e.name)}</a>` : escapeHtml(e.name)}
+        ${e.volume ? `<span class="pill ok small" title="${escapeHtml(e.volume)}">volumen</span>` : ''}</span></td>
+      <td>${e.is_dir ? '' : fmt(e.size)}</td><td class="small">${when(e.mtime)}</td>
+      <td class="mono">${escapeHtml(e.mode)}</td><td class="mono small">${escapeHtml(e.user)}:${escapeHtml(e.group)}</td>
+      <td style="white-space:nowrap; text-align:right;">${acts}</td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted center">Carpeta vacía</td></tr>';
+}
+$('filter').addEventListener('input', render);
+
+function renderCrumbs() {
+  let acc = '';
+  $('crumbs').innerHTML = `<button data-go="/">/</button>` + CUR.path.split('/').filter(Boolean).map(p => {
+    acc += '/' + p; return `<span class="sep">›</span><button data-go="${escapeHtml(acc)}">${escapeHtml(p)}</button>`;
+  }).join('');
+}
+$('crumbs').addEventListener('click', e => {
+  const b = e.target.closest('[data-go]');
+  if (b) return go(b.dataset.go);
+  $('crumbs').hidden = true; const i = $('path-input'); i.hidden = false; i.value = CUR.path; i.focus(); i.select();
+});
+$('path-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { const v = e.target.value.trim(); e.target.blur(); if (v.startsWith('/')) go(v); }
+  if (e.key === 'Escape') e.target.blur();
+});
+$('path-input').addEventListener('blur', () => { $('path-input').hidden = true; $('crumbs').hidden = false; });
+
+// ── Editor ──
+async function openFile(path) {
+  const d = await getJSON(API + 'read?' + q({ c: CUR.c, path }));
+  if (!d.ok) return ui.alert(d.error, { title: 'No se puede abrir', icon: 'info' });
+  ED = { path, version: d.version };
+  $('ed-name').textContent = path; $('ed-info').textContent = `${CUR.c} · ${fmt(d.size)}`;
+  $('editor').value = d.content; $('ed-dirty').hidden = true;
+  $('editor').readOnly = !WRITE;
+  $('editor-modal').classList.add('open'); $('editor').focus();
+}
+$('editor').addEventListener('input', () => { $('ed-dirty').hidden = false; });
+$('editor').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveFile(); } });
+async function saveFile() {
+  if (!ED || !WRITE) return;
+  const d = await postJSON(API + 'write', { c: CUR.c, path: ED.path, version: ED.version, content: $('editor').value });
+  if (!d.ok) return ui.alert(d.error, { title: 'No se guardó', icon: 'error' });
+  const r = await getJSON(API + 'read?' + q({ c: CUR.c, path: ED.path }));
+  if (r.ok) ED.version = r.version;
+  $('ed-dirty').hidden = true; ui.toast('Guardado'); load();
+}
+async function closeEditor() {
+  if (!$('ed-dirty').hidden && !await ui.confirm('Hay cambios sin guardar. ¿Cerrar igual?', { title: 'Cerrar', danger: true, confirmText: 'Cerrar sin guardar' })) return;
+  $('editor-modal').classList.remove('open'); ED = null;
+}
+
+// ── Acciones ──
+async function createItem(kind) {
+  const name = await ui.prompt(kind === 'dir' ? 'Nombre de la carpeta nueva:' : 'Nombre del archivo nuevo:',
+    { title: kind === 'dir' ? 'Nueva carpeta' : 'Nuevo archivo', confirmText: 'Crear',
+      validate: s => !s.trim() || s.includes('/') ? 'Nombre inválido' : null });
+  if (!name) return;
+  const d = await postJSON(API + 'create', { c: CUR.c, path: CUR.path, name: name.trim(), kind });
+  if (!d.ok) return ui.alert(d.error, { title: 'No se creó', icon: 'error' });
+  ui.toast(d.message); await load();
+  if (kind === 'file') openFile(join(CUR.path, name.trim()));
+}
+async function renameItem(path, old) {
+  const name = await ui.prompt('Nombre nuevo:', { title: 'Renombrar', value: old, confirmText: 'Renombrar',
+    validate: s => !s.trim() || s.includes('/') ? 'Nombre inválido' : null });
+  if (!name || name.trim() === old) return;
+  const d = await postJSON(API + 'rename', { c: CUR.c, path, name: name.trim() });
+  if (!d.ok) return ui.alert(d.error, { title: 'No se renombró', icon: 'error' });
+  ui.toast(d.message); load();
+}
+async function deleteItem(path, name) {
+  if (!await ui.confirm(`Se eliminará ${path} dentro de ${CUR.c} (con todo su contenido, si es una carpeta). No se puede deshacer.`,
+    { title: 'Eliminar', danger: true, typed: name, confirmText: 'Eliminar' })) return;
+  const d = await postJSON(API + 'delete', { c: CUR.c, path });
+  if (!d.ok) return ui.alert(d.error, { title: 'No se eliminó', icon: 'error' });
+  ui.toast(d.message); load();
+}
+async function upload(files) {
+  if (!files || !files.length) return;
+  const clash = [...files].filter(f => ENTRIES.some(e => e.name === f.name)).map(f => f.name);
+  if (clash.length && !await ui.confirm(`Ya existen y se reemplazarán: ${clash.join(', ')}`, { title: 'Subir', danger: true, confirmText: 'Reemplazar' })) { $('up').value = ''; return; }
+  const fd = new FormData(); fd.append('c', CUR.c); fd.append('path', CUR.path);
+  [...files].forEach(f => fd.append('files', f));
+  ui.toast('Subiendo…', 'info');
+  let d;
+  try { d = await (await fetch(API + 'upload', { method: 'POST', body: fd })).json(); } catch (e) { d = { ok: false, error: String(e) }; }
+  $('up').value = '';
+  if (!d.ok) return ui.alert(d.error, { title: 'No se subió', icon: 'error' });
+  ui.toast(d.message); load();
+}
+function downloadDir() { if (CUR.c) location.href = API + 'download?' + q({ c: CUR.c, path: CUR.path, dir: '1' }); }
+
+loadContainers();
+</script>
+{% endblock %}

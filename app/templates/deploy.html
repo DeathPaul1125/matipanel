@@ -785,7 +785,8 @@ async function loadContainers() {
     return `<tr><td class="mono">${escapeHtml(c.service)}</td>
       <td><span class="pill ${cls}">${escapeHtml(c.state)}${c.health ? ' · ' + escapeHtml(c.health) : ''}</span></td>
       <td class="small muted">${escapeHtml(c.status)}</td>
-      <td>${c.state === 'running' && c.name ? `<a class="btn btn-sm" title="Abrir una terminal dentro del contenedor" href="${escapeHtml({{ url_for('terminal.index')|tojson }} + '?container=' + encodeURIComponent(c.name))}">Consola</a>` : ''}</td></tr>`;
+      <td>${c.state === 'running' && c.name ? `<a class="btn btn-sm" title="Abrir una terminal dentro del contenedor" href="${escapeHtml({{ url_for('terminal.index')|tojson }} + '?container=' + encodeURIComponent(c.name))}">Consola</a>`
+        + ` <a class="btn btn-sm" title="Ver y editar los archivos del contenedor" href="${escapeHtml({{ url_for('cfiles.index')|tojson }} + '?' + new URLSearchParams({ c: c.name, path: ['db', 'redis'].includes(c.service) ? '/' : '/var/www/html' }))}">Archivos</a>` : ''}</td></tr>`;
   }).join('');
 }
 

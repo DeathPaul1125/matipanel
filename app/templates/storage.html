@@ -165,6 +165,7 @@ const API = {
   grow: "{{ url_for('storage.grow_status') }}",
   growRescan: "{{ url_for('storage.grow_rescan') }}",
   growRun: "{{ url_for('storage.grow_run') }}",
+  growSwap: "{{ url_for('storage.grow_swap') }}",
   lvRemove: "{{ url_for('storage.lv_remove') }}",
   snapCreate: "{{ url_for('storage.snap_create') }}",
   raidCreate: "{{ url_for('storage.raid_create') }}",
@@ -182,6 +183,7 @@ const STATUS = {
   'libre': ['ok', 'libre'], 'sistema': ['warn', 'sistema'], 'swap': ['mute', 'swap'], 'montado': ['mute', 'montado'],
   'PV de LVM': ['mute', 'PV de LVM'], 'miembro RAID': ['mute', 'miembro RAID'], 'en uso': ['mute', 'en uso'],
   'con datos': ['warn', 'con datos'], 'tabla de particiones vacía': ['warn', 'tabla vacía'], 'no disponible': ['mute', '—'],
+  'extendida': ['mute', 'extendida'],
 };
 let LVM = null, RAID = null, QUOTA = null;
 
@@ -217,7 +219,12 @@ async function getJSON(url) {
 async function act(url, data, wait) {
   if (wait) ui.toast(wait, 'info', 6000);
   const d = await postJSON(url, data);
-  if (!d.ok) { await ui.alert(d.error || 'Error desconocido', { title: 'No se pudo completar', icon: 'error' }); return null; }
+  if (!d.ok) {
+    const bad = (d.steps || []).filter(s => !s.ok).pop();
+    const detail = bad ? `\n\nFalló: ${bad.cmd}\n${bad.output || ''}` : '';
+    await ui.alert((d.error || 'Error desconocido') + detail, { title: 'No se pudo completar', icon: 'error' });
+    return null;
+  }
   ui.toast(d.message || 'Listo');
   return d;
 }
@@ -283,13 +290,17 @@ async function loadGrow() {
     body.innerHTML = '<p class="muted" style="margin:0;">No hay espacio sin asignar en los discos. Si agrandaste un disco en el hipervisor, pulsa <b>Detectar espacio nuevo</b>.</p>';
     return;
   }
-  const needTool = cands.some(c => c.action === 'grow' && c.part) && !GROW.growpart;
+  const needTool = cands.some(c => ['grow', 'swap'].includes(c.action) && c.part) && !GROW.growpart;
   body.innerHTML = (needTool ? `<p style="margin-top:0;">Para ampliar particiones hace falta <b>growpart</b>.
       ${GROW.can_install ? `<button class="btn btn-sm btn-primary" onclick="install('cloud-guest-utils', this)">Instalar cloud-guest-utils</button>` : ''}</p>` : '')
     + '<ul style="margin:0;">' + cands.map(c => {
-      const what = c.part ? `después de <span class="mono">${escapeHtml(c.part)}</span>` : '(el disco entero es un PV)';
+      const what = c.action === 'swap' ? `si se mueve la swap (<span class="mono">${(c.swap || []).map(escapeHtml).join(', ')}</span>) que está después de <span class="mono">${escapeHtml(c.part)}</span>`
+        : c.part ? `después de <span class="mono">${escapeHtml(c.part)}</span>` : '(el disco entero es un PV)';
       const content = [CONTENT[c.content] || c.content || 'sin formato', c.vg ? `grupo ${c.vg}` : '', c.mount].filter(Boolean).map(escapeHtml).join(' · ');
-      const btn = c.action === 'grow'
+      const short = escapeHtml((c.part || c.disk).replace('/dev/', ''));
+      const btn = c.action === 'swap'
+        ? ` <button class="btn btn-sm btn-primary" ${needTool ? 'disabled' : ''} onclick="growSwap(${jsArg(c.disk)}, ${jsArg(c.part)})">Mover la swap a un archivo y ampliar ${short}</button>`
+        : c.action === 'grow'
         ? ` <button class="btn btn-sm btn-primary" ${needTool && c.part ? 'disabled' : ''} onclick="growRun(${jsArg(c.disk)}, ${jsArg(c.part)})">Ampliar ${escapeHtml((c.part || c.disk).replace('/dev/', ''))}</button>`
         : `<br><span class="muted small">${escapeHtml(c.why)}</span>`;
       return `<li><b class="mono">${escapeHtml(c.disk)}</b>: <b>${fmtBytes(c.free)}</b> sin asignar ${what} <span class="muted">(${content})</span>${btn}</li>`;
@@ -299,6 +310,23 @@ async function growRescan(btn) {
   btn.disabled = true;
   await act(API.growRescan, {}, 'Releyendo el tamaño de los discos…');
   btn.disabled = false;
+  await Promise.all([loadGrow(), loadLvm()]);
+}
+async function growSwap(disk, part) {
+  const c = (GROW.candidates || []).find(x => x.disk === disk && x.part === part);
+  if (!c) return;
+  const target = part.replace('/dev/', ''), swaps = (c.swap || []).join(', ');
+  const msg = `La swap ${swaps} está al final del disco, después de ${part}: por eso ${part} no puede crecer. El panel va a:\n`
+    + `1) Respaldar la tabla de particiones de ${disk}, /etc/fstab y la configuración de hibernación.\n`
+    + `2) Apagar la swap (lo que tenga en uso pasa a la RAM).\n`
+    + `3) Borrar ${swaps}${c.removes_ext ? ' y la partición extendida que la contiene' : ''}.\n`
+    + `4) Ampliar ${part} hasta el final del disco y su sistema de archivos (${CONTENT[c.content] || c.content}, en ${c.mount}).\n`
+    + `5) Crear /swapfile de ${fmtBytes(c.swap_bytes)} y activarlo.\n`
+    + `6) Cambiar /etc/fstab a /swapfile y, si hace falta, actualizar el initramfs.\n\n`
+    + `No se borran datos ni hace falta reiniciar. Aun así, si es una máquina virtual, TOMA UN SNAPSHOT ANTES.\n\nEscribe ${target} para confirmar.`;
+  if (!await ui.confirm(msg, { title: 'Mover la swap y ampliar ' + target, danger: true, typed: target, confirmText: 'Mover y ampliar' })) return;
+  const d = await act(API.growSwap, { disk, part }, 'Moviendo la swap y ampliando… puede tardar unos minutos');
+  if (!d) { loadGrow(); return; }
   await Promise.all([loadGrow(), loadLvm()]);
 }
 async function growRun(disk, part) {
