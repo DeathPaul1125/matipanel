@@ -14,9 +14,9 @@ Este módulo muestra los contenedores, imágenes y volúmenes de Docker, y permi
 | Puedes | No puedes (usa la Terminal) |
 |---|---|
 | Ver resumen de contenedores, imágenes y versión | Crear contenedores nuevos (`docker run`) |
-| Iniciar, detener y reiniciar contenedores | Eliminar contenedores, imágenes o volúmenes |
+| Iniciar, detener y reiniciar contenedores | Eliminar contenedores o imágenes |
 | Ver las últimas 200 líneas de logs de un contenedor | Descargar imágenes (`docker pull`) |
-| Ver la lista de imágenes y volúmenes | Usar Docker Compose |
+| Ver imágenes y volúmenes; eliminar volúmenes sin usar | Usar Docker Compose |
 
 Para todo lo de la segunda columna usa la [Terminal](29-terminal.md) con `sudo docker …`.
 
@@ -87,12 +87,31 @@ Los logs no se actualizan en vivo. Vuelve a pulsar **logs** para ver las líneas
 
 ## Revisar imágenes y volúmenes
 
-- **Imágenes:** ID, **Repositorio**, **Tag**, **Tamaño** y antigüedad (**Creada**).
-- **Volúmenes:** **Nombre**, **Driver** y **Mountpoint** (la carpeta del volumen en el disco, normalmente bajo `/var/lib/docker/volumes/`).
+**Imágenes:** ID, **Repositorio**, **Tag**, **Tamaño** y antigüedad (**Creada**). Se borran las que no se usan desde [Discos → Qué se puede limpiar](15-discos.md).
 
-Estas tablas son solo de consulta y se cargan al abrir la página. Recarga la página para actualizarlas.
+## Volúmenes
 
-> **Consejo:** Puedes ver los archivos de un volumen con [Archivos](26-archivos.md) navegando a su **Mountpoint**. Ten cuidado al modificarlos con el contenedor en marcha.
+Un **volumen** guarda datos que sobreviven al contenedor: la base de datos de una app, su `storage` o los datos de un stack. Al volver a desplegar, el contenedor se reemplaza y el volumen sigue ahí.
+
+La tarjeta **Volúmenes** muestra arriba cuántos hay, cuánto pesan en total y cuánto ocupan **los que no se usan**. Por cada volumen:
+
+| Columna | Qué dice |
+|---|---|
+| **Volumen** | Su nombre y **de quién es**: <br>• **App «x» · base de datos / archivos subidos**: de una app de [Despliegues](56-despliegues.md) que existe.<br>• **App «x» (ya eliminada)**: quedó de una app que se borró sin marcar «borrar también los datos».<br>• **Proyecto «x»**: de un [stack](59-stacks.md) u otro proyecto de Docker Compose.<br>• **Anónimo**: sin nombre; lo creó una imagen (por ejemplo, la de una base de datos que se probó con `docker run`).<br>• **Creado a mano**: con `docker volume create` u otro programa. |
+| **Tamaño** | Lo que ocupa en el disco. |
+| **Estado** | **en uso**, con los contenedores que lo usan (aunque estén detenidos), o **sin usar**. |
+
+Los que no se usan aparecen primero, de mayor a menor. Marca **Solo los que no se usan** para ver solo esos. Desde **Discos → Volúmenes de Docker sin usar → Revisar y eliminar** se llega directo con ese filtro.
+
+### Revisar y eliminar un volumen
+
+1. Pulsa **Ver contenido**: abre la carpeta del volumen en [Archivos](26-archivos.md) para revisar qué tiene. En una base de datos verás sus archivos internos; si dudas, no lo borres.
+2. Pulsa **Eliminar** y escribe el nombre del volumen. Solo aparece en los que **no se usan**, y el panel lo vuelve a comprobar antes de borrar.
+   - Si es de una **app que todavía existe** (por ejemplo, porque sus contenedores están detenidos), el aviso lo dice: borrarlo es perder su base o sus archivos. Haz antes un respaldo en [Respaldos de apps](57-respaldos-apps.md).
+
+**Eliminar los anónimos sin usar** borra de una vez los volúmenes **sin nombre** que ningún contenedor usa. Los que tienen nombre, como las bases y el `storage` de las apps, no se tocan. Necesita Docker 23 o superior; en versiones anteriores el botón no aparece.
+
+> **Importante:** Borrar un volumen no se puede deshacer.
 
 ## Preguntas frecuentes
 
@@ -102,7 +121,7 @@ Recarga la página. Si sigue igual, comprueba en la [Terminal](29-terminal.md) q
 
 ### ¿Cómo elimino un contenedor o una imagen que ya no uso?
 
-El panel no tiene botón para eso. Usa la terminal: `sudo docker rm <nombre>` para un contenedor detenido, y `sudo docker image prune` para borrar imágenes sin usar.
+Las imágenes sin usar se borran en [Discos → Qué se puede limpiar](15-discos.md), y los volúmenes en [Volúmenes](#volumenes). Para un contenedor detenido usa la terminal: `sudo docker rm <nombre>`.
 
 ### Detuve un contenedor y volvió a arrancar solo.
 

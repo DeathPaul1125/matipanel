@@ -254,9 +254,10 @@ def candidates():
         vols = (df.get("Local Volumes") or {}).get("reclaimable", 0)
         if vols >= 1024 * 1024:
             items.append({"id": "docker_volumes", "title": "Volúmenes de Docker sin usar", "size": vols, "count": None,
-                          "desc": "Volúmenes que ningún contenedor usa. Pueden tener datos (bases, archivos de apps borradas): "
-                                  "no se borran desde aquí; revísalos en Docker → Volúmenes.",
-                          "risk": "revisar", "warn": "", "action": None, "link": "/docker/"})
+                          "desc": "Datos de bases o archivos de apps y stacks que ya no tienen contenedor. En Docker → "
+                                  "Volúmenes ves de quién es cada uno, revisas su contenido y lo borras.",
+                          "risk": "revisar", "warn": "", "action": None, "link": "/docker/#volumes",
+                          "link_text": "Revisar y eliminar"})
     if shutil.which("apt-get"):
         code, out, _ = run(["apt-get", "-s", "autoremove"], timeout=120)
         pkgs = [ln.split()[1] for ln in out.splitlines() if ln.startswith("Remv ")] if code == 0 else []

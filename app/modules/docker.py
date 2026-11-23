@@ -206,23 +206,151 @@ def images():
 @docker_bp.route("/api/volumes")
 @login_required
 def volumes():
-    code, out, err = _docker("volume", "ls", "--format", "{{json .}}")
-    if code != 0:
-        return jsonify({"error": err.strip()}), 500
-    items = []
-    for line in out.strip().splitlines():
-        if not line:
+    return jsonify(volume_report())
+
+
+# ── Volúmenes: de quién son, cuánto pesan, si se usan ──────────────────
+
+ANON_RE = re.compile(r"^[0-9a-f]{64}$")
+APP_VOLUMES = {"mariadb_data": "base de datos (MariaDB)", "postgres_data": "base de datos (PostgreSQL)",
+               "storage": "archivos subidos (storage)", "redis_data": "Redis"}
+
+
+def parse_labels(text):
+    """«a=b,c=d» (docker volume ls) → dict."""
+    out = {}
+    for part in (text or "").split(","):
+        k, sep, v = part.partition("=")
+        if sep and k.strip():
+            out[k.strip()] = v
+    return out
+
+
+def classify_volume(name, labels, apps):
+    """De quién es un volumen, en lenguaje claro. → {kind, owner, app}
+    kind: app (de una app de Despliegues que existe), app_deleted, project (otro proyecto de Compose,
+    p. ej. un stack), anonymous (sin nombre, lo creó una imagen) u other."""
+    project = labels.get("com.docker.compose.project", "")
+    if not project and name.startswith("matipanel-") and "_" in name:
+        project = name.split("_", 1)[0]
+    if project.startswith("matipanel-"):
+        app = project[len("matipanel-"):]
+        vol = labels.get("com.docker.compose.volume") or (name.split("_", 1)[1] if "_" in name else "")
+        what = APP_VOLUMES.get(vol, f"carpeta persistente «{vol}»" if vol else "datos")
+        if app in apps:
+            return {"kind": "app", "owner": f"App «{app}» · {what}", "app": app}
+        return {"kind": "app_deleted", "owner": f"App «{app}» (ya eliminada) · {what}", "app": app}
+    if project:
+        return {"kind": "project", "owner": f"Proyecto «{project}» (stack u otro Compose)", "app": ""}
+    if ANON_RE.match(name):
+        return {"kind": "anonymous", "owner": "Anónimo: lo creó una imagen, sin nombre", "app": ""}
+    return {"kind": "other", "owner": "Creado a mano o por otro programa", "app": ""}
+
+
+def volume_sizes():
+    """{nombre: (bytes, contenedores que lo usan)} de `docker system df -v` (vacío si falla)."""
+    from .disk import parse_size
+    code, out, _ = _docker("system", "df", "-v", "--format", "{{json .}}", timeout=120)
+    res = {}
+    for line in out.splitlines() if code == 0 else []:
+        try:
+            d = json.loads(line)
+        except ValueError:
             continue
+        for v in (d.get("Volumes") or []) if isinstance(d, dict) else []:
+            links = str(v.get("Links", "0"))
+            res[v.get("Name", "")] = (parse_size(v.get("Size")) or 0, int(links) if links.isdigit() else 0)
+    return res
+
+
+def volume_report():
+    code, out, err = _docker("volume", "ls", "--format", "{{json .}}", timeout=30)
+    if code != 0:
+        return {"error": err.strip() or "docker volume ls falló", "volumes": []}
+    sizes = volume_sizes()
+    users = {}
+    c2, ps, _ = _docker("ps", "-a", "--no-trunc", "--format", "{{.Names}}\t{{.Mounts}}", timeout=30)
+    for line in ps.splitlines() if c2 == 0 else []:
+        cname, _, mounts = line.partition("\t")
+        for m in mounts.split(","):
+            if m.strip():
+                users.setdefault(m.strip(), []).append(cname)
+    try:
+        from .. import deployer as D
+        apps = set(D.list_apps())
+    except Exception:  # noqa: BLE001 — sin Despliegues configurado
+        apps = set()
+    vols = []
+    for line in out.splitlines():
         try:
             v = json.loads(line)
-            items.append({
-                "name": v.get("Name", ""),
-                "driver": v.get("Driver", ""),
-                "mount": v.get("Mountpoint", ""),
-            })
-        except json.JSONDecodeError:
+        except ValueError:
             continue
-    return jsonify({"volumes": items})
+        name = v.get("Name", "")
+        size, links = sizes.get(name, (None, 0))
+        used_by = users.get(name, [])
+        info = classify_volume(name, parse_labels(v.get("Labels", "")), apps)
+        vols.append({"name": name, "driver": v.get("Driver", ""), "mount": v.get("Mountpoint", ""),
+                     "size": size, "in_use": bool(used_by) or links > 0, "used_by": used_by, **info})
+    vols.sort(key=lambda x: (x["in_use"], -(x["size"] or 0), x["name"]))
+    unused = [v for v in vols if not v["in_use"]]
+    return {"volumes": vols, "total": sum(v["size"] or 0 for v in vols),
+            "unused_count": len(unused), "unused_size": sum(v["size"] or 0 for v in unused),
+            "anon_unused_size": sum(v["size"] or 0 for v in unused if v["kind"] == "anonymous"),
+            "anon_unused_count": sum(1 for v in unused if v["kind"] == "anonymous"),
+            "can_prune_anon": _docker_major() >= 23, "sizes_known": bool(sizes)}
+
+
+def _docker_major():
+    code, out, _ = _docker("version", "--format", "{{.Server.Version}}", timeout=15)
+    m = re.match(r"(\d+)\.", out.strip()) if code == 0 else None
+    return int(m.group(1)) if m else 0
+
+
+@docker_bp.route("/api/volumes/remove", methods=["POST"])
+@login_required
+def volume_remove():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "")
+    if not isinstance(name, str) or not _safe_id(name):
+        return jsonify({"ok": False, "error": "Nombre de volumen inválido"}), 400
+    code, out, err = _docker("ps", "-a", "-q", "--filter", f"volume={name}", timeout=20)
+    if code != 0:
+        return jsonify({"ok": False, "error": err.strip() or "No se pudo comprobar si está en uso"}), 500
+    if out.strip():
+        return jsonify({"ok": False, "error": "Ese volumen lo usa un contenedor: no se borra."}), 409
+    try:
+        from .. import deployer as D
+        apps = set(D.list_apps())
+    except Exception:  # noqa: BLE001
+        apps = set()
+    code, lbl, _ = _docker("volume", "inspect", "--format", "{{json .Labels}}", "--", name, timeout=20)
+    try:
+        labels = (json.loads(lbl) or {}) if code == 0 else {}
+    except ValueError:
+        labels = {}
+    info = classify_volume(name, labels if isinstance(labels, dict) else {}, apps)
+    if info["kind"] == "app" and not data.get("confirm_app"):
+        return jsonify({"ok": False, "error": f"Es de la app «{info['app']}», que todavía existe: confirma que quieres "
+                                              "borrar sus datos.", "needs_confirm": True}), 409
+    code, out, err = _docker("volume", "rm", "--", name, timeout=120)
+    if code != 0:
+        return jsonify({"ok": False, "error": err.strip() or "docker volume rm falló"}), 500
+    return jsonify({"ok": True, "message": f"Volumen {name} eliminado"})
+
+
+@docker_bp.route("/api/volumes/prune-anonymous", methods=["POST"])
+@login_required
+def volume_prune_anonymous():
+    """Docker 23+: `volume prune` sin --all solo borra volúmenes ANÓNIMOS sin usar (nunca los que tienen nombre)."""
+    if _docker_major() < 23:
+        return jsonify({"ok": False, "error": "Necesita Docker 23 o superior: en versiones anteriores también "
+                                              "borraría volúmenes con nombre."}), 400
+    code, out, err = _docker("volume", "prune", "-f", timeout=600)
+    if code != 0:
+        return jsonify({"ok": False, "error": err.strip() or "docker volume prune falló"}), 500
+    freed = next((l.split(":", 1)[1].strip() for l in out.splitlines() if l.lower().startswith("total reclaimed space")), "0B")
+    return jsonify({"ok": True, "message": f"Volúmenes anónimos sin usar eliminados: se liberaron {freed}"})
 
 
 ALLOWED_ACTIONS = {"start", "stop", "restart", "rm", "pause", "unpause"}

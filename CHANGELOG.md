@@ -2,6 +2,22 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.19.1] - 2026-11-23
+
+### Mejorado
+- Docker → **Volúmenes**:
+  - por cada volumen dice **de quién es** (app de Despliegues, app ya eliminada, stack, anónimo…), **cuánto pesa** y **si está en uso** y por qué contenedores;
+  - arriba suma lo que ocupan los que no se usan;
+  - **Ver contenido** los abre en Archivos;
+  - **Eliminar** borra los que no se usan, comprobándolo de nuevo y con un aviso fuerte si son de una app que existe;
+  - **Eliminar los anónimos sin usar** borra solo volúmenes sin nombre, con Docker 23 o superior.
+- Discos: «Volúmenes de Docker sin usar» lleva directo a esa tabla, filtrada, con el botón **Revisar y eliminar**.
+- Bases de datos:
+  - nueva tarjeta **Bases de las apps (Despliegues)**, con lo que ocupan los **datos** y el **volumen en disco** de cada app, y **Ver tablas** en el Explorador BD;
+  - las bases del servidor se ordenan por tamaño;
+  - aviso cuando los **binlogs** de MariaDB/MySQL ocupan más de 100 MB.
+- Ayuda: «Volúmenes» en Docker y «Cuánto ocupa cada base» en Bases de datos, con las causas típicas de crecimiento y cómo liberar espacio.
+
 ## [0.19.0] - 2026-11-19
 
 ### Añadido

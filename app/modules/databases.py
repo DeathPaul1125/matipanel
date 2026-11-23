@@ -258,6 +258,18 @@ def status(engine):
             service, running = unit, True
             break
 
+    version, dbs, err = _sizes(engine)
+    if err:
+        return jsonify({"running": running, "service": service, "version": "", "databases": [], "error": err})
+    total = sum(d["size"] for d in dbs)
+    return jsonify({"running": running, "service": service, "version": version, "databases": dbs,
+                    "total": total, "total_h": bytes_to_human(total),
+                    "binlogs": _binlogs() if engine == "mysql" else None})
+
+
+def _sizes(engine):
+    """Bases del motor (del servidor o del contenedor elegido) con su tamaño. → (versión, bases, error)
+    Ordenadas de mayor a menor: así se ve enseguida cuál ocupa el disco."""
     if engine == "mysql":
         sql = ("SELECT VERSION();\n"
                "SELECT s.SCHEMA_NAME, s.DEFAULT_CHARACTER_SET_NAME, COUNT(t.TABLE_NAME),"
@@ -271,9 +283,7 @@ def status(engine):
                " FROM pg_database ORDER BY datname;")
     code, rows, err = _exec(engine, sql)
     if code != 0 or not rows:
-        return jsonify({"running": running, "service": service, "version": "",
-                        "databases": [], "error": err or "No se pudo conectar"})
-
+        return "", [], err or "No se pudo conectar"
     dbs = []
     for r in rows[1:]:
         if len(r) < 4:
@@ -281,9 +291,60 @@ def status(engine):
         size = int(r[3]) if r[3].isdigit() else 0
         dbs.append({"name": r[0], "charset": r[1], "tables": r[2], "size": size,
                     "size_h": bytes_to_human(size), "system": r[0] in SYSTEM_DBS[engine]})
-    total = sum(d["size"] for d in dbs)
-    return jsonify({"running": running, "service": service, "version": rows[0][0],
-                    "databases": dbs, "total_h": bytes_to_human(total)})
+    dbs.sort(key=lambda d: (d["system"], -d["size"], d["name"]))
+    return rows[0][0], dbs, ""
+
+
+def parse_binlogs(logs, variables):
+    """Filas de SHOW BINARY LOGS (nombre, tamaño…) y de SHOW VARIABLES (nombre, valor)
+    → {count, size, days} (days None = no se borran solos)."""
+    size = sum(int(r[1]) for r in logs if len(r) > 1 and r[1].isdigit())
+    v = {r[0]: r[1] for r in variables if len(r) > 1}
+    secs = int(v["binlog_expire_logs_seconds"]) if v.get("binlog_expire_logs_seconds", "").isdigit() else 0
+    days = secs / 86400 if secs else (float(v["expire_logs_days"]) if v.get("expire_logs_days", "").replace(".", "", 1).isdigit() else 0)
+    return {"count": len(logs), "size": size, "size_h": bytes_to_human(size), "days": round(days, 1) or None}
+
+
+def _binlogs():
+    """Registros binarios del MariaDB/MySQL del servidor (None si están apagados): suelen explicar un
+    /var/lib/mysql mucho más grande que la suma de las bases."""
+    code, logs, _ = _exec("mysql", "SHOW BINARY LOGS;")
+    if code != 0 or not logs:
+        return None
+    _, variables, _ = _exec("mysql", "SHOW VARIABLES WHERE Variable_name IN "
+                                     "('expire_logs_days', 'binlog_expire_logs_seconds');")
+    return parse_binlogs(logs, variables)
+
+
+@databases_bp.route("/api/apps/sizes")
+@login_required
+def app_sizes():
+    """Bases de las apps de Despliegues (en sus contenedores): datos y tamaño del volumen en disco."""
+    from .. import deployer as D
+    from .docker import volume_sizes
+    if not shutil.which("docker"):
+        return jsonify({"ok": True, "apps": []})
+    vols = volume_sizes()
+    out = []
+    for name in D.list_apps():
+        t = app_db_target(name)
+        if not t:
+            continue
+        g.db_target = t
+        try:
+            _, dbs, err = _sizes(t["engine"])
+        finally:
+            g.db_target = None
+        user = [d for d in dbs if not d["system"]]
+        vol = f"{D.project_name(name)}_{'mariadb_data' if t['engine'] == 'mysql' else 'postgres_data'}"
+        disk = vols.get(vol, (None, 0))[0]
+        data = None if err else sum(d["size"] for d in user)
+        out.append({"app": name, "engine": t["engine"], "db": t["user"], "dbs": user, "data": data,
+                    "data_h": bytes_to_human(data) if data is not None else "", "disk": disk,
+                    "disk_h": bytes_to_human(disk) if disk is not None else "",
+                    "error": "La base no responde (¿contenedor detenido?)" if err else ""})
+    out.sort(key=lambda a: -(a["disk"] or a["data"] or 0))
+    return jsonify({"ok": True, "apps": out})
 
 
 @databases_bp.route("/api/<any(mysql, pg):engine>/users")

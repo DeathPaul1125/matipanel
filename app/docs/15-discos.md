@@ -59,7 +59,7 @@ La tarjeta **Qué se puede limpiar** revisa lo que el sistema vuelve a generar o
 | **Imágenes de Docker sin usar** | `docker image prune -af`. | Con cuidado: borra también las versiones anteriores de las apps de [Despliegues](56-despliegues.md), así que ya no podrás revertir a ellas sin compilar de nuevo. |
 | **Paquetes que ya no se necesitan** | `apt-get autoremove --purge`: dependencias huérfanas y kernels viejos. | Seguro |
 | **Caché de root** y **papeleras** | Vacía `/root/.cache` y las papeleras de los usuarios. | Seguro |
-| **Volúmenes de Docker sin usar** | Solo informa: pueden tener datos. Revísalos en [Docker](25-docker.md). | Revísalo tú |
+| **Volúmenes de Docker sin usar** | No se borran desde aquí porque pueden tener datos. **Revisar y eliminar** abre [Docker → Volúmenes](25-docker.md#volumenes), que dice de quién es cada uno y cuánto pesa, y deja ver su contenido y borrarlo. | Revísalo tú |
 | **Respaldos de carpetas del panel** | Solo informa. Borra los que no necesites en [Respaldos](16-respaldos.md). | Revísalo tú |
 
 Cada limpieza pide confirmación, muestra en vivo lo que hace y al terminar dice cuánto espacio se liberó. **Revisar de nuevo** vuelve a calcular los tamaños.

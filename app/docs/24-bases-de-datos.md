@@ -148,6 +148,30 @@ El respaldo se genera con `mysqldump` (incluye rutinas y triggers) o `pg_dump`, 
 
 > **Importante:** Restaurar puede sobrescribir datos. Haz un **Backup** de la base antes de restaurar.
 
+## Cuánto ocupa cada base
+
+- **Bases del servidor:** la tabla **Bases de datos** las ordena de la que más ocupa a la que menos, y arriba está el **Tamaño total**.
+- **Bases de las apps:** la tarjeta **Bases de las apps (Despliegues)**, arriba de todo, muestra las bases de las apps que viven en contenedores. Para cada una muestra:
+  - **Datos**: lo que ocupan sus tablas e índices;
+  - **En disco**: el volumen completo de la base.
+- **Qué tabla pesa más:** pulsa **Ver tablas** (o **Explorar**, en las bases del servidor). Se abre el [Explorador BD](55-explorador-bd.md) con la lista de tablas y su tamaño; ordénala por **Tamaño**.
+
+### Por qué una base crece tanto
+
+- **Tablas que se llenan solas.** En Laravel: `sessions` (con `SESSION_DRIVER=database`), `jobs` y `failed_jobs`, `telescope_*`, `activity_log` o tablas de auditoría o bitácora. Revisa si tienen una tarea que borre lo viejo; por ejemplo, `php artisan model:prune` o `telescope:prune` en el Programador.
+- **Registros binarios (binlogs) de MariaDB/MySQL.** Si están activos, el panel avisa cuánto ocupan y en cuántos días se borran solos. Son el historial de cambios para replicar o restaurar a un momento; si no los usas, puedes borrar los viejos desde la consola SQL:
+
+  ```
+  PURGE BINARY LOGS BEFORE NOW() - INTERVAL 7 DAY;
+  ```
+
+  Para que se borren solos, pon `expire_logs_days = 7` (o `binlog_expire_logs_seconds = 604800`) en la configuración de MariaDB y reinicia el servicio.
+- **Espacio que no se devolvió.** Al borrar muchas filas, el archivo de la tabla no se achica solo, y por eso **En disco** puede ser mucho mayor que **Datos**. Para recuperarlo:
+  - en MariaDB, `OPTIMIZE TABLE nombre;`;
+  - en PostgreSQL, `VACUUM FULL nombre;`.
+
+  > **Importante:** Las dos **bloquean la tabla** mientras se ejecutan y necesitan espacio libre temporal del tamaño de la tabla. Hazlo fuera de horario y con un respaldo reciente.
+
 ## Preguntas frecuentes
 
 ### Mi aplicación dice "Access denied" con el usuario que creé.

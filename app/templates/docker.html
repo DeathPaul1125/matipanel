@@ -31,11 +31,17 @@
   </table>
 </div>
 
-<div class="card">
-  <h3>Volúmenes</h3>
+<div class="card" id="volumes">
+  <div class="card-head"><h3>Volúmenes</h3>
+    <span id="vol-actions" style="display:flex; gap:8px; align-items:center;">
+      <label class="small"><input type="checkbox" id="vol-unused" onchange="renderVolumes()"> Solo los que no se usan</label>
+    </span></div>
+  <p class="small muted" style="margin-top:0;">Un volumen guarda datos que sobreviven al contenedor: la base de datos o el <span class="mono">storage</span> de una app.
+    Uno <b>sin usar</b> no está conectado a ningún contenedor; puede ser de una app o stack que se borró, o de una prueba. Antes de borrarlo, revisa su contenido.</p>
+  <div id="vol-summary" class="small" style="margin-bottom:8px;"></div>
   <table class="lx" id="vol-table" data-table>
-    <thead><tr><th>Nombre</th><th>Driver</th><th>Mountpoint</th></tr></thead>
-    <tbody><tr><td colspan="3" class="muted center">Cargando…</td></tr></tbody>
+    <thead><tr><th>Volumen</th><th>Tamaño</th><th>Estado</th><th data-nosort></th></tr></thead>
+    <tbody><tr><td colspan="4" class="muted center">Calculando tamaños… (puede tardar unos segundos)</td></tr></tbody>
   </table>
 </div>
 
@@ -160,15 +166,59 @@ async function loadImages() {
     </tr>`).join('');
 }
 
+let VOLS = null;
+const $ = id => document.getElementById(id);
+const FILES_URL = {{ url_for('files.index')|tojson }};
+const vsize = n => n == null ? '—' : (() => { let x = Number(n), i = 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; while (x >= 1024 && i < 4) { x /= 1024; i++; } return (i ? x.toFixed(1) : x) + ' ' + u[i]; })();
 async function loadVolumes() {
-  const r = await fetch("{{ url_for('docker.volumes') }}");
-  const d = await r.json();
+  try { VOLS = await (await fetch("{{ url_for('docker.volumes') }}")).json(); } catch (e) { VOLS = { error: String(e), volumes: [] }; }
+  const s = $('vol-summary');
+  s.innerHTML = VOLS.error ? '' : `${VOLS.volumes.length} volúmenes · ${vsize(VOLS.total)} en total · `
+    + (VOLS.unused_count ? `<b>${VOLS.unused_count} sin usar: ${vsize(VOLS.unused_size)}</b>` : 'todos en uso')
+    + (VOLS.sizes_known ? '' : ' <span class="muted">(Docker no informó los tamaños)</span>');
+  const acts = $('vol-actions');
+  acts.querySelector('#vol-prune')?.remove();
+  if (VOLS.can_prune_anon && VOLS.anon_unused_count) acts.insertAdjacentHTML('afterbegin',
+    `<button class="btn btn-sm" id="vol-prune" onclick="pruneAnon()" title="Solo los anónimos (sin nombre) que ningún contenedor usa">Eliminar los ${VOLS.anon_unused_count} anónimos sin usar (${vsize(VOLS.anon_unused_size)})</button>`);
+  renderVolumes();
+}
+function renderVolumes() {
   const tbody = document.querySelector('#vol-table tbody');
-  if (d.error) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">' + escapeHtml(d.error) + '</td></tr>'; return; }
-  if (!d.volumes.length) { tbody.innerHTML = '<tr><td colspan="3" class="muted center">Sin volúmenes</td></tr>'; return; }
-  tbody.innerHTML = d.volumes.map(v => `
-    <tr><td class="mono">${escapeHtml(v.name)}</td><td>${escapeHtml(v.driver)}</td><td class="mono small">${escapeHtml(v.mount)}</td></tr>
-  `).join('');
+  if (VOLS.error) { tbody.innerHTML = `<tr><td colspan="4" class="muted center">${escapeHtml(VOLS.error)}</td></tr>`; return; }
+  const list = VOLS.volumes.filter(v => !$('vol-unused').checked || !v.in_use);
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted center">Sin volúmenes</td></tr>'; return; }
+  const kindCls = { app: 'ok', app_deleted: 'warn', project: 'mute', anonymous: 'mute', other: 'mute' };
+  tbody.innerHTML = list.map(v => `<tr>
+    <td><div class="mono small" style="word-break:break-all;">${escapeHtml(v.name)}</div>
+      <div class="small"><span class="pill ${kindCls[v.kind] || 'mute'}">${escapeHtml(v.owner)}</span></div></td>
+    <td data-sort="${Number(v.size) || 0}">${vsize(v.size)}</td>
+    <td>${v.in_use ? `<span class="pill ok">en uso</span><div class="small muted mono">${v.used_by.map(escapeHtml).join(', ')}</div>` : '<span class="pill warn">sin usar</span>'}</td>
+    <td style="white-space:nowrap; text-align:right;">
+      ${v.mount ? `<a class="btn btn-sm" href="${escapeHtml(FILES_URL + '?path=' + encodeURIComponent(v.mount))}" title="Abrir en Archivos">Ver contenido</a>` : ''}
+      ${v.in_use ? '' : `<button class="btn btn-sm btn-danger" onclick="removeVolume(${jsArg(v.name)})">Eliminar</button>`}</td></tr>`).join('');
+}
+async function removeVolume(name) {
+  const v = VOLS.volumes.find(x => x.name === name);
+  if (!v) return;
+  let msg = `Se eliminará el volumen ${name} (${vsize(v.size)}) con todos sus datos. No se puede deshacer.\n\nDe quién es: ${v.owner}.`;
+  if (v.kind === 'app') msg += `\n\n⚠ La app «${v.app}» todavía existe: si es su base de datos o su storage, pierdes esos datos. Haz antes un respaldo en Respaldos de apps.`;
+  else if ((v.size || 0) > 100 * 1024 * 1024) msg += '\n\n⚠ Pesa más de 100 MB: revisa su contenido con «Ver contenido» antes de borrarlo.';
+  if (!await ui.confirm(msg + '\n\nEscribe el nombre del volumen para confirmar.', { title: 'Eliminar volumen', danger: true, typed: name, confirmText: 'Eliminar' })) return;
+  const d = await postJSON("{{ url_for('docker.volume_remove') }}", { name, confirm_app: v.kind === 'app' });
+  if (!d.ok) return ui.alert(d.error, { title: 'No se eliminó', icon: 'error' });
+  ui.toast(d.message); loadVolumes();
+}
+async function pruneAnon() {
+  if (!await ui.confirm(`Se eliminarán los ${VOLS.anon_unused_count} volúmenes anónimos que ningún contenedor usa (${vsize(VOLS.anon_unused_size)}). `
+    + 'Son volúmenes sin nombre que crean algunas imágenes. Los volúmenes con nombre (bases y storage de las apps) no se tocan.',
+    { title: 'Eliminar volúmenes anónimos', danger: true, confirmText: 'Eliminar' })) return;
+  const d = await postJSON("{{ url_for('docker.volume_prune_anonymous') }}", {});
+  if (!d.ok) return ui.alert(d.error, { title: 'No se completó', icon: 'error' });
+  ui.toast(d.message); loadVolumes();
+}
+if (location.hash === '#volumes') {
+  $('vol-unused').checked = true;
+  setTimeout(() => $('volumes').scrollIntoView({ behavior: 'smooth' }), 300);
 }
 
 const DOCKER_ACTIONS = {

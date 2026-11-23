@@ -3,6 +3,18 @@
 {% block heading %}Bases de datos{% endblock %}
 
 {% block content %}
+<div class="card" id="app-dbs" style="margin-bottom:12px;" hidden>
+  <div class="card-head"><h3>Bases de las apps (Despliegues)</h3>
+    <button class="btn btn-sm" onclick="loadAppSizes()">Refrescar</button></div>
+  <p class="small muted" style="margin-top:0;"><b>Datos</b> es lo que ocupan sus tablas e índices. <b>En disco</b> es el volumen completo de la base
+    (datos, logs de transacciones y espacio libre que el motor aún no devolvió). Con <b>Ver tablas</b> ves cuál tabla pesa más.</p>
+  <table class="lx" id="app-db-table" data-table>
+    <thead><tr><th>App</th><th>Motor</th><th>Base</th><th>Datos</th><th>En disco</th><th data-nosort></th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted center">Calculando…</td></tr></tbody>
+  </table>
+  <div id="app-db-note" class="small" style="margin-top:8px;"></div>
+</div>
+
 {% if not has_mysql and not has_pg %}
 <div class="card">
   <h3>No hay motores de base de datos instalados</h3>
@@ -24,6 +36,7 @@ apt install postgresql</pre>
   <div class="stat"><div class="stat-lbl">Tamaño total</div><div class="stat-val" id="s-size">—</div></div>
 </div>
 <div id="s-error" class="flash flash-error mono" style="display:none; white-space:pre-wrap;"></div>
+<div id="s-binlog" class="flash" style="display:none;"></div>
 
 <div class="card" style="margin-bottom:12px;">
   <h3>Bases de datos</h3>
@@ -156,6 +169,11 @@ async function loadStatus() {
   $('s-version').textContent = d.version || '—';
   $('s-count').textContent = dbs.length;
   $('s-size').textContent = d.total_h || '—';
+  const b = d.binlogs;
+  $('s-binlog').style.display = b && b.size > 100 * 1024 * 1024 ? '' : 'none';
+  if (b) $('s-binlog').innerHTML = `Los <b>registros binarios</b> (binlogs) de este servidor ocupan <b>${escapeHtml(b.size_h)}</b> en ${b.count} archivo(s), aparte de las bases, `
+    + (b.days ? `y se borran solos a los ${b.days} días.` : '<b>y no se borran solos</b>.')
+    + ' Ver la ayuda: «Cuánto ocupa cada base».';
   $('s-error').style.display = d.error ? '' : 'none';
   $('s-error').textContent = d.error || '';
   renderDbs();
@@ -362,4 +380,27 @@ $('q-sql').addEventListener('keydown', e => {
 selectEngine({{ ('mysql' if has_mysql else 'pg')|tojson }});
 </script>
 {% endif %}
+<script>
+// Bases de las apps de Despliegues: tamaño de los datos y del volumen en disco
+async function loadAppSizes() {
+  const card = document.getElementById('app-dbs'), tbody = document.querySelector('#app-db-table tbody');
+  let d;
+  try { d = await (await fetch({{ url_for('databases.app_sizes')|tojson }})).json(); } catch (e) { d = { ok: false, apps: [] }; }
+  const apps = d.apps || [];
+  card.hidden = !apps.length;
+  if (!apps.length) return;
+  const ENG = { mysql: 'MariaDB', pg: 'PostgreSQL' };
+  tbody.innerHTML = apps.map(a => `<tr>
+    <td><a href="${escapeHtml('/despliegues/app/' + encodeURIComponent(a.app))}">${escapeHtml(a.app)}</a></td>
+    <td>${ENG[a.engine] || escapeHtml(a.engine)}</td>
+    <td class="mono">${escapeHtml(a.db)}${a.dbs.length > 1 ? ` <span class="muted small">+${a.dbs.length - 1}</span>` : ''}</td>
+    <td data-sort="${Number(a.data) || 0}">${a.error ? `<span class="pill warn" title="${escapeHtml(a.error)}">sin respuesta</span>` : escapeHtml(a.data_h)}</td>
+    <td data-sort="${Number(a.disk) || 0}">${escapeHtml(a.disk_h || '—')}</td>
+    <td>${a.error ? '' : `<a class="btn btn-sm" href="${escapeHtml('/bd/?' + new URLSearchParams({ srv: a.app, db: a.db }))}">Ver tablas</a>`}</td></tr>`).join('');
+  const big = apps.filter(a => a.disk && a.data != null && a.disk > 2 * a.data && a.disk - a.data > 500 * 1024 * 1024);
+  document.getElementById('app-db-note').innerHTML = big.length
+    ? `En ${big.map(a => '<b>' + escapeHtml(a.app) + '</b>').join(', ')} el disco ocupa bastante más que los datos: suele ser espacio que el motor no devolvió después de borrar muchas filas, o logs de transacciones. La ayuda («Cuánto ocupa cada base») explica cómo recuperarlo.` : '';
+}
+loadAppSizes();
+</script>
 {% endblock %}

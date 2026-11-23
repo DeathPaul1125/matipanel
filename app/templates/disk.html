@@ -132,7 +132,7 @@ async function loadCleanup() {
     const [cls, label] = RISK[i.risk] || RISK.revisar;
     const amount = i.size != null ? fmtBytes(i.size) : `${i.count} paquete(s)`;
     const btn = i.action ? `<button class="btn btn-sm ${i.risk === 'seguro' ? 'btn-primary' : ''}" onclick="doClean(${jsArg(i.id)}, ${jsArg(i.title)}, ${jsArg(i.warn || '')})">${escapeHtml(i.action)}</button>`
-                         : (i.link ? `<a class="btn btn-sm" href="${escapeHtml(i.link)}">Ver</a>` : '');
+                         : (i.link ? `<a class="btn btn-sm" href="${escapeHtml(i.link)}">${escapeHtml(i.link_text || 'Ver')}</a>` : '');
     return `<div class="cl-item"><div class="cl-size">${escapeHtml(amount)}</div>
       <div class="cl-text"><b>${escapeHtml(i.title)}</b> <span class="pill ${cls}">${label}</span><div class="small muted">${escapeHtml(i.desc)}</div>
         ${i.warn ? `<div class="small cl-warn">⚠ ${escapeHtml(i.warn)}</div>` : ''}</div>
