@@ -2,6 +2,12 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.19.2] - 2026-11-24
+
+### Añadido
+- Despliegues: **PHP 8.5** en la versión de PHP de las apps (imágenes `serversideup/php:8.5-fpm-nginx` y `8.5-fpm-apache`).
+- Ayuda: **Cambiar la versión de PHP**. Incluye qué revisar antes, qué pasa si falla (la versión anterior sigue en línea) y que los parches (8.4.x) llegan solos en cada despliegue.
+
 ## [0.19.1] - 2026-11-23
 
 ### Mejorado

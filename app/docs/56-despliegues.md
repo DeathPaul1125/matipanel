@@ -87,7 +87,7 @@ En el [Firewall](20-firewall.md) del panel agrega reglas para esos puertos, limi
 4. **Paso 2 · Acceso:** si el repositorio es privado, agrega la clave en GitHub (ver abajo). Pulsa **Probar acceso**: debe decir **Acceso correcto** y la cantidad de ramas.
 5. **Paso 3 · Opciones:**
    - **Rama:** la que se despliega (se sugieren las del repositorio).
-   - **Versión de PHP:** 8.2, 8.3 o 8.4.
+   - **Versión de PHP:** 8.2, 8.3, 8.4 u 8.5.
    - **Nombre interno (opcional):** por ejemplo `portal-rrhh.apps.empresa.local`.
    - **Base de datos:**
      - **MariaDB 11** o **PostgreSQL 16 (contenedor propio)**: se crea una base solo para la app. En **Nombre de la base de datos** eliges cómo se llama (minúsculas, números y `_`, por ejemplo `erp_mayoreo`); ese nombre también es el usuario, y la contraseña se genera sola. Si lo dejas vacío se llama `laravel` (Laravel) o `app` (PHP). **No se puede cambiar después**: la base se crea con ese nombre en el primer despliegue.
@@ -231,13 +231,24 @@ En **Configuración** puedes cambiar el repositorio, la rama, el puerto público
 
 La tarjeta **PHP del contenedor** de **Configuración** gestiona lo que hay dentro de la imagen de la app (solo con el Dockerfile que genera el panel):
 
-- **Versión de PHP**: 8.2, 8.3 u 8.4 (arriba, junto a la rama).
+- **Versión de PHP**: 8.2, 8.3, 8.4 u 8.5 (arriba, junto a la rama). Ver [Cambiar la versión de PHP](#cambiar-la-version-de-php).
 - **Extensiones**: las que piden `composer.json` y `composer.lock` se instalan **solas**. Por ejemplo, `phpoffice/phpspreadsheet` (que usa `maatwebsite/excel`) pide `ext-gd`, y el panel la agrega sin que hagas nada. El log del despliegue dice cuáles instaló: «Extensiones de PHP a instalar: gd, intl (pedidas por composer…)». En **Extensiones de PHP adicionales** van solo las que tu código usa sin declararlas en composer (por ejemplo `exif` o `snmp`). La imagen ya trae `pdo_mysql`, `pdo_pgsql`, `redis`, `zip`, `opcache`, `pcntl`, `mbstring`, `xml`, `curl` y las básicas de PHP.
 - **Ajustes de php.ini**: **Memoria** (`memory_limit`, por ejemplo `512M`; `-1` sin límite), **Subida máxima** (fija `upload_max_filesize` y `post_max_size`, por ejemplo `64M`), **Tiempo máximo** en segundos (`max_execution_time`) y **Zona horaria** (`date.timezone`, por ejemplo `America/Guatemala`). Vacío = el valor de la imagen (256M, 100M, 99 s, UTC). Se aplican con **Aplicar ahora**, sin compilar.
 - **Paquetes del sistema (apt)**: programas de Debian que tu app necesita dentro del contenedor, separados por espacios. Por ejemplo `snmp` (consultar impresoras por SNMP), `iputils-ping`, `ghostscript` (PDF) o `poppler-utils`. Se instalan al compilar la imagen.
 - **Ver el PHP del contenedor en marcha** muestra lo que realmente tiene la app ahora: versión exacta, cada extensión cargada y los valores efectivos de `php.ini`. Úsalo para confirmar que un cambio se aplicó.
 
 Si tu repositorio trae su propio `Dockerfile`, estas opciones no se usan: el Dockerfile manda.
+
+### Cambiar la versión de PHP
+
+1. Antes, revisa que tu proyecto la admita:
+   - el `"php"` de `composer.json` debe aceptarla (por ejemplo `"^8.2"` acepta 8.5);
+   - en tu PC, con esa versión, `composer install` y las pruebas deben funcionar.
+2. En **Configuración**, elige la versión y pulsa **Guardar**. La imagen se vuelve a compilar con esa versión.
+3. Si algo falla (por ejemplo, un paquete que aún no soporta la versión nueva), el despliegue se marca como fallido y **la versión anterior sigue en línea**. Vuelve a elegir la versión de antes o actualiza las dependencias.
+4. Comprueba con **Ver el PHP del contenedor en marcha**.
+
+**Los parches** (8.4.1 → 8.4.x) no hay que pedirlos: cada despliegue descarga la imagen más reciente de esa versión (`docker build --pull`). Para recibirlos sin cambios en el código, pulsa **Desplegar ahora**.
 - **Clave de despliegue:** **Probar acceso** y **Regenerar clave** (después tendrás que reemplazarla en GitHub).
 - **Webhook:** URL y secreto; **Regenerar** invalida el anterior.
 
@@ -316,6 +327,7 @@ Abre el **Log** del despliegue y busca la última línea que empieza con `==>`: 
 | `Repository not found` con URL `https://` | El repositorio es privado: cambia a la URL SSH `git@github.com:…` y agrega la clave. |
 | `couldn't find remote ref` | La rama configurada no existe. Corrígela en **Configuración**. |
 | `docker build` falló en `composer install` | Falta una extensión de PHP (agrégala en **Extensiones de PHP adicionales**), `composer.lock` no corresponde a la versión de PHP, o un paquete privado necesita credenciales. |
+| `composer install` dice `your php version (8.5.x) does not satisfy that requirement` | Un paquete de `composer.lock` todavía no admite esa versión de PHP. En tu PC, con la versión nueva, ejecuta `composer update` y sube `composer.lock`, o vuelve a la versión anterior en **Configuración**. |
 | `docker build` falló en `npm run build` | Error de Vite/Mix. Prueba `npm ci && npm run build` en tu equipo con Node 22. |
 | `npm run build` dice `php: not found` (plugin `wayfinder`) | Actualiza el panel a la versión 0.16.1 o superior: detecta Wayfinder y compila con PHP. Si dice `There are no commands defined in the "wayfinder" namespace`, `laravel/wayfinder` está en `require-dev` de `composer.json`; muévelo a `require` (la imagen instala sin dependencias de desarrollo). |
 | `composer install` dice `requires ext-xxx -> it is missing from your system` | Con las versiones nuevas del panel las extensiones pedidas por composer se instalan solas. Si la extensión no aparece en `composer.json`/`composer.lock`, agrégala en **Configuración → PHP del contenedor → Extensiones de PHP adicionales** y despliega. |

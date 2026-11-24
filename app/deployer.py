@@ -47,7 +47,7 @@ APACHE_DIR = Path("/etc/apache2")
 O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 O_BINARY = getattr(os, "O_BINARY", 0)
 
-PHP_VERSIONS = ("8.2", "8.3", "8.4")
+PHP_VERSIONS = ("8.2", "8.3", "8.4", "8.5")
 KINDS = ("laravel", "php")         # php: cualquier framework (Apache + .htaccess), sin artisan
 MAX_PERSIST = 10
 DATABASES = ("none", "mariadb", "postgres")
@@ -2367,6 +2367,8 @@ if __name__ == "__main__":
                                    ("DATABASE_URL", "u")]) == ["x1", "z", "u"]
     # Dockerfile
     df = render_dockerfile("8.3")
+    assert "FROM serversideup/php:8.5-fpm-nginx AS base" in render_dockerfile("8.5")
+    assert "FROM serversideup/php:8.5-fpm-apache" in render_dockerfile_php("8.5")
     assert "FROM serversideup/php:8.3-fpm-nginx AS base" in df and "node" not in df and "AUTORUN_LARAVEL_MIGRATION=false" in df
     assert "composer install --no-dev" in df and "--optimize-autoloader" in df and ".env" not in df
     assert with_force("migrate --seed") == "migrate --seed --force" and with_force("db:seed --class=X") == "db:seed --class=X --force"
