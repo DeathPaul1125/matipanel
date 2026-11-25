@@ -25,7 +25,7 @@ Arriba de la página está la tarjeta **Requisitos del servidor**. Cada componen
 | Componente | Paquete de Debian | Para qué |
 |---|---|---|
 | **Docker Engine** | `docker.io` | Construir y correr las aplicaciones. |
-| **Docker Compose v2** | `docker-compose` | Levantar la app, la base de datos y Redis juntos. |
+| **Docker Compose v2** | `docker-compose-v2` en Ubuntu, `docker-compose` en Debian 13 | Levantar la app, la base de datos y Redis juntos. |
 | **Docker Buildx** (recomendado) | `docker-buildx` | Construcción más rápida (BuildKit). Sin él se usa el constructor clásico. |
 | **Git** | `git` | Descargar el código de GitHub. |
 | **Nginx** | `nginx` | Recibir las visitas y repartirlas a cada aplicación. |
@@ -35,6 +35,8 @@ Arriba de la página está la tarjeta **Requisitos del servidor**. Cada componen
 3. Al terminar, la tarjeta se actualiza sola. Si no, pulsa **Volver a comprobar**.
 
 > **Nota:** Si instalaste Docker desde el repositorio oficial de Docker en vez del de Debian, el panel prueba también el paquete `docker-compose-plugin`.
+
+> **Importante:** Hace falta Compose **versión 2**. En Ubuntu y en Debian 12 el paquete `docker-compose` es la versión 1.x, que no sirve: los despliegues fallan con `'name' does not match any of the regexes`. Si la fila dice que hay un docker-compose 1.x, pulsa **Instalar** para poner la versión 2.
 
 > **Importante:** Si usas Apache en lugar de Nginx en el puerto 80, el nombre interno no funcionará: los dos no pueden escuchar en el mismo puerto. Los puertos propios (8081…) sí funcionan.
 

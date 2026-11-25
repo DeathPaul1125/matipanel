@@ -27,9 +27,12 @@ _hook_rate = RateLimiter(max_fails=60, window=60)     # peticiones por IP y minu
 _hook_bad = RateLimiter(max_fails=10, window=600)     # firmas inválidas por IP
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PACKAGES = {"docker": ["docker.io"], "compose": ["docker-compose"], "buildx": ["docker-buildx"],
+PACKAGES = {"docker": ["docker.io"], "compose": ["docker-compose-v2"], "buildx": ["docker-buildx"],
             "git": ["git"], "nginx": ["nginx"]}
-COMPOSE_FALLBACK = ["docker-compose-plugin"]  # nombre en el repositorio oficial de Docker
+# Compose v2 se llama distinto según el origen: docker-compose-v2 (Ubuntu), docker-compose-plugin
+# (repositorio oficial de Docker) y docker-compose (Debian 13). En Ubuntu y Debian 12 el paquete
+# «docker-compose» es la versión 1.x, que no sirve: por eso va el último y se comprueba después.
+COMPOSE_FALLBACK = [["docker-compose-plugin"], ["docker-compose"]]
 
 
 @deploy_bp.record_once
@@ -90,8 +93,10 @@ def _requirements():
                                                           if docker else "no instalado")})
     cc = D.compose_cmd() if docker else None
     cver = run([*cc, "version", "--short"], timeout=15)[1].strip() if cc else ""
+    old = D.compose_v1_installed() if docker and not cc else False
     items.append({"key": "compose", "label": "Docker Compose v2", "ok": bool(cc),
-                  "detail": f"{' '.join(cc)} {cver}" if cc else "no instalado"})
+                  "detail": f"{' '.join(cc)} {cver}" if cc else
+                  ("hay un docker-compose 1.x, que no sirve: instala la versión 2" if old else "no instalado")})
     bcode, bout, _ = run(["docker", "buildx", "version"], timeout=15) if docker else (127, "", "")
     items.append({"key": "buildx", "label": "Docker Buildx (recomendado)", "ok": bcode == 0, "optional": True,
                   "detail": bout.strip()[:80] if bcode == 0 else "no instalado: se usará el constructor clásico"})
@@ -136,12 +141,19 @@ def install():
     for k in keys:
         ok, out, msg = _apt_install(PACKAGES[k])
         log.append(out[-3000:])
-        if not ok and k == "compose":
-            ok, out, msg = _apt_install(COMPOSE_FALLBACK)
-            log.append(out[-3000:])
-            if not ok:
-                msg = ("No se encontró Docker Compose v2 en los repositorios (paquetes docker-compose y "
-                       "docker-compose-plugin). Revisa las fuentes de apt.")
+        if k == "compose":
+            D._compose_cache["at"] = 0.0
+            for pkgs in COMPOSE_FALLBACK:
+                if ok and D.compose_cmd():
+                    break
+                ok, out, msg = _apt_install(pkgs)
+                log.append(out[-3000:])
+                D._compose_cache["at"] = 0.0
+            if not (ok and D.compose_cmd()):
+                ok = False
+                msg = ("No se encontró Docker Compose v2 en los repositorios (paquetes docker-compose-v2, "
+                       "docker-compose-plugin y docker-compose). Agrega el repositorio oficial de Docker "
+                       "e instala docker-compose-plugin.")
         if not ok:
             if k == "buildx" and key == "all":
                 continue  # opcional

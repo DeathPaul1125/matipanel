@@ -2,6 +2,13 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.20.1] - 2026-11-24
+
+### Corregido
+- Despliegues en **Ubuntu** (y Debian 12): fallaban en las migraciones con `'name' does not match any of the regexes`. El panel instalaba y aceptaba el paquete `docker-compose`, que ahí es la versión 1.x. Ahora:
+  - **Instalar** pone Compose v2 probando `docker-compose-v2` (Ubuntu), `docker-compose-plugin` (repositorio de Docker) y `docker-compose` (Debian 13), y comprueba que quedó la versión 2;
+  - un `docker-compose` 1.x ya no cuenta como instalado: Requisitos lo dice y ofrece instalar la versión 2.
+
 ## [0.20.0] - 2026-11-24
 
 ### Añadido

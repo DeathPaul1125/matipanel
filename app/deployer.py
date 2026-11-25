@@ -1142,17 +1142,36 @@ def _wait_listening(port, timeout=5):
 _compose_cache = {"cmd": None, "at": 0.0}
 
 
+def compose_is_v2(version_output):
+    """¿La salida de «version --short» es de Compose v2 o posterior? («v2.24.5», «2.24.5», «1.29.2»…)"""
+    m = re.search(r"(\d+)\.\d+", version_output or "")
+    return bool(m) and int(m.group(1)) >= 2
+
+
 def compose_cmd():
-    """['docker','compose'] (plugin v2) o ['docker-compose'] (binario v2). None si no hay."""
+    """['docker','compose'] (plugin v2) o ['docker-compose'] (binario v2). None si no hay.
+
+    El «docker-compose» 1.x (el paquete de ese nombre en Ubuntu y Debian 12) NO sirve: rechaza los
+    compose.yaml del panel («'name' does not match any of the regexes»)."""
     if _compose_cache["cmd"] and time.time() - _compose_cache["at"] < 300:
         return _compose_cache["cmd"]
     cmd = None
     if _run(["docker", "compose", "version"], timeout=15)[0] == 0:
         cmd = ["docker", "compose"]
-    elif shutil.which("docker-compose") and _run(["docker-compose", "version"], timeout=15)[0] == 0:
-        cmd = ["docker-compose"]
+    elif shutil.which("docker-compose"):
+        code, out, _ = _run(["docker-compose", "version", "--short"], timeout=15)
+        if code == 0 and compose_is_v2(out):
+            cmd = ["docker-compose"]
     _compose_cache.update(cmd=cmd, at=time.time())
     return cmd
+
+
+def compose_v1_installed():
+    """Hay un docker-compose 1.x y ningún Compose v2: caso típico tras «apt install docker-compose» en Ubuntu."""
+    if compose_cmd() or not shutil.which("docker-compose"):
+        return False
+    code, out, _ = _run(["docker-compose", "version", "--short"], timeout=15)
+    return code == 0 and not compose_is_v2(out)
 
 
 def compose(name, *args):
