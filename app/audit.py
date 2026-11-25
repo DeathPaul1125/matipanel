@@ -32,7 +32,7 @@ MODULES = {
     "terminal": "Terminal", "appearance": "Apariencia", "help": "Ayuda", "remote": "Multi-servidor", "mail": "Correo",
     "dns": "DNS", "shares": "Compartidos", "storage": "Almacenamiento", "dbexplorer": "Explorador BD",
     "deploy": "Despliegues", "audit": "Auditoría", "notify": "Notificaciones", "appbackup": "Respaldos de apps", "roles": "Permisos del panel",
-    "monitor": "Monitor", "hardening": "Seguridad del servidor", "stacks": "Stacks",
+    "monitor": "Monitor", "hardening": "Seguridad del servidor", "stacks": "Stacks", "contabo": "Contabo",
 }
 
 # Acciones que además se avisan por correo («Cambios delicados en el panel»): endpoint → qué hizo
@@ -58,6 +58,10 @@ SENSITIVE = {
     "storage.lv_remove": "eliminó el volumen lógico", "storage.raid_fail_remove": "retiró un disco del RAID",
     "shares.smb_delete_share": "eliminó el recurso compartido", "remote.token_create": "creó un token de acceso remoto",
     "notify.config": "cambió la configuración de notificaciones",
+    "contabo.config": "cambió las credenciales de Contabo", "contabo.config_delete": "desconectó la cuenta de Contabo",
+    "contabo.action": "encendió, apagó o reinició en Contabo el VPS",
+    "contabo.snapshot_rollback": "revirtió un VPS de Contabo al snapshot",
+    "contabo.snapshot_delete": "eliminó en Contabo el snapshot",
 }
 
 _lock = threading.Lock()

@@ -25,6 +25,7 @@ from .databases import databases_bp
 from .docker import docker_bp
 from .appearance import appearance_bp
 from .remote import remote_bp
+from .contabo import contabo_bp
 from .mail import mail_bp
 from .shares import shares_bp
 from .storage import storage_bp
@@ -53,6 +54,7 @@ def register_modules(app, sock):
         (mail_bp, "/correo"), (dns_bp, "/dns"), (shares_bp, "/compartidos"),
         (storage_bp, "/almacenamiento"), (dbexplorer_bp, "/bd"), (deploy_bp, "/despliegues"),
         (audit_bp, "/auditoria"), (notify_bp, "/notificaciones"), (appbackup_bp, "/respaldos-apps"), (roles_bp, "/permisos"), (stacks_bp, "/stacks"), (hardening_bp, "/seguridad-servidor"), (monitor_bp, "/monitor"),
+        (contabo_bp, "/contabo"),
         (remote_bp, "/servidores"),  # ruta fija: los paneles se consultan entre sí en /servidores/api/remote/summary
     ]:
         app.register_blueprint(bp, url_prefix=prefix)

@@ -2,6 +2,18 @@
 
 Versionado semántico: MAYOR.MENOR.PARCHE. Cada versión indica su fecha de publicación.
 
+## [0.20.0] - 2026-11-24
+
+### Añadido
+- ☁️ **Contabo (VPS)** — nuevo módulo en **Red y acceso** para controlar por fuera los VPS de tu cuenta de Contabo, usando su API:
+  - lista de todos los VPS con estado, IP, núcleos, memoria, disco, plan y región; el servidor donde corre el panel se marca como **Este servidor**;
+  - **Encender**, **Reiniciar**, **Apagar** y **Forzar apagado**;
+  - **Snapshots**: crear, revertir y eliminar;
+  - apagar o revertir el propio servidor del panel exige escribir una confirmación, porque el panel se apaga con él;
+  - las credenciales se prueban contra Contabo antes de guardarse, quedan en un archivo que solo lee root y no se muestran ni se registran;
+  - respeta los permisos (solo lectura ve, no cambia), queda en la Auditoría y avisa por correo como cambio delicado.
+- Ayuda: capítulo **Contabo (VPS)**.
+
 ## [0.19.2] - 2026-11-24
 
 ### Añadido

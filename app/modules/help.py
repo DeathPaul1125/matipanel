@@ -24,7 +24,7 @@ CONTEXT = {
     "webserver": "21-servidor-web", "ssl": "22-ssl", "php": "23-php", "databases": "24-bases-de-datos",
     "docker": "25-docker", "files": "26-archivos", "packages": "27-paquetes", "logs": "28-logs",
     "terminal": "29-terminal", "auth": "30-seguridad-2fa", "appearance": "31-apariencia", "audit": "32-auditoria", "roles": "35-permisos", "hardening": "34-seguridad-servidor", "notify": "33-notificaciones",
-    "remote": "54-multiservidor", "mail": "50-correo", "shares": "52-compartidos", "storage": "53-almacenamiento", "dns": "51-dns", "dbexplorer": "55-explorador-bd", "deploy": "56-despliegues", "appbackup": "57-respaldos-apps", "stacks": "59-stacks", "cfiles": "61-archivos-contenedores", "monitor": "58-monitor",
+    "remote": "54-multiservidor", "mail": "50-correo", "shares": "52-compartidos", "storage": "53-almacenamiento", "dns": "51-dns", "dbexplorer": "55-explorador-bd", "deploy": "56-despliegues", "appbackup": "57-respaldos-apps", "stacks": "59-stacks", "cfiles": "61-archivos-contenedores", "monitor": "58-monitor", "contabo": "62-contabo",
 }
 
 

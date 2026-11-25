@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+{% block title %}Contabo{% endblock %}
+{% block heading %}Contabo{% endblock %}
+
+{% block content %}
+{# Resumen de la cuenta #}
+<section class="health" id="sum" data-level="ok">
+  <span class="led lg mute live" id="sum-led"></span>
+  <div class="health-main">
+    <div class="health-greet">VPS en Contabo</div>
+    <h1 class="health-verdict" id="sum-verdict">{{ 'Consultando Contabo…' if cfg.configured else 'Conecta tu cuenta de Contabo' }}</h1>
+    <div class="health-sub" id="sum-sub">Enciende, apaga y reinicia tus VPS, y guarda snapshots antes de un cambio delicado.</div>
+  </div>
+  <div class="health-chips">
+    <button class="btn" id="btn-refresh" onclick="refresh(true)" {{ '' if cfg.configured else 'hidden' }}>Actualizar</button>
+    <button class="btn" id="btn-account" onclick="openForm()" {{ '' if cfg.configured else 'hidden' }}>Cuenta</button>
+  </div>
+</section>
+
+{# Credenciales de la API #}
+<div class="card" id="cfg-form" {{ 'hidden' if cfg.configured else '' }} style="max-width:760px;">
+  <div class="card-head"><h3 id="cfg-title">Conectar cuenta de Contabo</h3></div>
+  <p class="muted small" style="margin-top:0;">Los cuatro datos están en
+    <a href="https://my.contabo.com/api/details" target="_blank" rel="noopener noreferrer">my.contabo.com → API</a>.
+    La <b>contraseña de la API</b> es distinta a la de tu cuenta: la defines en esa misma página.
+    Se guardan solo en este servidor, en un archivo que únicamente lee root.</p>
+  <label class="form-row"><span>Client ID</span>
+    <input class="input mono" id="f-client-id" maxlength="128" placeholder="INT-12345678" autocomplete="off" spellcheck="false"></label>
+  <label class="form-row"><span>Client Secret</span>
+    <input class="input mono" id="f-client-secret" type="password" maxlength="256" autocomplete="new-password" spellcheck="false">
+    <span class="muted small" data-keep hidden>Déjalo vacío para conservar el guardado.</span></label>
+  <label class="form-row"><span>Usuario de la API</span>
+    <input class="input" id="f-api-user" maxlength="254" placeholder="tu-correo@ejemplo.com" autocomplete="off" spellcheck="false"></label>
+  <label class="form-row"><span>Contraseña de la API</span>
+    <input class="input mono" id="f-api-password" type="password" maxlength="256" autocomplete="new-password" spellcheck="false">
+    <span class="muted small" data-keep hidden>Déjala vacía para conservar la guardada.</span></label>
+  <div class="form-actions">
+    <button type="button" class="btn btn-danger" id="btn-disconnect" onclick="disconnect()" hidden>Desconectar cuenta</button>
+    <button type="button" class="btn" id="btn-cancel" onclick="closeForm()" hidden>Cancelar</button>
+    <button type="button" class="btn btn-primary" id="btn-save" onclick="saveConfig()">Probar y guardar</button>
+  </div>
+</div>
+
+<div id="err-box" hidden style="border:1px solid var(--err);background:var(--err-bg);color:var(--err);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;"></div>
+
+{# Una tarjeta por VPS: este servidor primero #}
+<div class="grid grid-3" id="cards"></div>
+
+{# Snapshots del VPS elegido #}
+<div class="card" id="snap-card" hidden>
+  <div class="card-head">
+    <h3>Snapshots de <span id="snap-of"></span></h3>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" onclick="newSnapshot()">Crear snapshot</button>
+      <button class="btn btn-sm" onclick="closeSnapshots()">Cerrar</button>
+    </div>
+  </div>
+  <p class="muted small" style="margin-top:0;">Un snapshot es una foto del disco completo. <b>Revertir</b> devuelve el VPS a ese momento: se pierde todo lo que cambió después. Contabo borra cada snapshot en la fecha indicada y el plan limita cuántos puedes tener.</p>
+  <div class="table-wrap">
+    <table class="lx">
+      <thead><tr><th>Nombre</th><th>Descripción</th><th>Creado</th><th>Se borra</th><th class="right"></th></tr></thead>
+      <tbody id="snap-body"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BASE = {{ url_for('contabo.index')|tojson }};
+const API = {
+  list: {{ url_for('contabo.instances')|tojson }},
+  config: {{ url_for('contabo.config')|tojson }},
+  configDel: {{ url_for('contabo.config_delete')|tojson }},
+  action: id => `${BASE}api/instances/${encodeURIComponent(id)}/action`,
+  snaps: id => `${BASE}api/instances/${encodeURIComponent(id)}/snapshots`,
+  snap: (id, sid, what) => `${BASE}api/instances/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(sid)}/${what}`,
+};
+const REFRESH_MS = 30000;
+const $ = id => document.getElementById(id);
+let cfg = {{ cfg|tojson }};
+let instances = [];
+let snapFor = null;  // id del VPS cuyos snapshots se muestran
+
+const STATUS = {
+  running: ['ok', 'Encendido'], stopped: ['mute', 'Apagado'], provisioning: ['warn', 'Preparando'],
+  installing: ['warn', 'Instalando'], rescue: ['warn', 'Modo rescate'], reset_password: ['warn', 'Cambiando contraseña'],
+  error: ['err', 'Error'], pending_payment: ['err', 'Pago pendiente'], uninstalled: ['mute', 'Sin sistema'],
+  verification_required: ['warn', 'Verificación pendiente'], product_not_available: ['err', 'Producto no disponible'],
+  manual_provisioning: ['warn', 'Preparación manual'],
+};
+const ACT = {
+  start: { label: 'Encender', done: 'Encendiendo' },
+  restart: { label: 'Reiniciar', done: 'Reiniciando' },
+  shutdown: { label: 'Apagar', done: 'Apagando' },
+  stop: { label: 'Forzar apagado', done: 'Forzando el apagado de' },
+};
+
+// ── Utilidades ──
+const fmtDate = iso => {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+};
+const fmtDay = iso => {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleDateString('es', { dateStyle: 'medium' }) : '';
+};
+const gb = mb => mb ? (mb / 1024 >= 10 ? Math.round(mb / 1024) : (mb / 1024).toFixed(1)) + ' GB' : '—';
+const byId = id => instances.find(i => i.id === id);
+
+function showError(text) {
+  $('err-box').textContent = text || '';
+  $('err-box').hidden = !text;
+}
+
+// ── Tarjetas ──
+function cardHtml(i) {
+  const [lvl, label] = STATUS[i.status] || ['mute', i.status];
+  const on = i.status === 'running', off = i.status === 'stopped';
+  const btn = (act, cls = '') =>
+    `<button class="btn btn-sm ${cls}" onclick="power(${jsArg(i.id)}, ${jsArg(act)})">${ACT[act].label}</button>`;
+  const actions = (off ? btn('start', 'btn-primary') : '')
+    + (on ? btn('restart') + btn('shutdown') + btn('stop', 'btn-danger') : '')
+    + `<button class="btn btn-sm" onclick="openSnapshots(${jsArg(i.id)})">Snapshots</button>`;
+  const specs = [i.cpu && `${i.cpu} núcleos`, i.ram_mb && `${gb(i.ram_mb)} RAM`, i.disk_mb && `${gb(i.disk_mb)} disco`]
+    .filter(Boolean).join(' · ');
+  return `<div class="card" style="display:flex;flex-direction:column;">
+    <div class="card-head" style="align-items:flex-start;">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <span class="led ${lvl === 'ok' ? 'live' : lvl}"></span>
+        <div style="min-width:0;">
+          <h3 style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(i.name)}">${escapeHtml(i.name)}</h3>
+          <div class="mono muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(i.ip || i.ip6 || '—')}</div>
+        </div>
+      </div>
+      <span class="pill ${lvl}">${escapeHtml(label)}</span>
+    </div>
+    ${i.self ? '<div class="small" style="margin-bottom:8px;"><span class="pill ok">Este servidor</span> <span class="muted">MatiPanel corre aquí.</span></div>' : ''}
+    ${i.error ? `<div class="small" style="color:var(--err);margin-bottom:8px;">${escapeHtml(i.error)}</div>` : ''}
+    ${i.cancel ? `<div class="small" style="color:var(--warn);margin-bottom:8px;">Cancelado: termina el ${escapeHtml(fmtDay(i.cancel))}</div>` : ''}
+    <div class="small">${escapeHtml(specs || '—')}</div>
+    <div class="small muted" style="margin-top:4px;">${escapeHtml([i.product, i.region, i.os, i.vmi !== i.name && i.vmi].filter(Boolean).join(' · '))}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:auto;padding-top:14px;">${actions}</div>
+  </div>`;
+}
+
+function render() {
+  const box = $('cards');
+  if (!cfg.configured) { box.innerHTML = ''; return; }
+  box.innerHTML = instances.length ? instances.map(cardHtml).join('')
+    : '<div class="card muted">La cuenta no tiene VPS, o el usuario de la API no tiene permiso para verlos.</div>';
+}
+
+function summarize(error) {
+  const total = instances.length;
+  const on = instances.filter(i => i.status === 'running').length;
+  const bad = instances.filter(i => (STATUS[i.status] || [])[0] === 'err').length;
+  const level = !cfg.configured ? 'ok' : error || bad ? 'err' : on < total ? 'warn' : 'ok';
+  $('sum').dataset.level = level;
+  $('sum-led').className = 'led lg ' + (cfg.configured && !error ? 'live ' : '') + (!cfg.configured ? 'mute' : level === 'ok' ? '' : level);
+  $('sum-verdict').textContent = !cfg.configured ? 'Conecta tu cuenta de Contabo'
+    : error ? 'No se pudo consultar Contabo'
+    : !total ? 'La cuenta no tiene VPS'
+    : on === total ? (total === 1 ? 'Tu VPS está encendido' : `Los ${total} VPS están encendidos`)
+    : `${on} de ${total} VPS encendidos`;
+  $('sum-sub').textContent = !cfg.configured
+    ? 'Enciende, apaga y reinicia tus VPS, y guarda snapshots antes de un cambio delicado.'
+    : `Cuenta ${cfg.api_user} · actualizado a las ${new Date().toLocaleTimeString('es')}`;
+  $('btn-refresh').hidden = $('btn-account').hidden = !cfg.configured;
+}
+
+let busy = false;
+async function refresh(manual) {
+  if (busy || !cfg.configured) return;
+  busy = true;
+  try {
+    const r = await fetch(API.list + (manual ? '?force=1' : ''), { headers: { Accept: 'application/json' } });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    instances = j.instances;
+    showError('');
+    render();
+    summarize();
+    if (snapFor !== null && !byId(snapFor)) closeSnapshots();
+    if (manual) ui.toast('Lista actualizada', 'info', 1800);
+  } catch (e) {
+    showError(e.message);
+    summarize(true);
+  } finally {
+    busy = false;
+  }
+}
+
+// Tras una acción el estado tarda en cambiar en Contabo: se vuelve a consultar varias veces
+function refreshSoon() {
+  for (const ms of [3000, 10000, 25000]) setTimeout(() => refresh(true), ms);
+}
+
+// ── Energía ──
+async function power(id, act) {
+  const i = byId(id);
+  if (!i) return;
+  const a = ACT[act];
+  let confirmSelf = false;
+  if (act !== 'start') {
+    const guarded = i.self && (act === 'shutdown' || act === 'stop');
+    const text = {
+      restart: `¿Reiniciar «${i.name}»? Sus sitios y servicios dejarán de responder uno o dos minutos.`,
+      shutdown: `¿Apagar «${i.name}»? Se avisa al sistema para que cierre sus servicios en orden. Todo lo que aloja dejará de responder hasta que lo enciendas.`,
+      stop: `¿Forzar el apagado de «${i.name}»? Es como desconectar el cable: puede dañar bases de datos o archivos que se estén escribiendo. Úsalo solo si «Apagar» no funciona.`,
+    }[act] + (i.self ? (guarded
+      ? '\n\nATENCIÓN: es este mismo servidor. El panel se apagará con él y NO podrás encenderlo desde aquí: tendrás que hacerlo en my.contabo.com.'
+      : '\n\nEs este mismo servidor: el panel dejará de responder mientras reinicia.') : '');
+    const ok = await ui.confirm(text, {
+      title: `${a.label} VPS`, danger: act !== 'restart' || i.self, confirmText: a.label,
+      typed: guarded ? (i.vmi || String(i.id)) : undefined,
+    });
+    if (!ok) return;
+    confirmSelf = guarded;
+  }
+  const r = await postJSON(API.action(id), { action: act, name: i.name, confirm_self: confirmSelf });
+  if (!r.ok) { ui.alert(r.error || 'No se pudo completar.', { title: `No se pudo ${a.label.toLowerCase()}`, icon: 'error' }); return; }
+  ui.toast(`${a.done} «${i.name}»…`);
+  refreshSoon();
+}
+
+// ── Snapshots ──
+async function openSnapshots(id) {
+  const i = byId(id);
+  if (!i) return;
+  snapFor = id;
+  $('snap-of').textContent = i.name;
+  $('snap-body').innerHTML = '<tr><td colspan="5" class="muted center">Consultando…</td></tr>';
+  $('snap-card').hidden = false;
+  $('snap-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  await loadSnapshots();
+}
+
+function closeSnapshots() {
+  snapFor = null;
+  $('snap-card').hidden = true;
+}
+
+async function loadSnapshots() {
+  const id = snapFor;
+  if (id === null) return;
+  let j;
+  try {
+    j = await (await fetch(API.snaps(id), { headers: { Accept: 'application/json' } })).json();
+  } catch (e) {
+    j = { ok: false, error: String(e) };
+  }
+  if (snapFor !== id) return;  // se eligió otro VPS mientras tanto
+  const tb = $('snap-body');
+  if (!j.ok) {
+    tb.innerHTML = `<tr><td colspan="5" class="center" style="color:var(--err);">${escapeHtml(j.error || 'No se pudo consultar.')}</td></tr>`;
+    return;
+  }
+  if (!j.snapshots.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="muted center">Este VPS no tiene snapshots.</td></tr>';
+    return;
+  }
+  tb.innerHTML = j.snapshots.map(s => `<tr>
+    <td>${escapeHtml(s.name)}</td>
+    <td class="muted">${escapeHtml(s.description || '—')}</td>
+    <td>${escapeHtml(fmtDate(s.created))}</td>
+    <td class="muted">${escapeHtml(fmtDay(s.auto_delete) || '—')}</td>
+    <td class="right" style="white-space:nowrap;">
+      <button class="btn btn-sm" onclick="rollback(${jsArg(s.id)}, ${jsArg(s.name)})">Revertir</button>
+      <button class="btn btn-sm btn-danger" onclick="removeSnapshot(${jsArg(s.id)}, ${jsArg(s.name)})">Eliminar</button>
+    </td></tr>`).join('');
+}
+
+async function newSnapshot() {
+  const i = byId(snapFor);
+  if (!i) return;
+  const v = await ui.form({
+    title: `Crear snapshot de «${i.name}»`,
+    text: 'Guarda el estado actual del disco. El VPS sigue funcionando mientras se crea.',
+    fields: [
+      { name: 'name', label: 'Nombre', required: true, placeholder: 'antes-de-actualizar', help: 'Hasta 30 caracteres: letras sin acento, números, espacios y guiones.' },
+      { name: 'description', label: 'Descripción (opcional)', placeholder: 'Antes de subir PHP a 8.5' },
+    ],
+    validate: f => /^[A-Za-z0-9 -]{1,30}$/.test(f.name.trim()) ? '' : 'El nombre solo admite letras sin acento, números, espacios y guiones (máximo 30).',
+    confirmText: 'Crear snapshot',
+  });
+  if (!v) return;
+  const r = await postJSON(API.snaps(i.id), { name: v.name.trim(), description: v.description });
+  if (!r.ok) { ui.alert(r.error || 'No se pudo crear.', { title: 'No se pudo crear el snapshot', icon: 'error' }); return; }
+  ui.toast('Snapshot creado');
+  loadSnapshots();
+}
+
+async function rollback(sid, name) {
+  const i = byId(snapFor);
+  if (!i) return;
+  const ok = await ui.confirm(
+    `Vas a devolver «${i.name}» al snapshot «${name}». Se PIERDE todo lo que cambió después: archivos, bases de datos y configuración. No se puede deshacer.`
+    + (i.self ? '\n\nATENCIÓN: es este mismo servidor. El panel y sus datos también vuelven a ese momento y dejará de responder mientras se revierte.' : ''),
+    { title: 'Revertir a un snapshot', danger: true, confirmText: 'Revertir', typed: 'REVERTIR' });
+  if (!ok) return;
+  const r = await postJSON(API.snap(i.id, sid, 'rollback'), { name, confirm_self: i.self });
+  if (!r.ok) { ui.alert(r.error || 'No se pudo revertir.', { title: 'No se pudo revertir', icon: 'error' }); return; }
+  ui.toast(`Revirtiendo «${i.name}» a «${name}»…`);
+  refreshSoon();
+}
+
+async function removeSnapshot(sid, name) {
+  const i = byId(snapFor);
+  if (!i) return;
+  const ok = await ui.confirm(`¿Eliminar el snapshot «${name}» de «${i.name}»? Ya no podrás volver a ese punto.`,
+    { title: 'Eliminar snapshot', danger: true, confirmText: 'Eliminar' });
+  if (!ok) return;
+  const r = await postJSON(API.snap(i.id, sid, 'delete'), { name });
+  if (!r.ok) { ui.alert(r.error || 'No se pudo eliminar.', { title: 'No se pudo eliminar', icon: 'error' }); return; }
+  ui.toast('Snapshot eliminado');
+  loadSnapshots();
+}
+
+// ── Cuenta ──
+function openForm() {
+  $('cfg-title').textContent = cfg.configured ? 'Cuenta de Contabo' : 'Conectar cuenta de Contabo';
+  $('f-client-id').value = cfg.client_id || '';
+  $('f-api-user').value = cfg.api_user || '';
+  $('f-client-secret').value = $('f-api-password').value = '';
+  document.querySelectorAll('#cfg-form [data-keep]').forEach(x => { x.hidden = !cfg.configured; });
+  $('btn-disconnect').hidden = $('btn-cancel').hidden = !cfg.configured;
+  $('cfg-form').hidden = false;
+  $('cfg-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('f-client-id').focus();
+}
+function closeForm() { if (cfg.configured) $('cfg-form').hidden = true; }
+
+async function saveConfig() {
+  const btn = $('btn-save');
+  btn.disabled = true; btn.textContent = 'Probando…';
+  const r = await postJSON(API.config, {
+    client_id: $('f-client-id').value, client_secret: $('f-client-secret').value,
+    api_user: $('f-api-user').value, api_password: $('f-api-password').value,
+  });
+  btn.disabled = false; btn.textContent = 'Probar y guardar';
+  if (!r.ok) { ui.alert(r.error || 'No se pudo guardar.', { title: 'No se pudo conectar', icon: 'error' }); return; }
+  $('f-client-secret').value = $('f-api-password').value = '';
+  cfg = r.cfg;
+  $('cfg-form').hidden = true;
+  ui.toast('Cuenta de Contabo conectada');
+  summarize();
+  refresh();
+}
+
+async function disconnect() {
+  const ok = await ui.confirm('¿Desconectar la cuenta de Contabo? Se borran las credenciales guardadas en este servidor. Tus VPS no cambian.',
+    { title: 'Desconectar cuenta', danger: true, confirmText: 'Desconectar' });
+  if (!ok) return;
+  const r = await postJSON(API.configDel, {});
+  if (!r.ok) { ui.toast(r.error || 'No se pudo desconectar.', 'error'); return; }
+  cfg = { configured: false, client_id: '', api_user: '' };
+  instances = [];
+  closeSnapshots();
+  showError('');
+  render();
+  summarize();
+  openForm();
+  ui.toast('Cuenta desconectada');
+}
+
+// ── Inicio ──
+setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+if (cfg.configured) refresh(); else openForm();
+</script>
+{% endblock %}

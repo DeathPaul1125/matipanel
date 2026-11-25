@@ -4,7 +4,7 @@
 
 Administra tu servidor Debian desde el navegador: estado del sistema, servicios, usuarios, archivos, firewall, sitios web, PHP, bases de datos, correo, DNS, recursos compartidos, almacenamiento y más. Despliega apps PHP/Laravel desde GitHub en Docker, las respalda en otros servidores Linux o Windows y las recupera en un servidor nuevo si el actual se pierde. Incluye terminal web, historial de métricas de 7 días, monitor, avisos por correo, auditoría, ayuda integrada con buscador y dos estilos de interfaz con tema claro/oscuro.
 
-![Versión](https://img.shields.io/badge/versión-0.19.2-0E7C6B)
+![Versión](https://img.shields.io/badge/versión-0.20.0-0E7C6B)
 ![Debian](https://img.shields.io/badge/Debian-12%20%7C%2013-A81D33)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
@@ -64,6 +64,7 @@ Administra tu servidor Debian desde el navegador: estado del sistema, servicios,
 | **Tráfico de red** | Ancho de banda por interfaz en vivo y 7 días, quién consume (equipos, servicios, procesos), capturas `.pcap` y alertas |
 | **Firewall** | UFW (instalación con un clic, reglas, accesos rápidos, políticas), firewalld y nftables |
 | **Multi-servidor** | Monitorea otros MatiPanel desde uno solo, con tokens de solo lectura y huella de certificado anclada |
+| **Contabo (VPS)** | Controla los VPS de tu cuenta de Contabo por su API: encender, apagar, reiniciar y snapshots (crear, revertir, eliminar) |
 | **Servidor web** | Apache y Nginx: sitios, asistente de virtual hosts, módulos, recarga con prueba previa |
 | **SSL / Let's Encrypt** | Certificados con certbot: emitir, renovar, borrar |
 | **PHP** | Versiones, `php.ini`, extensiones, PHP-FPM y pools |
